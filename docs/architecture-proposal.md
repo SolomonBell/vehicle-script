@@ -74,17 +74,31 @@ Script Properties follow the pattern `{SITE_ID}_{KEY}` for site-specific values;
 
 ---
 
-### 3. `doPost` — Webhook Routing
+### 3. Pipedream — Webhook Bridge
 
-Stripe and DocuSeal webhooks carry only a customer email; they carry no site identifier. The temporary solution is to search all `SITES` sheets for a row matching the email and process the first match found. The matched site ID is logged for auditability.
+All external webhook events are routed through Pipedream before reaching Apps Script. Apps Script `doPost` never receives raw Stripe or DocuSeal/Dropbox Sign payloads directly.
 
-This is safe for most real-world cases but has a known edge case: if the same customer email appears at two different sites simultaneously with an unpaid deposit, the first sheet searched wins. This is acceptable as a Milestone 1 constraint and must be documented.
+**Three active Pipedream workflows:**
 
-**Milestone 2 fix:** Upgrade to Stripe Checkout Sessions (v9). A Checkout Session allows custom metadata to be attached at creation time. The script should embed the `site.id` and the booking's event ID in the session metadata when generating the payment link. The `doPost` handler can then read `data.metadata.siteId` directly, eliminating the cross-sheet search entirely.
+| Workflow | Trigger | What Pipedream does | Payload POSTed to Apps Script |
+|---|---|---|---|
+| Stripe Connection to Google App | HTTP / Stripe-related payload | Extracts `customerEmail` and `amountPaid` | `{ "customerEmail": "...", "amountPaid": "..." }` |
+| DocuSeal Workflow | HTTP / DocuSeal | Filters to completed events only; ignores manager signing role; extracts `signerEmail` | `{ "type": "lease_signed", "signerEmail": "..." }` |
+| Dropbox Sign → Google App | HTTP / Dropbox Sign | Filters to signature events; extracts `signerEmail` | `{ "type": "lease_signed", "signerEmail": "..." }` |
+
+**Apps Script `doPost` must remain compatible with these three payload shapes.** Do not change the field names `customerEmail`, `amountPaid`, `type`, or `signerEmail`.
+
+### 4. `doPost` — Webhook Routing
+
+Because Pipedream normalises all three event sources into the same two payload shapes, `doPost` routing logic is straightforward. The only routing problem is which site's sheet to update, because the payloads carry no site identifier.
+
+**Milestone 1:** Search all `SITES` sheets for a row whose email column matches the incoming email. Process the first match and log the matched site ID. This is safe for nearly all real-world cases. The known edge case — same customer email at two sites simultaneously with an unpaid deposit — is accepted as a Milestone 1 constraint and must be documented in the code.
+
+**v9 fix:** Update each Pipedream workflow to append `siteId` and `eventId` to its outbound payload before POSTing to Apps Script. This requires no structural change to the workflows — only an extra field in the final POST step. `doPost` can then read `data.siteId` and route directly to the correct site's sheet without any cross-sheet search.
 
 ---
 
-### 4. Migration Strategy
+### 5. Migration Strategy
 
 **Step 1 — Branch.** Create `refactor/multi-site` from `main`. Never modify `main`, `archive/v7-original.js`, or the live production script during this phase.
 
@@ -100,7 +114,7 @@ This is safe for most real-world cases but has a known edge case: if the same cu
 
 ---
 
-### 5. Risks
+### 6. Risks
 
 | Risk | Severity | Mitigation |
 |---|---|---|
@@ -112,7 +126,7 @@ This is safe for most real-world cases but has a known edge case: if the same cu
 
 ---
 
-### 6. Testing Gates
+### 7. Testing Gates
 
 **Gate 1 — Sandbox parity (blocks everything else)**
 All 8 tests in `docs/testing-plan.md` pass against refactored single-site sandbox code. `site.fromEmail` and `site.twilioFrom` appear correctly in outbound messages. Column O is never written.

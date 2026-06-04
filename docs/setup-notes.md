@@ -68,13 +68,49 @@ This deletes all existing triggers and creates:
 | `sendLeaseToNewBookings`  | every 15 min |
 | `processReminders`        | every 30 min |
 
-## Webhook endpoint
+## Apps Script web app deployment
 
 After deploying as a Web App (Deploy → New deployment → Web app):
 - Set "Execute as" = Me
 - Set "Who has access" = Anyone
-- The deployment URL is your Stripe webhook endpoint
-- Also register this URL in DocuSeal for the `lease_signed` event
+- Copy the deployment URL — this is the URL the Pipedream workflows POST to, not a URL you register directly with Stripe or DocuSeal
+
+## Pipedream workflows
+
+Pipedream sits between external services (Stripe, DocuSeal, Dropbox Sign) and Apps Script. It normalises the raw webhook payloads into the two shapes that `doPost` expects. Do not register the Apps Script URL directly with Stripe or DocuSeal — always route through Pipedream.
+
+**Three active workflows:**
+
+### 1. Stripe Connection to Google App
+- **Trigger:** HTTP webhook receiving a Stripe-related payload
+- **Pipedream steps:** Extracts `customerEmail` and `amountPaid` from the Stripe event
+- **POSTs to Apps Script:**
+  ```json
+  { "customerEmail": "...", "amountPaid": "..." }
+  ```
+- **Setup:** Point the Stripe webhook (in the Stripe Dashboard) at this Pipedream workflow's HTTP trigger URL
+
+### 2. DocuSeal Workflow
+- **Trigger:** HTTP webhook from DocuSeal
+- **Pipedream steps:** Filters to completed signature events only; skips the manager signing role; extracts `signerEmail`
+- **POSTs to Apps Script:**
+  ```json
+  { "type": "lease_signed", "signerEmail": "..." }
+  ```
+- **Setup:** Register this Pipedream workflow's URL in DocuSeal as the webhook endpoint
+
+### 3. Dropbox Sign → Google App
+- **Trigger:** HTTP webhook from Dropbox Sign (HelloSign)
+- **Pipedream steps:** Filters to signature completed events; extracts `signerEmail`
+- **POSTs to Apps Script:**
+  ```json
+  { "type": "lease_signed", "signerEmail": "..." }
+  ```
+- **Setup:** Register this Pipedream workflow's URL in Dropbox Sign as the event callback URL
+
+**Pipedream → Apps Script URL:** Set the Apps Script web app deployment URL as the destination in each workflow's final POST step. Update this URL any time the Apps Script is re-deployed as a new version.
+
+**Future (v9):** Each Pipedream workflow will be updated to include `siteId` and `eventId` in the outbound payload. This allows `doPost` to route directly to the correct site's sheet without searching all sheets. No structural workflow change is needed — only an additional field in the final POST step.
 
 ## DocuSeal template IDs
 
