@@ -1,3 +1,9 @@
+# Apps Script / secrets — never commit these
+.clasp.json
+appsscript.json
+script.properties
+*.properties
+
 # Logs
 logs
 *.log
