@@ -1,5 +1,7 @@
 # Setup Notes — Bainbridge Single-Location
 
+> **Before making any changes:** Pull Andrew's latest script from the shared Google Drive folder. Save it as `archive/current-production-from-andrew.js` and replace `src/Code.js` with that version. Do not implement from `archive/v7-original.js`.
+
 ## Script Properties
 
 All of these must be set in Apps Script → Project Settings → Script Properties.
@@ -18,6 +20,7 @@ None of these values belong in source code.
 | `INTAKE_FORM_BASE`     | Google Form base URL for the intake form (Form 1)       |
 | `INSPECT_FORM_BASE`    | Google Form base URL for the inspection form (Form 2)   |
 | `BITLY_TOKEN`          | Bitly generic access token (for SMS URL shortening)     |
+| `WEBHOOK_SHARED_SECRET`| Shared secret validating Pipedream → Apps Script requests (see Webhook shared secret section) |
 
 **Hardcoded constants (not Script Properties — intentional):**
 - `TWILIO_NUM: '+12065550111'` — the Twilio sending number
@@ -59,14 +62,18 @@ The script never writes to column O. Only the manager does.
 ## Trigger setup
 
 Run `setupTriggers()` once manually from the Apps Script editor toolbar.
-This deletes all existing triggers and creates:
+This deletes all existing triggers and creates per-site wrapper functions on their own schedules. Each wrapper runs in an independent 6-minute execution budget so a slow site cannot block another.
 
-| Function                  | Interval  |
-|---------------------------|-----------|
-| `syncCalendarBookings`    | every 5 min  |
-| `checkRentalEligibility`  | every 5 min  |
-| `sendLeaseToNewBookings`  | every 15 min |
-| `processReminders`        | every 30 min |
+**Single-site (Bainbridge only):**
+
+| Function                           | Interval     |
+|------------------------------------|--------------|
+| `syncCalendarBookings_Bainbridge`  | every 5 min  |
+| `checkRentalEligibility_Bainbridge`| every 5 min  |
+| `sendLeaseToNewBookings_Bainbridge`| every 15 min |
+| `processReminders_Bainbridge`      | every 30 min |
+
+When a second site is added, `setupTriggers()` registers an equivalent set for that site (e.g., `syncCalendarBookings_Poulsbo`, etc.).
 
 ## Apps Script web app deployment
 
@@ -77,40 +84,96 @@ After deploying as a Web App (Deploy → New deployment → Web app):
 
 ## Pipedream workflows
 
-Pipedream sits between external services (Stripe, DocuSeal, Dropbox Sign) and Apps Script. It normalises the raw webhook payloads into the two shapes that `doPost` expects. Do not register the Apps Script URL directly with Stripe or DocuSeal — always route through Pipedream.
+Pipedream sits between external services (Stripe and DocuSeal) and Apps Script. It validates upstream signatures, normalises raw payloads, adds the shared secret, and POSTs to Apps Script. Do not register the Apps Script URL directly with Stripe or DocuSeal — always route through Pipedream.
 
-**Three active workflows:**
+**DocuSeal is the active signature provider.** Any Dropbox Sign workflow visible in historical Pipedream screenshots is legacy — ignore it.
+
+**Two active workflows:**
 
 ### 1. Stripe Connection to Google App
 - **Trigger:** HTTP webhook receiving a Stripe-related payload
-- **Pipedream steps:** Extracts `customerEmail` and `amountPaid` from the Stripe event
+- **Pipedream steps:** Validates Stripe signature where possible; extracts `customerEmail` and `amountPaid`; adds `secret`
 - **POSTs to Apps Script:**
   ```json
-  { "customerEmail": "...", "amountPaid": "..." }
+  { "secret": "...", "customerEmail": "...", "amountPaid": "..." }
   ```
 - **Setup:** Point the Stripe webhook (in the Stripe Dashboard) at this Pipedream workflow's HTTP trigger URL
 
 ### 2. DocuSeal Workflow
 - **Trigger:** HTTP webhook from DocuSeal
-- **Pipedream steps:** Filters to completed signature events only; skips the manager signing role; extracts `signerEmail`
+- **Pipedream steps:** Validates DocuSeal request where possible; filters to completed signature events only; skips the manager signing role; extracts `signerEmail`; adds `secret`
 - **POSTs to Apps Script:**
   ```json
-  { "type": "lease_signed", "signerEmail": "..." }
+  { "secret": "...", "type": "lease_signed", "signerEmail": "..." }
   ```
 - **Setup:** Register this Pipedream workflow's URL in DocuSeal as the webhook endpoint
 
-### 3. Dropbox Sign → Google App
-- **Trigger:** HTTP webhook from Dropbox Sign (HelloSign)
-- **Pipedream steps:** Filters to signature completed events; extracts `signerEmail`
-- **POSTs to Apps Script:**
-  ```json
-  { "type": "lease_signed", "signerEmail": "..." }
-  ```
-- **Setup:** Register this Pipedream workflow's URL in Dropbox Sign as the event callback URL
+**Pipedream → Apps Script URL:** Set the Apps Script web app deployment URL as the destination in each workflow's final POST step. Update this URL whenever the Apps Script is re-deployed as a new version.
 
-**Pipedream → Apps Script URL:** Set the Apps Script web app deployment URL as the destination in each workflow's final POST step. Update this URL any time the Apps Script is re-deployed as a new version.
+**Future (v9):** Each workflow will also include `siteId` and `eventId` in the outbound payload so `doPost` can route directly to the correct site without searching all sheets. No structural workflow change is required — only an extra field in the final POST step.
 
-**Future (v9):** Each Pipedream workflow will be updated to include `siteId` and `eventId` in the outbound payload. This allows `doPost` to route directly to the correct site's sheet without searching all sheets. No structural workflow change is needed — only an additional field in the final POST step.
+## Webhook shared secret setup
+
+The shared secret prevents arbitrary POST requests from triggering any side effects in `doPost`. The same value must be set in Apps Script Script Properties and in each Pipedream workflow.
+
+### Generate the secret
+
+```bash
+openssl rand -hex 32
+```
+
+Copy the output. Treat it like a password — do not commit it to source control.
+
+### Set in Apps Script
+
+Apps Script → Project Settings → Script Properties → Add property:
+- Key: `WEBHOOK_SHARED_SECRET`
+- Value: the generated hex string
+
+### Set in each Pipedream workflow
+
+In each workflow's environment variables (or in the final POST step as a hardcoded field):
+- Add the same hex string as the value for `secret` in the JSON body POSTed to Apps Script
+
+Both the Stripe and DocuSeal workflows must include it.
+
+### Test unauthorized POST fails safely
+
+Send a POST to the Apps Script web app URL with no `secret` field:
+
+```bash
+curl -X POST "<your-apps-script-url>" \
+  -H "Content-Type: application/json" \
+  -d '{"customerEmail":"test@example.com","amountPaid":50}'
+```
+
+Expected: `{ "received": true }` returned, zero rows updated, zero emails or SMS sent, rejection logged in Apps Script execution log.
+
+Repeat with a wrong secret value — same expected result.
+
+### Test authorized Stripe payload works
+
+```bash
+curl -X POST "<your-apps-script-url>" \
+  -H "Content-Type: application/json" \
+  -d '{"secret":"<your-secret>","customerEmail":"<email-in-sheet>","amountPaid":50}'
+```
+
+Expected: matching row's deposit column updated, confirmation email and SMS sent to customer, DocuSeal lease triggered, column J set to Yes.
+
+### Test authorized DocuSeal payload works
+
+```bash
+curl -X POST "<your-apps-script-url>" \
+  -H "Content-Type: application/json" \
+  -d '{"secret":"<your-secret>","type":"lease_signed","signerEmail":"<email-in-sheet>"}'
+```
+
+Expected: matching row's Lease Signed column (N) set to Yes.
+
+### Rotating the secret
+
+If the secret must be rotated: update Pipedream workflows first, then update Apps Script Script Properties within seconds. Avoid rotating during active booking hours. A brief window of mismatched secrets will cause Pipedream POSTs to be rejected silently (logged only) until both sides are in sync.
 
 ## DocuSeal template IDs
 
