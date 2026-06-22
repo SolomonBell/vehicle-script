@@ -4,6 +4,12 @@ appsscript.json
 script.properties
 *.properties
 
+# Archive files contain production source received from Andrew.
+# They are preserved locally as reference but must not be committed
+# (they may contain business logic, phone numbers, or template IDs
+# that should not be in version history).
+archive/*.js
+
 # Logs
 logs
 *.log
