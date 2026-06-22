@@ -2,6 +2,37 @@
 
 > **Before making any changes:** Pull Andrew's latest script from the shared Google Drive folder. Save it as `archive/current-production-from-andrew.js` and replace `src/Code.js` with that version. Do not implement from `archive/v7-original.js`.
 
+## Source code structure
+
+The Apps Script source is split across multiple files in `src/`. Each file holds one logical group of functions:
+
+| File | Contents |
+|---|---|
+| `Config.js` | `PROPS`, `CONFIG` — all configuration and Script Property bindings |
+| `Forms.js` | `buildIntakeUrl`, `buildInspectUrl` |
+| `DocuSeal.js` | `sendLeaseViaDocuSeal` |
+| `Webhooks.js` | `doPost`, `doGet`, `markDepositPaid`, `markLeaseSigned`, `verifyStripeSignature`, `computeHmacSha256` |
+| `CalendarSync.js` | `syncCalendarBookings` |
+| `Leases.js` | `sendLeaseToNewBookings` |
+| `Approval.js` | `checkRentalEligibility` |
+| `Reminders.js` | `processReminders` |
+| `Notifications.js` | `shortenUrl`, `shortenUrlsInText`, `sendSms`, `sendEmailHtml`, `alertAdmin` |
+| `Helpers.js` | `getSheet`, `getExistingEventIds`, extraction helpers, `toDate`, date formatters |
+| `Setup.js` | `setupTriggers` |
+| `Code.js` | Header comment and file map only — no code |
+
+**All files share one global scope.** Google Apps Script loads every `.js` file in the project into the same execution environment. Functions defined in one file call functions defined in another without any import or export syntax. There is no module system.
+
+**All files must be deployed together.** When copying code into Apps Script, every `src/*.js` file must be present as its own script file in the project. Deploying a subset will produce "function not defined" errors at runtime.
+
+**Load order does not matter.** No file has top-level code that depends on another file being loaded first. `CONFIG` and `PROPS` are declared in `Config.js` and referenced inside function bodies elsewhere — function bodies are not executed until the function is called, by which time all files have been parsed.
+
+**How to deploy:**
+1. Open the Apps Script project (Extensions → Apps Script from the Google Sheet).
+2. For each file in `src/`, create a matching script file in the Apps Script editor and paste its contents. The filename in Apps Script does not need to match exactly, but keeping the same names makes it easier to track.
+3. Alternatively, use [clasp](https://github.com/google/clasp) to push all `src/*.js` files at once from the command line.
+4. Set all Script Properties (see below), then run `setupTriggers()` once from the editor toolbar.
+
 ## Script Properties
 
 All of these must be set in Apps Script → Project Settings → Script Properties.
