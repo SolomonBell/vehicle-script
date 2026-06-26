@@ -2,8 +2,11 @@
 // HELPERS
 // ============================================================
 function getSheet() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEET_NAME);
-  if (!sheet) throw new Error('Sheet "' + CONFIG.SHEET_NAME + '" not found');
+  const sheetId = PropertiesService.getScriptProperties().getProperty('SHEET_ID');
+  if (!sheetId) throw new Error('Script Property "SHEET_ID" is not set');
+  const ss = SpreadsheetApp.openById(sheetId);
+  const sheet = ss.getSheetByName(CONFIG.SHEET_NAME);
+  if (!sheet) throw new Error('Tab "' + CONFIG.SHEET_NAME + '" not found in spreadsheet ' + sheetId);
   return sheet;
 }
 
