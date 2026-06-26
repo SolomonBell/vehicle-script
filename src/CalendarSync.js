@@ -107,3 +107,20 @@ function syncCalendarBookings() {
     }
   });
 }
+
+function testCalendarConnection() {
+  const calendar = CalendarApp.getCalendarById(CONFIG.CALENDAR_ID);
+  if (!calendar) throw new Error('Calendar not found. Check CALENDAR_ID Script Property.');
+
+  Logger.log("Connected to calendar: " + calendar.getName());
+
+  const now = new Date();
+  const future = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const events = calendar.getEvents(now, future);
+
+  Logger.log("Events found in next 30 days: " + events.length);
+
+  events.slice(0, 5).forEach((event, index) => {
+    Logger.log((index + 1) + ". " + event.getTitle() + " | " + event.getStartTime());
+  });
+}
