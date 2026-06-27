@@ -45,6 +45,7 @@ function processReminders() {
           const preUrl      = buildInspectUrl(name, email || '', rentalDate, 'pre');
           const depositPaid = row[6];
           const leaseSigned = row[13];
+          const vehicleType = row[17] || '';
 
           let emailSubject = 'Your truck pickup is tomorrow!';
           let emailHtml    = '<p>Hi ' + name + ',</p>';
@@ -54,7 +55,7 @@ function processReminders() {
             emailHtml +=
               '<p>⚠️ <strong>Your pickup is tomorrow but we have not received your deposit yet.</strong></p>' +
               '<p>Please pay your $' + CONFIG.DEPOSIT_AMOUNT + ' deposit immediately to confirm your booking:</p>' +
-              '<p><a href="' + CONFIG.STRIPE_PAYMENT_URL + '">Pay deposit now</a></p>' +
+              '<p><a href="' + getStripePaymentUrl(vehicleType) + '">Pay deposit now</a></p>' +
               '<p>If you have any questions please reply to this email or call us.</p>';
           } else {
             emailHtml += '<p>Your truck pickup is <strong>tomorrow!</strong></p>';
@@ -73,7 +74,7 @@ function processReminders() {
           emailHtml += '<p>— Reliable Storage</p>';
 
           const sms = depositPaid !== 'Yes'
-            ? 'Reliable Storage: Your pickup is tomorrow but we have not received your deposit. Please pay now: ' + CONFIG.STRIPE_PAYMENT_URL
+            ? 'Reliable Storage: Your pickup is tomorrow but we have not received your deposit. Please pay now: ' + getStripePaymentUrl(vehicleType)
             : 'Reliable Storage: Pickup is tomorrow! Complete your pre-trip inspection: ' + preUrl;
 
           // Each send in its own try/catch — one failure won't block the others

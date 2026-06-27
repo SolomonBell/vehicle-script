@@ -24,6 +24,7 @@ function syncCalendarBookings() {
       const phone       = extractPhone(desc);
       const email       = extractPrimaryEmail(desc);
       const secondEmail = extractSecondDriverEmail(desc);
+      const vehicleType = extractVehicleType(event.getTitle());
 
       if (!email && !phone) return;
 
@@ -56,13 +57,15 @@ function syncCalendarBookings() {
         '',                               // N: Lease Signed
         '',                               // O: Rental Approved (pending)
         '',                               // P: Approval Notified At
-        ''                                // Q: Approval Reminder Count
+        '',                               // Q: Approval Reminder Count
+        vehicleType                       // R: Vehicle Type
       ]);
 
       // Welcome SMS
+      const stripeUrl = getStripePaymentUrl(vehicleType);
       const welcomeSms =
         'Reliable Storage: Hi ' + firstName + '! Your truck is reserved for ' + dateStr + '. ' +
-        'Step 1 -- pay your $' + CONFIG.DEPOSIT_AMOUNT + ' deposit: ' + CONFIG.STRIPE_PAYMENT_URL + ' ' +
+        'Step 1 -- pay your $' + CONFIG.DEPOSIT_AMOUNT + ' deposit: ' + stripeUrl + ' ' +
         'Step 2 -- complete intake form: ' + intakeUrl;
 
       // Welcome HTML email
@@ -71,7 +74,7 @@ function syncCalendarBookings() {
         '<p>Your moving truck is reserved for <strong>' + dateStr + '</strong>.</p>' +
         '<p>Please complete these two steps to confirm your booking:</p>' +
         '<p><strong>1. Pay your $' + CONFIG.DEPOSIT_AMOUNT + ' deposit:</strong><br>' +
-        '<a href="' + CONFIG.STRIPE_PAYMENT_URL + '">Click here to pay deposit</a></p>' +
+        '<a href="' + stripeUrl + '">Click here to pay deposit</a></p>' +
         '<p><strong>2. Complete your intake form</strong> (your info is pre-filled — just verify and submit):<br>' +
         '<a href="' + intakeUrl + '">Click here to complete intake form</a></p>' +
         '<p>Your rental agreement will be emailed for e-signature once your deposit is received.</p>' +

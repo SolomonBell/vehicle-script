@@ -79,3 +79,15 @@ function formatDateForForm(date) {
 function formatDateTime(date) {
   return Utilities.formatDate(toDate(date, 'formatDateTime'), Session.getScriptTimeZone(), 'MMMM d, yyyy \'at\' h:mm a');
 }
+
+function extractVehicleType(title) {
+  if (/cargo van/i.test(title))    return 'Cargo Van';
+  if (/moving truck/i.test(title)) return 'Moving Truck';
+  return '';
+}
+
+function getStripePaymentUrl(vehicleType) {
+  if (vehicleType === 'Cargo Van'    && CONFIG.STRIPE_PAYMENT_URL_CARGO_VAN)    return CONFIG.STRIPE_PAYMENT_URL_CARGO_VAN;
+  if (vehicleType === 'Moving Truck' && CONFIG.STRIPE_PAYMENT_URL_MOVING_TRUCK) return CONFIG.STRIPE_PAYMENT_URL_MOVING_TRUCK;
+  return CONFIG.STRIPE_PAYMENT_URL;
+}

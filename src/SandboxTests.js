@@ -98,6 +98,7 @@ function testSyncCalendarBookingsNoNotifications() {
     const phone       = extractPhone(desc);
     const email       = extractPrimaryEmail(desc);
     const secondEmail = extractSecondDriverEmail(desc);
+    const vehicleType = extractVehicleType(event.getTitle());
 
     if (!email && !phone) {
       Logger.log('SKIP (no email or phone): ' + name);
@@ -124,10 +125,11 @@ function testSyncCalendarBookingsNoNotifications() {
       '',                               // N: Lease Signed
       '',                               // O: Rental Approved
       '',                               // P: Approval Notified At
-      ''                                // Q: Approval Reminder Count
+      '',                               // Q: Approval Reminder Count
+      vehicleType                       // R: Vehicle Type
     ]);
 
-    Logger.log('ADDED: ' + name + ' | ' + (email || 'No Email') + ' | ' + formatDateTime(startTime));
+    Logger.log('ADDED: ' + name + ' | ' + (email || 'No Email') + ' | ' + formatDateTime(startTime) + ' | ' + (vehicleType || 'unknown vehicle'));
     added++;
   });
 
