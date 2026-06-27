@@ -66,9 +66,9 @@ const PROPS = PropertiesService.getScriptProperties().getProperties();
 const CONFIG = {
   CALENDAR_ID:    PROPS.CALENDAR_ID,
   SHEET_NAME:     'Bookings',
-  ADMIN_EMAIL:    'admin@example.com',
-  MANAGER_EMAIL:  'site@example.com',
-  MANAGER_PHONE:  '+12065550100',
+  ADMIN_EMAIL:    PROPS.ADMIN_EMAIL,
+  MANAGER_EMAIL:  PROPS.MANAGER_EMAIL,
+  MANAGER_PHONE:  PROPS.MANAGER_PHONE,
 
   // ---- Stripe -------------------------------------------------
   STRIPE_PAYMENT_URL:    PROPS.STRIPE_PAYMENT_URL,
@@ -78,34 +78,34 @@ const CONFIG = {
   // ---- Twilio (SMS) --------------------------------------------
   TWILIO_SID:   PROPS.TWILIO_SID,
   TWILIO_TOKEN: PROPS.TWILIO_TOKEN,
-  TWILIO_NUM:   '+12065550111',
+  TWILIO_NUM:   PROPS.TWILIO_NUM,
 
   // ---- SendGrid (email) ----------------------------------------
   SENDGRID_KEY:   PROPS.SENDGRID_KEY,
-  FROM_EMAIL:     'site@example.com',
+  FROM_EMAIL:     PROPS.FROM_EMAIL,
   FROM_NAME:      'Reliable Storage',
-  REPLY_TO_EMAIL: 'site@example.com',
+  REPLY_TO_EMAIL: PROPS.REPLY_TO_EMAIL,
 
   // ---- DocuSeal (e-signature) ---------------------------------
   DOCUSEAL_KEY:                  PROPS.DOCUSEAL_KEY,
-  DOCUSEAL_TEMPLATE_SINGLE:      1234567,
-  DOCUSEAL_TEMPLATE_TWO_DRIVERS: 7654321,
+  DOCUSEAL_TEMPLATE_SINGLE:      Number(PROPS.DOCUSEAL_TEMPLATE_SINGLE),
+  DOCUSEAL_TEMPLATE_TWO_DRIVERS: Number(PROPS.DOCUSEAL_TEMPLATE_TWO_DRIVERS),
 
   // ---- Intake Form (Form 1) ------------------------------------
   INTAKE_FORM_BASE:   PROPS.INTAKE_FORM_BASE,
-  INTAKE_ENTRY_NAME:  '889272548',
-  INTAKE_ENTRY_PHONE: '1280482071',
-  INTAKE_ENTRY_EMAIL: '1691609357',
-  INTAKE_ENTRY_DATE:  '767568394',
+  INTAKE_ENTRY_NAME:  PROPS.INTAKE_ENTRY_NAME,
+  INTAKE_ENTRY_PHONE: PROPS.INTAKE_ENTRY_PHONE,
+  INTAKE_ENTRY_EMAIL: PROPS.INTAKE_ENTRY_EMAIL,
+  INTAKE_ENTRY_DATE:  PROPS.INTAKE_ENTRY_DATE,
 
   // ---- Inspection Form (Form 2) --------------------------------
   INSPECT_FORM_BASE:   PROPS.INSPECT_FORM_BASE,
-  INSPECT_ENTRY_NAME:  '537348103',
-  INSPECT_ENTRY_EMAIL: '2017800260',
-  INSPECT_ENTRY_DATE:  '1326800652',
-  INSPECT_ENTRY_TYPE:  '996322172',
-  INSPECT_VAL_PRE:     'Pre-trip (before rental)',
-  INSPECT_VAL_POST:    'Post-trip (returning truck)',
+  INSPECT_ENTRY_NAME:  PROPS.INSPECT_ENTRY_NAME,
+  INSPECT_ENTRY_EMAIL: PROPS.INSPECT_ENTRY_EMAIL,
+  INSPECT_ENTRY_DATE:  PROPS.INSPECT_ENTRY_DATE,
+  INSPECT_ENTRY_TYPE:  PROPS.INSPECT_ENTRY_TYPE,
+  INSPECT_VAL_PRE:     PROPS.INSPECT_VAL_PRE,
+  INSPECT_VAL_POST:    PROPS.INSPECT_VAL_POST,
 
   DAYS_AHEAD:        60,
   POST_RENTAL_HOURS: 1,
@@ -115,4 +115,7 @@ const CONFIG = {
 
   // ---- Bitly (URL shortening) ----------------------------------
   BITLY_TOKEN: PROPS.BITLY_TOKEN,
+
+  // ---- Deposit amount (customer-facing messages) ---------------
+  DEPOSIT_AMOUNT: PROPS.DEPOSIT_AMOUNT || '50',
 };

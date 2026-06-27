@@ -53,7 +53,7 @@ function processReminders() {
             emailSubject = 'Action needed — your pickup is tomorrow';
             emailHtml +=
               '<p>⚠️ <strong>Your pickup is tomorrow but we have not received your deposit yet.</strong></p>' +
-              '<p>Please pay your $50 deposit immediately to confirm your booking:</p>' +
+              '<p>Please pay your $' + CONFIG.DEPOSIT_AMOUNT + ' deposit immediately to confirm your booking:</p>' +
               '<p><a href="' + CONFIG.STRIPE_PAYMENT_URL + '">Pay deposit now</a></p>' +
               '<p>If you have any questions please reply to this email or call us.</p>';
           } else {
