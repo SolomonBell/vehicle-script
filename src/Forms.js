@@ -13,37 +13,6 @@ function buildIntakeUrl(name, email, phone, rentalDate) {
     + '&entry.' + CONFIG.INTAKE_ENTRY_DATE  + '=' + encodeURIComponent(date);
 }
 
-function testBuildIntakeUrl() {
-  const sheet = getSheet();
-  const data  = sheet.getDataRange().getValues();
-
-  let row = null;
-  for (let i = 1; i < data.length; i++) {
-    if ((data[i][1] || '').toString().toLowerCase().includes('test customer')) {
-      row = data[i];
-      break;
-    }
-  }
-
-  if (!row) {
-    Logger.log('No row found with name containing "Test Customer". Add one to the sheet first.');
-    return;
-  }
-
-  const name      = row[1];
-  const email     = row[2];
-  const phone     = (row[3] || '').toString().replace(/^'/, '');
-  const startTime = new Date(row[4]);
-
-  Logger.log('Name:  ' + name);
-  Logger.log('Email: ' + email);
-  Logger.log('Phone: ' + phone);
-  Logger.log('Date:  ' + startTime);
-
-  const url = buildIntakeUrl(name, email, phone, startTime);
-  Logger.log('Intake URL: ' + url);
-}
-
 function buildInspectUrl(name, email, rentalDate, type) {
   const base    = CONFIG.INSPECT_FORM_BASE;
   const date    = formatDate(rentalDate);

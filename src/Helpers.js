@@ -79,9 +79,3 @@ function formatDateForForm(date) {
 function formatDateTime(date) {
   return Utilities.formatDate(toDate(date, 'formatDateTime'), Session.getScriptTimeZone(), 'MMMM d, yyyy \'at\' h:mm a');
 }
-
-function testSheetConnection() {
-  const sheet = getSheet();
-  Logger.log("Connected to sheet: " + sheet.getName());
-  Logger.log("Rows: " + sheet.getLastRow());
-}
