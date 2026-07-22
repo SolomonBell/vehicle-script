@@ -344,3 +344,43 @@ function testDepositAmounts() {
     ? 'All ' + passed + ' deposit amount checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
 }
+
+// ============================================================
+// CONFIGURATION TESTS
+// ============================================================
+
+// ---------------------------------------------------------------------------
+// TEST 10: Configuration validation
+// Verifies all required numeric Script Properties are set and contain valid
+// finite numbers. Run this first when setting up a new environment or after
+// changing Script Properties. Reports every problem before throwing.
+// ---------------------------------------------------------------------------
+function validateConfig() {
+  var errors = [];
+
+  var NUMERIC_PROPS = [
+    'DAYS_AHEAD',
+    'POST_RENTAL_HOURS',
+    'HOURS_BETWEEN_APPROVAL_REMINDERS',
+    'MAX_APPROVAL_REMINDERS',
+    'DEPOSIT_AMOUNT',
+    'DEPOSIT_AMOUNT_CARGO_VAN',
+    'DEPOSIT_AMOUNT_MOVING_TRUCK',
+  ];
+
+  NUMERIC_PROPS.forEach(function(key) {
+    var raw = PROPS[key];
+    if (raw == null || raw.trim() === '') {
+      errors.push('Invalid or missing Script Property: ' + key);
+    } else if (!isFinite(Number(raw))) {
+      errors.push('Invalid or missing Script Property: ' + key + ' (got "' + raw + '", expected a number)');
+    }
+  });
+
+  if (errors.length > 0) {
+    errors.forEach(function(msg) { Logger.log(msg); });
+    throw new Error('Configuration validation failed. See execution log for details.');
+  }
+
+  Logger.log('validateConfig: all required numeric Script Properties are set and valid.');
+}

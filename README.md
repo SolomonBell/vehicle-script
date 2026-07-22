@@ -384,10 +384,13 @@ Full instructions are in [`docs/setup-notes.md`](docs/setup-notes.md). Summary:
 
 ## Testing
 
-Manual test functions live in `src/SandboxTests.js`. Run them from the Apps Script editor — select the function name in the dropdown and click Run. Never wire these to triggers.
+All manual test and validation functions live in `src/SandboxTests.js`. Run them from the Apps Script editor — select the function name in the dropdown and click Run. Never wire these to triggers.
+
+Run `validateConfig()` first in any new environment to confirm all required numeric Script Properties are present before running any other test.
 
 | Function | What it tests |
 |---|---|
+| `validateConfig()` | All required numeric Script Properties are set and contain valid numbers |
 | `testSheetConnection()` | SHEET_ID is set, Bookings tab is accessible |
 | `testCalendarConfigs()` | Every CALENDAR_CONFIGS entry connects to a real calendar |
 | `listAccessibleCalendars()` | Lists all calendars visible to the script account |
