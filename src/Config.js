@@ -58,9 +58,9 @@
 //   - DocuSeal is now live on a paid plan (test_mode removed)
 // ============================================================
 
-// All secrets, API keys, tokens, and form/calendar URLs are stored in
-// Script Properties (Project Settings > Script Properties), NOT in this file.
-// To rotate a secret, update the value in Script Properties — no code change.
+// All configuration — secrets, API keys, tokens, URLs, and operational settings —
+// is stored in Script Properties (Project Settings > Script Properties), NOT in this file.
+// To change a setting or rotate a credential, update the value in Script Properties — no code change.
 
 const PROPS = PropertiesService.getScriptProperties().getProperties();
 
@@ -107,16 +107,16 @@ const CONFIG = {
   INSPECT_VAL_PRE:     PROPS.INSPECT_VAL_PRE,
   INSPECT_VAL_POST:    PROPS.INSPECT_VAL_POST,
 
-  DAYS_AHEAD:        60,
-  POST_RENTAL_HOURS: 1,
+  DAYS_AHEAD:        Number(PROPS.DAYS_AHEAD),        // Number of days ahead to scan calendars for bookings.
+  POST_RENTAL_HOURS: Number(PROPS.POST_RENTAL_HOURS), // Number of hours after a rental ends before sending the post-rental message.
 
-  HOURS_BETWEEN_APPROVAL_REMINDERS: 12,
-  MAX_APPROVAL_REMINDERS: 3,   // 1 initial + 2 follow-ups; 3rd = escalation
+  HOURS_BETWEEN_APPROVAL_REMINDERS: Number(PROPS.HOURS_BETWEEN_APPROVAL_REMINDERS), // Hours between approval reminder messages.
+  MAX_APPROVAL_REMINDERS:           Number(PROPS.MAX_APPROVAL_REMINDERS),           // Reminders sent before escalating to admin; 1 initial + (MAX-1) follow-ups, then escalation.
 
   // ---- Deposit amounts (customer-facing messages) ---------------
-  DEPOSIT_AMOUNT:              PROPS.DEPOSIT_AMOUNT              || '50',
-  DEPOSIT_AMOUNT_CARGO_VAN:    PROPS.DEPOSIT_AMOUNT_CARGO_VAN    || '50',
-  DEPOSIT_AMOUNT_MOVING_TRUCK: PROPS.DEPOSIT_AMOUNT_MOVING_TRUCK || '100',
+  DEPOSIT_AMOUNT:              PROPS.DEPOSIT_AMOUNT,
+  DEPOSIT_AMOUNT_CARGO_VAN:    PROPS.DEPOSIT_AMOUNT_CARGO_VAN,
+  DEPOSIT_AMOUNT_MOVING_TRUCK: PROPS.DEPOSIT_AMOUNT_MOVING_TRUCK,
 };
 
 // Maps each calendar Script Property to its location and vehicle type.
@@ -147,3 +147,39 @@ const CALENDAR_CONFIGS = [
     vehicleType: 'Moving Truck',
   },
 ];
+
+// ============================================================
+// CONFIGURATION VALIDATION
+// Run validateConfig() manually from the Apps Script editor to
+// verify all required numeric Script Properties are present and
+// parseable before testing or deploying.
+// ============================================================
+function validateConfig() {
+  var errors = [];
+
+  var NUMERIC_PROPS = [
+    'DAYS_AHEAD',
+    'POST_RENTAL_HOURS',
+    'HOURS_BETWEEN_APPROVAL_REMINDERS',
+    'MAX_APPROVAL_REMINDERS',
+    'DEPOSIT_AMOUNT',
+    'DEPOSIT_AMOUNT_CARGO_VAN',
+    'DEPOSIT_AMOUNT_MOVING_TRUCK',
+  ];
+
+  NUMERIC_PROPS.forEach(function(key) {
+    var raw = PROPS[key];
+    if (raw === null || raw === undefined || raw === '') {
+      errors.push('Invalid or missing Script Property: ' + key);
+    } else if (!isFinite(Number(raw))) {
+      errors.push('Invalid or missing Script Property: ' + key + ' (got "' + raw + '", expected a number)');
+    }
+  });
+
+  if (errors.length > 0) {
+    errors.forEach(function(msg) { Logger.log(msg); });
+    throw new Error('Configuration validation failed. See execution log for details.');
+  }
+
+  Logger.log('validateConfig: all required numeric Script Properties are set and valid.');
+}
