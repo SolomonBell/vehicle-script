@@ -169,7 +169,7 @@ function validateConfig() {
 
   NUMERIC_PROPS.forEach(function(key) {
     var raw = PROPS[key];
-    if (raw === null || raw === undefined || raw === '') {
+    if (raw == null || raw.trim() === '') {
       errors.push('Invalid or missing Script Property: ' + key);
     } else if (!isFinite(Number(raw))) {
       errors.push('Invalid or missing Script Property: ' + key + ' (got "' + raw + '", expected a number)');
