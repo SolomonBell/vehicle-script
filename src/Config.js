@@ -65,7 +65,7 @@
 const PROPS = PropertiesService.getScriptProperties().getProperties();
 
 const CONFIG = {
-  SHEET_NAME:     'Bookings',
+  SHEET_NAME:     PROPS.SHEET_NAME,
   ADMIN_EMAIL:    PROPS.ADMIN_EMAIL,
   MANAGER_EMAIL:  PROPS.MANAGER_EMAIL,
   MANAGER_PHONE:  PROPS.MANAGER_PHONE,
@@ -83,7 +83,7 @@ const CONFIG = {
   // ---- SendGrid (email) ----------------------------------------
   SENDGRID_KEY:   PROPS.SENDGRID_KEY,
   FROM_EMAIL:     PROPS.FROM_EMAIL,
-  FROM_NAME:      'Reliable Storage',
+  FROM_NAME:      PROPS.FROM_NAME,
   REPLY_TO_EMAIL: PROPS.REPLY_TO_EMAIL,
 
   // ---- DocuSeal (e-signature) ---------------------------------
