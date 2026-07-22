@@ -87,7 +87,12 @@ function extractVehicleType(title) {
 }
 
 function getStripePaymentUrl(vehicleType) {
-  if (vehicleType === 'Cargo Van'    && CONFIG.STRIPE_PAYMENT_URL_CARGO_VAN)    return CONFIG.STRIPE_PAYMENT_URL_CARGO_VAN;
-  if (vehicleType === 'Moving Truck' && CONFIG.STRIPE_PAYMENT_URL_MOVING_TRUCK) return CONFIG.STRIPE_PAYMENT_URL_MOVING_TRUCK;
+  const urls = {
+    'Cargo Van':    CONFIG.STRIPE_PAYMENT_URL_CARGO_VAN,
+    'Moving Truck': CONFIG.STRIPE_PAYMENT_URL_MOVING_TRUCK,
+  };
+  const url = urls[vehicleType];
+  if (url) return url;
+  if (vehicleType) Logger.log('WARNING: getStripePaymentUrl — unknown vehicleType "' + vehicleType + '"');
   return CONFIG.STRIPE_PAYMENT_URL;
 }

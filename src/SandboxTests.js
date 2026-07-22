@@ -255,3 +255,44 @@ function testSyncCalendarBookingsNoNotifications() {
 
   Logger.log('Done. Total rows added across all calendars: ' + totalAdded);
 }
+
+// ---------------------------------------------------------------------------
+// TEST 8: Stripe payment URL resolution
+// Verifies that each vehicle type in CALENDAR_CONFIGS resolves to a non-empty
+// payment URL, and documents the fallback behavior for unknown/blank types.
+// Payment links are public URLs — no secret keys are logged or exposed.
+// ---------------------------------------------------------------------------
+function testStripePaymentUrls() {
+  let passed = 0;
+  let failed = 0;
+
+  // Verify each vehicle type present in CALENDAR_CONFIGS gets a URL
+  const seenTypes = {};
+  CALENDAR_CONFIGS.forEach(function(calCfg) {
+    if (seenTypes[calCfg.vehicleType]) return; // only test each type once
+    seenTypes[calCfg.vehicleType] = true;
+
+    const url = getStripePaymentUrl(calCfg.vehicleType);
+    if (url) {
+      Logger.log('OK [' + calCfg.vehicleType + ']: ' + url.substring(0, 40) + '...');
+      passed++;
+    } else {
+      Logger.log('FAIL [' + calCfg.vehicleType + ']: getStripePaymentUrl returned empty/null — check Script Property');
+      failed++;
+    }
+  });
+
+  // Verify unknown vehicle type falls back (does not throw, does not return null silently)
+  const unknownUrl = getStripePaymentUrl('Unknown Vehicle');
+  Logger.log('Unknown type → fallback URL ' +
+    (unknownUrl ? 'set (' + unknownUrl.substring(0, 40) + '...)' : 'NOT set (STRIPE_PAYMENT_URL is blank)'));
+
+  // Verify blank vehicle type (old rows before multi-site migration)
+  const blankUrl = getStripePaymentUrl('');
+  Logger.log('Blank type   → fallback URL ' +
+    (blankUrl ? 'set (' + blankUrl.substring(0, 40) + '...)' : 'NOT set (STRIPE_PAYMENT_URL is blank)'));
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' Stripe URL checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+}
