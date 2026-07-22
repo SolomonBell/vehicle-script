@@ -19,8 +19,13 @@ function sendLeaseToNewBookings() {
     if (depositPaid === 'Yes' && leaseSent !== 'Yes' && email !== 'No Email'
         && (approved === 'Approved - Free' || approved === 'Approved - Paid')) {
       try {
-        sendLeaseViaDocuSeal(name, email, secondEmail, dateStr);
-        sheet.getRange(i + 1, 10).setValue('Yes');
+        const docuSealResp = sendLeaseViaDocuSeal(name, email, secondEmail, dateStr);
+        const submissionId = extractDocuSealSubmissionId(docuSealResp);
+
+        sheet.getRange(i + 1, 10).setValue('Yes'); // J: Lease Sent
+        if (submissionId != null) {
+          sheet.getRange(i + 1, 20).setValue(submissionId); // T: DocuSeal Submission ID
+        }
         Logger.log('Catch-up lease sent via DocuSeal for: ' + email);
       } catch(e) {
         alertAdmin('sendLeaseToNewBookings error for ' + email, e.toString());

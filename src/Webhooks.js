@@ -104,9 +104,13 @@ function markDepositPaid(customerEmail, amountPaid) {
           sendEmailHtml(email, 'Deposit confirmed — ' + dateStr, customerEmailHtml);
 
           // Send lease via DocuSeal
-          sendLeaseViaDocuSeal(name, email, secondEmail, dateStr);
+          const docuSealResp = sendLeaseViaDocuSeal(name, email, secondEmail, dateStr);
+          const submissionId = extractDocuSealSubmissionId(docuSealResp);
 
-          sheet.getRange(i + 1, 10).setValue('Yes');
+          sheet.getRange(i + 1, 10).setValue('Yes'); // J: Lease Sent
+          if (submissionId != null) {
+            sheet.getRange(i + 1, 20).setValue(submissionId); // T: DocuSeal Submission ID
+          }
           Logger.log('Deposit confirmed and lease sent for: ' + email);
 
         } catch(e) {

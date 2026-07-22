@@ -90,11 +90,11 @@ Calendars with an unset property are silently skipped at sync time. You can add 
 
 ### DocuSeal (e-signature)
 
-| Property key                    | What it is                                     |
-|---------------------------------|------------------------------------------------|
-| `DOCUSEAL_KEY`                  | DocuSeal API key (X-Auth-Token)                |
-| `DOCUSEAL_TEMPLATE_SINGLE`      | Template ID for single-driver lease (numeric)  |
-| `DOCUSEAL_TEMPLATE_TWO_DRIVERS` | Template ID for two-driver lease (numeric)     |
+| Property key                      | What it is                                     |
+|-----------------------------------|------------------------------------------------|
+| `DOCUSEAL_API_KEY`                | DocuSeal API key (X-Auth-Token)                |
+| `DOCUSEAL_TEMPLATE_ONE_DRIVER`    | Template ID for single-driver lease (numeric)  |
+| `DOCUSEAL_TEMPLATE_TWO_DRIVERS`   | Template ID for two-driver lease (numeric)     |
 
 Role names in DocuSeal templates must match exactly what the script sends:
 - Single driver: `Driver`, `Reliable Storage Manager`
@@ -132,7 +132,7 @@ Role names in DocuSeal templates must match exactly what the script sends:
 
 Sheet tab must be named `Bookings` (exact, case-sensitive).
 
-Row 1 headers (columns A–S). Columns R and S are written by `syncCalendarBookings()` and set up by `setupSheetSchema()`:
+Row 1 headers (columns A–T). Columns R and S are written by `syncCalendarBookings()` and set up by `setupSheetSchema()`:
 
 | Col | Header                  | Written by         |
 |-----|--------------------------|--------------------|
@@ -155,6 +155,7 @@ Row 1 headers (columns A–S). Columns R and S are written by `syncCalendarBooki
 | Q   | Approval Reminder Count | checkRentalEligibility |
 | R   | Vehicle Type            | syncCalendarBookings (from CALENDAR_CONFIGS) |
 | S   | Location                | syncCalendarBookings (from CALENDAR_CONFIGS) |
+| T   | DocuSeal Submission ID  | markDepositPaid / sendLeaseToNewBookings (via sendLeaseViaDocuSeal) |
 
 **Column O** must have a data-validation dropdown restricted to:
 - `Approved - Free`

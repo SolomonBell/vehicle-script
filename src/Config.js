@@ -28,7 +28,7 @@
 //   J: Lease Sent            K: 24hr Sent            L: Post-Rental Sent
 //   M: Second Driver Email   N: Lease Signed         O: Rental Approved
 //   P: Approval Notified At  Q: Approval Reminder Count
-//   R: Vehicle Type          S: Location
+//   R: Vehicle Type          S: Location             T: DocuSeal Submission ID
 // ============================================================
 // CHANGES IN v7:
 //   - Approval reminder loop reworked. Script no longer writes
@@ -87,8 +87,8 @@ const CONFIG = {
   REPLY_TO_EMAIL: PROPS.REPLY_TO_EMAIL,
 
   // ---- DocuSeal (e-signature) ---------------------------------
-  DOCUSEAL_KEY:                  PROPS.DOCUSEAL_KEY,
-  DOCUSEAL_TEMPLATE_SINGLE:      Number(PROPS.DOCUSEAL_TEMPLATE_SINGLE),
+  DOCUSEAL_KEY:                  PROPS.DOCUSEAL_API_KEY,
+  DOCUSEAL_TEMPLATE_SINGLE:      Number(PROPS.DOCUSEAL_TEMPLATE_ONE_DRIVER),
   DOCUSEAL_TEMPLATE_TWO_DRIVERS: Number(PROPS.DOCUSEAL_TEMPLATE_TWO_DRIVERS),
 
   // ---- Intake Form (Form 1) ------------------------------------

@@ -346,6 +346,106 @@ function testDepositAmounts() {
 }
 
 // ============================================================
+// DOCUSEAL TESTS
+// ============================================================
+
+// ---------------------------------------------------------------------------
+// TEST 11: DocuSeal Script Property names
+// Confirms DOCUSEAL_API_KEY is set, and that DOCUSEAL_TEMPLATE_ONE_DRIVER and
+// DOCUSEAL_TEMPLATE_TWO_DRIVERS are set and numeric.
+// Does not log secret values. Does not make a live API call.
+// ---------------------------------------------------------------------------
+function testDocuSealPropertyNames() {
+  let passed = 0;
+  let failed = 0;
+
+  // API key — confirm it exists but do not log the value
+  if (PROPS.DOCUSEAL_API_KEY) {
+    Logger.log('OK: DOCUSEAL_API_KEY is set (value not logged).');
+    passed++;
+  } else {
+    Logger.log('FAIL: DOCUSEAL_API_KEY is not set in Script Properties.');
+    failed++;
+  }
+
+  // Template IDs — must be set and numeric
+  ['DOCUSEAL_TEMPLATE_ONE_DRIVER', 'DOCUSEAL_TEMPLATE_TWO_DRIVERS'].forEach(function(key) {
+    const raw = PROPS[key];
+    if (raw == null || raw.trim() === '') {
+      Logger.log('FAIL: ' + key + ' is not set in Script Properties.');
+      failed++;
+    } else if (!isFinite(Number(raw))) {
+      Logger.log('FAIL: ' + key + ' is not numeric (got "' + raw + '").');
+      failed++;
+    } else {
+      Logger.log('OK: ' + key + ' = ' + Number(raw));
+      passed++;
+    }
+  });
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' DocuSeal property checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+}
+
+// ---------------------------------------------------------------------------
+// TEST 12: extractDocuSealSubmissionId response parsing
+// Uses mocked response objects to verify extraction logic without a live call.
+//
+// NOTE: Run one live sandbox DocuSeal submission after deploying to confirm
+// that response.id is the correct field. The helper logs top-level response
+// keys (not values) on every real call so you can verify the actual shape.
+// ---------------------------------------------------------------------------
+function testExtractDocuSealSubmissionId() {
+  let passed = 0;
+  let failed = 0;
+
+  // Case 1: expected happy-path shape — { id: <number>, ... }
+  const id1 = extractDocuSealSubmissionId({ id: 12345, status: 'pending', submitters: [] });
+  if (id1 === 12345) {
+    Logger.log('OK (valid response): id = ' + id1);
+    passed++;
+  } else {
+    Logger.log('FAIL (valid response): expected 12345, got ' + id1);
+    failed++;
+  }
+
+  // Case 2: null response (e.g. caller received nothing)
+  const id2 = extractDocuSealSubmissionId(null);
+  if (id2 === null) {
+    Logger.log('OK (null response): returned null');
+    passed++;
+  } else {
+    Logger.log('FAIL (null response): expected null, got ' + id2);
+    failed++;
+  }
+
+  // Case 3: response object with no id field
+  const id3 = extractDocuSealSubmissionId({ status: 'error', message: 'bad request' });
+  if (id3 === null) {
+    Logger.log('OK (missing id field): returned null with warning logged');
+    passed++;
+  } else {
+    Logger.log('FAIL (missing id field): expected null, got ' + id3);
+    failed++;
+  }
+
+  // Case 4: non-object type (unexpected response)
+  const id4 = extractDocuSealSubmissionId('unexpected string');
+  if (id4 === null) {
+    Logger.log('OK (string response): returned null');
+    passed++;
+  } else {
+    Logger.log('FAIL (string response): expected null, got ' + id4);
+    failed++;
+  }
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' extractDocuSealSubmissionId checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+}
+
+// ============================================================
 // CONFIGURATION TESTS
 // ============================================================
 

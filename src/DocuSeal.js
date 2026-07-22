@@ -66,3 +66,24 @@ function sendLeaseViaDocuSeal(name, email, secondEmail, dateStr) {
              (hasTwoDrivers ? ' and ' + secondEmail : ''));
   return JSON.parse(resp.getContentText());
 }
+
+// Extracts the submission ID from a DocuSeal API response.
+// The DocuSeal API response shape is not documented in this repo. This function
+// logs top-level response keys (not values) so one live sandbox submission can
+// confirm the exact field path. The most likely field is response.id per REST
+// convention. If the response shape differs, update this function after reviewing
+// the logged keys.
+function extractDocuSealSubmissionId(response) {
+  if (!response || typeof response !== 'object') {
+    Logger.log('Warning: DocuSeal response is missing or not an object.');
+    return null;
+  }
+  // Log keys only — no values logged here, so no sensitive data is exposed.
+  Logger.log('DocuSeal response top-level keys: ' + Object.keys(response).join(', '));
+  const id = response.id;
+  if (id == null) {
+    Logger.log('Warning: DocuSeal response has no "id" field. Check log for key list to find correct path.');
+    return null;
+  }
+  return id;
+}
