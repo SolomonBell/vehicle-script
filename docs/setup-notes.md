@@ -40,7 +40,10 @@ None of these values belong in source code.
 
 | Property key           | What it is                                              |
 |------------------------|---------------------------------------------------------|
-| `CALENDAR_ID`          | Google Calendar ID for the Bainbridge booking calendar  |
+| `CALENDAR_ID_BAINBRIDGE_CARGO_VAN`      | Google Calendar ID — Bainbridge Cargo Van      |
+| `CALENDAR_ID_POULSBO_MOVING_TRUCK`      | Google Calendar ID — Poulsbo Moving Truck      |
+| `CALENDAR_ID_PORT_ORCHARD_MOVING_TRUCK` | Google Calendar ID — Port Orchard Moving Truck |
+| `CALENDAR_ID_FAIRGROUNDS_MOVING_TRUCK`  | Google Calendar ID — Fairgrounds Moving Truck  |
 | `STRIPE_PAYMENT_URL`   | Public Stripe payment link for the $50 deposit          |
 | `STRIPE_SECRET_KEY`    | Stripe secret key (sk_live_...)                         |
 | `STRIPE_WEBHOOK_SECRET`| Stripe webhook signing secret (whsec_...)               |
@@ -52,10 +55,6 @@ None of these values belong in source code.
 | `INSPECT_FORM_BASE`    | Google Form base URL for the inspection form (Form 2)   |
 | `BITLY_TOKEN`          | Bitly generic access token (for SMS URL shortening)     |
 | `WEBHOOK_SHARED_SECRET`| Shared secret validating Pipedream → Apps Script requests (see Webhook shared secret section) |
-
-**Hardcoded constants (not Script Properties — intentional):**
-- `TWILIO_NUM: '+12065550111'` — the Twilio sending number
-- `MANAGER_PHONE: '+12065550100'` — Bainbridge manager SMS number
 
 ## Google Sheet setup
 
@@ -82,6 +81,8 @@ Row 1 headers (columns A–Q):
 | O   | Rental Approved         |
 | P   | Approval Notified At    |
 | Q   | Approval Reminder Count |
+| R   | Vehicle Type            |
+| S   | Location                |
 
 **Column O must have a data-validation dropdown** restricted to:
 - `Approved - Free`

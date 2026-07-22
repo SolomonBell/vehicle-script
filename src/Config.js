@@ -28,6 +28,7 @@
 //   J: Lease Sent            K: 24hr Sent            L: Post-Rental Sent
 //   M: Second Driver Email   N: Lease Signed         O: Rental Approved
 //   P: Approval Notified At  Q: Approval Reminder Count
+//   R: Vehicle Type          S: Location
 // ============================================================
 // CHANGES IN v7:
 //   - Approval reminder loop reworked. Script no longer writes
@@ -64,7 +65,6 @@
 const PROPS = PropertiesService.getScriptProperties().getProperties();
 
 const CONFIG = {
-  CALENDAR_ID:    PROPS.CALENDAR_ID,
   SHEET_NAME:     'Bookings',
   ADMIN_EMAIL:    PROPS.ADMIN_EMAIL,
   MANAGER_EMAIL:  PROPS.MANAGER_EMAIL,
@@ -121,3 +121,32 @@ const CONFIG = {
   // ---- Deposit amount (customer-facing messages) ---------------
   DEPOSIT_AMOUNT: PROPS.DEPOSIT_AMOUNT || '50',
 };
+
+// Maps each calendar Script Property to its location and vehicle type.
+// syncCalendarBookings() reads every entry; entries with an unset calendarId are skipped.
+const CALENDAR_CONFIGS = [
+  {
+    propKey:     'CALENDAR_ID_BAINBRIDGE_CARGO_VAN',
+    calendarId:  PROPS.CALENDAR_ID_BAINBRIDGE_CARGO_VAN,
+    location:    'Bainbridge',
+    vehicleType: 'Cargo Van',
+  },
+  {
+    propKey:     'CALENDAR_ID_POULSBO_MOVING_TRUCK',
+    calendarId:  PROPS.CALENDAR_ID_POULSBO_MOVING_TRUCK,
+    location:    'Poulsbo',
+    vehicleType: 'Moving Truck',
+  },
+  {
+    propKey:     'CALENDAR_ID_PORT_ORCHARD_MOVING_TRUCK',
+    calendarId:  PROPS.CALENDAR_ID_PORT_ORCHARD_MOVING_TRUCK,
+    location:    'Port Orchard',
+    vehicleType: 'Moving Truck',
+  },
+  {
+    propKey:     'CALENDAR_ID_FAIRGROUNDS_MOVING_TRUCK',
+    calendarId:  PROPS.CALENDAR_ID_FAIRGROUNDS_MOVING_TRUCK,
+    location:    'Fairgrounds',
+    vehicleType: 'Moving Truck',
+  },
+];

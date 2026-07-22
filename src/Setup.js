@@ -40,5 +40,15 @@ function setupSheetSchema() {
     .build();
   sheet.getRange('R2:R').setDataValidation(rule);
 
-  Logger.log('Sheet schema applied: Column R = Vehicle Type (dropdown).');
+  // Column S: Location
+  const sHeaderCell = sheet.getRange('S1');
+  if (!sHeaderCell.getValue()) sHeaderCell.setValue('Location');
+
+  const locationRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['Bainbridge', 'Poulsbo', 'Port Orchard', 'Fairgrounds'], true)
+    .setAllowInvalid(true)
+    .build();
+  sheet.getRange('S2:S').setDataValidation(locationRule);
+
+  Logger.log('Sheet schema applied: Column R = Vehicle Type, Column S = Location (dropdowns).');
 }
