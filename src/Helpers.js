@@ -80,10 +80,15 @@ function formatDateTime(date) {
   return Utilities.formatDate(toDate(date, 'formatDateTime'), Session.getScriptTimeZone(), 'MMMM d, yyyy \'at\' h:mm a');
 }
 
-function extractVehicleType(title) {
-  if (/cargo van/i.test(title))    return 'Cargo Van';
-  if (/moving truck/i.test(title)) return 'Moving Truck';
-  return '';
+function getDepositAmount(vehicleType) {
+  const amounts = {
+    'Cargo Van':    CONFIG.DEPOSIT_AMOUNT_CARGO_VAN,
+    'Moving Truck': CONFIG.DEPOSIT_AMOUNT_MOVING_TRUCK,
+  };
+  const amount = amounts[vehicleType];
+  if (amount) return amount;
+  if (vehicleType) Logger.log('WARNING: getDepositAmount — unknown vehicleType "' + vehicleType + '"');
+  return CONFIG.DEPOSIT_AMOUNT;
 }
 
 function getStripePaymentUrl(vehicleType) {

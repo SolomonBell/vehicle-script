@@ -1,38 +1,10 @@
 // ============================================================
-// Bitly URL shortening
-// ============================================================
-function shortenUrl(longUrl) {
-  var resp = UrlFetchApp.fetch('https://api-ssl.bitly.com/v4/shorten', {
-    method: 'post',
-    headers: {
-      Authorization: 'Bearer ' + CONFIG.BITLY_TOKEN,
-      'Content-Type': 'application/json'
-    },
-    payload: JSON.stringify({ long_url: longUrl }),
-    muteHttpExceptions: true
-  });
-  if (resp.getResponseCode() < 300) {
-    return JSON.parse(resp.getContentText()).link;
-  }
-  Logger.log('Bitly error: ' + resp.getContentText());
-  return longUrl; // fall back to the original URL
-}
-
-function shortenUrlsInText(text) {
-  return text.replace(/https?:\/\/[^\s]+/g, function (url) {
-    return shortenUrl(url);
-  });
-}
-
-// ============================================================
 // SMS via Twilio
 // ============================================================
-// All texts are sent FROM the Bainbridge Twilio number (CONFIG.TWILIO_NUM,
-// +12065550111), so every customer message and manager alert already shows up
-// in that number's threads in the App — no separate "copy the manager" send is
-// needed (and one is impossible anyway: Twilio rejects To == From).
+// All texts are sent FROM CONFIG.TWILIO_NUM, so every customer message and
+// manager alert already shows up in that number's threads in the App — no
+// separate "copy the manager" send is needed (Twilio rejects To == From).
 function sendSms(toPhone, message) {
-  message = shortenUrlsInText(message);
   const url = 'https://api.twilio.com/2010-04-01/Accounts/' + CONFIG.TWILIO_SID + '/Messages.json';
   const options = {
     method:  'post',

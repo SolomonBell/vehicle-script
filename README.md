@@ -1,166 +1,97 @@
 # Reliable Storage — Truck Rental Automation
 
-> **Production system.** Runs the Bainbridge Island truck rental operation at Reliable Storage. Handles customer intake, deposit collection, e-signature, approval gating, and pre/post-rental reminders end-to-end.
+> **Production system.** Automates the complete truck rental workflow for Reliable Storage across multiple locations and vehicle types — from calendar booking to post-rental inspection follow-up.
 
 ---
 
 ## Table of Contents
 
 1. [Project Overview](#project-overview)
-2. [Business Impact](#business-impact)
-3. [System Characteristics](#system-characteristics)
-4. [Key Features](#key-features)
-5. [Multi-Site Design](#multi-site-design)
-6. [Architecture](#architecture)
-7. [Booking Workflow](#booking-workflow)
-8. [Repository Structure](#repository-structure)
-9. [Security Model](#security-model)
-10. [Production Challenges Solved](#production-challenges-solved)
-11. [Future Roadmap](#future-roadmap)
-12. [Deployment Notes](#deployment-notes)
+2. [Booking Workflow](#booking-workflow)
+3. [Architecture](#architecture)
+4. [Repository Structure](#repository-structure)
+5. [External Integrations](#external-integrations)
+6. [Configuration](#configuration)
+7. [Sandbox Setup](#sandbox-setup)
+8. [Deployment](#deployment)
+9. [Testing](#testing)
+10. [Adding a New Location](#adding-a-new-location)
+11. [Adding a New Vehicle Type](#adding-a-new-vehicle-type)
+12. [Development Workflow](#development-workflow)
+13. [Troubleshooting](#troubleshooting)
 
 ---
 
 ## Project Overview
 
-Reliable Storage is a Pacific Northwest storage and moving truck rental company. This repository contains the full backend automation system that handles every step of the rental workflow — from the moment a customer books a truck to the post-rental inspection follow-up — without requiring manual intervention from staff.
+Reliable Storage is a Pacific Northwest storage and moving truck rental company with locations in Bainbridge, Poulsbo, Port Orchard, and Fairgrounds. This repository contains the Google Apps Script automation that handles every step of the truck rental process without manual staff intervention.
 
-The system runs on Google Apps Script, triggered every five minutes against a Google Calendar booking feed. It writes to Google Sheets as its system of record, routes payments through Stripe via a Pipedream webhook bridge, collects e-signatures through DocuSeal, delivers transactional email through SendGrid, and sends SMS notifications through Twilio. All credentials live in Google Apps Script's Script Properties; no secrets appear in source code.
+**What it does automatically:**
 
-The v8 codebase is deployed in production for the Bainbridge location. The repository is structured for multi-site expansion: configuration is driven by a `SITES` array and a `GLOBAL` object, and adding a new location requires no logic changes — only a new `SITES` entry and a set of Script Properties.
+- Detects new calendar bookings and sends a welcome message with deposit and intake form links
+- Notifies the site manager and requests their approval for each booking
+- Sends a DocuSeal lease for e-signature after the deposit clears
+- Sends a 24-hour pickup reminder with the pre-trip inspection form link
+- Sends a post-rental inspection prompt after the rental ends
 
----
+**Active sites:** Bainbridge (Cargo Van), Poulsbo (Moving Truck), Port Orchard (Moving Truck), Fairgrounds (Moving Truck).
 
-## Business Impact
+**Tech stack:** Google Apps Script (V8) · Google Calendar · Google Sheets · Stripe · DocuSeal · Twilio · SendGrid · Pipedream
 
-Before this system, booking follow-up was handled manually. Staff had to remember to send deposit reminders, track which customers had signed their lease, and coordinate pre-trip inspection instructions for each pickup. Missed steps led to customers arriving without a paid deposit or a signed rental agreement.
-
-This automation closes every gap in that workflow:
-
-- **Deposit capture rate improved** — customers receive a payment link by SMS and email within minutes of booking; a 24-hour reminder repeats the prompt if the deposit has not cleared
-- **Lease completion enforced before pickup** — DocuSeal is triggered automatically on deposit confirmation; the 24-hour reminder flags unsigned leases to both the customer and the manager
-- **Unauthorized rentals prevented** — a manager approval gate blocks the workflow until column O is manually set; no lease sends without approval
-- **Manager has full email visibility** — every customer-facing email is silently BCC'd to the site manager, giving her a real-time audit trail without generating duplicate inbox threads
-- **Zero manual scheduling** — 24-hour pickup reminders and post-rental inspection requests fire automatically based on calendar start and end times; no cron job configuration required
+**System of record:** Google Sheets (Bookings tab, columns A–S). All state lives in the sheet; the script holds no state between runs.
 
 ---
 
-## System Characteristics
+## Booking Workflow
 
-**Runtime:** Google Apps Script (V8 JavaScript engine, server-side). No traditional server infrastructure. The script runs inside Google's managed execution environment, triggered by time-based schedules and HTTP requests.
+```mermaid
+flowchart TD
+    A([Customer books via Google Booking]) --> B[syncCalendarBookings detects\nnew Calendar event — every 5 min]
+    B --> C[Row appended to Bookings sheet\nColumns A–S initialised]
+    C --> D[Welcome SMS and email sent\nDeposit link + intake form URL]
+    C --> E[Manager notified by email and SMS]
+    C --> F[checkRentalEligibility sends\napproval request to manager\nColumns P and Q updated]
 
-**Database:** Google Sheets. Each booking occupies one row across 17 columns (A–Q). State flags written to individual cells serve as the idempotency mechanism for outbound communications. Reads and writes use the Spreadsheet API via `SpreadsheetApp`.
+    F --> G{Manager sets Column O}
+    G -->|Denied| STOP([Booking closed])
+    G -->|Approved - Free or Approved - Paid| H[Approval gate cleared]
 
-**Execution model:** Two independent paths — a trigger path (polling, scheduled) and a webhook path (event-driven, via Pipedream). Both read from and write to the same Sheets system of record.
+    H --> I([Customer pays deposit via Stripe])
+    I --> J[Stripe → Pipedream validates + forwards\nPOST to doPost with shared secret]
+    J --> K[markDepositPaid\nCol G = Yes · Col H = amount]
+    K --> L[Deposit confirmation SMS and email]
+    K --> M[DocuSeal lease dispatched\nCol J = Yes]
 
-**Hard constraints inherited from the platform:**
-- Maximum trigger execution time: 6 minutes
-- Minimum trigger scheduling interval: 5 minutes
-- Maximum triggers per Apps Script project: 20
-- No built-in IP allowlist for web app endpoints
+    M --> N([Customer signs lease])
+    N --> O[DocuSeal → Pipedream validates + forwards\nPOST to doPost with shared secret]
+    O --> P[markLeaseSigned — Col N = Yes]
 
-**Source structure:** 11 `.js` files in `src/`, all sharing one flat global scope when deployed. No module system, no imports, no exports. Each file contains one logical group of functions. Load order between files is irrelevant because no file has top-level code that depends on another file's declarations at parse time — all cross-file references are resolved at call time.
-
-**Configuration:** All API keys, webhook secrets, calendar IDs, and form URLs are loaded from Apps Script Script Properties at runtime. Rotating a credential requires one console update, no redeployment.
-
----
-
-## Key Features
-
-**Calendar-driven booking sync**
-A time-based trigger polls the Google Calendar every five minutes and appends new bookings to the Bookings sheet. Customer name, email, phone number, and second driver email are extracted from the structured HTML description written by Google Booking — no manual data entry required.
-
-**Approval-gated workflow with a reminder state machine**
-The manager must explicitly approve each rental by setting a dropdown in column O (`Approved - Free`, `Approved - Paid`, or `Denied`). The script never writes to that column. Approval state is tracked in columns P (last notification timestamp) and Q (reminder count), which drives a four-branch state machine: initial request → timed reminders → admin escalation → permanent silence. This design replaced an earlier pattern that caused a reminder storm every five minutes.
-
-**Idempotent message delivery**
-Every outbound message type has a corresponding sentinel flag in the Bookings sheet. The flag is written and flushed to the spreadsheet *before* the external API call is made. If a trigger re-fires mid-execution, the second invocation reads the flag as set and skips the row — preventing duplicate messages even under concurrent trigger overlap.
-
-**Webhook bridge via Pipedream**
-Stripe payment events and DocuSeal signing events are received by Pipedream, which validates upstream signatures, normalises payloads into a consistent shape, injects a shared secret, and forwards to the Apps Script web app endpoint. Apps Script never parses raw Stripe or DocuSeal payloads directly.
-
-**Shared-secret webhook authentication**
-`doPost` validates `data.secret` against `WEBHOOK_SHARED_SECRET` in Script Properties before reading any sheet data or triggering any side effect. Requests with a missing or incorrect secret return `{ received: false }` immediately. The endpoint is deployed as "Anyone" (required for Pipedream), but the shared secret is the authentication layer.
-
-**Manager BCC on all customer-facing email**
-`sendEmailHtml` automatically adds the site manager as a BCC recipient on every outbound customer email. Emails already addressed to the manager or admin are excluded. The BCC is invisible to customers, generates no duplicate inbox threads, and gives the manager a real-time audit trail of customer communications. DocuSeal lease emails are excluded because the manager already receives them as a co-signer.
-
-**Configuration-driven, no hardcoded credentials**
-Every API key, webhook secret, form URL, and calendar ID is loaded from Script Properties at runtime. Rotating a credential requires updating one value in the Apps Script console — no code change, no redeployment.
-
-**Defensive date handling**
-A `toDate(value, label)` helper wraps every call to `Utilities.formatDate`. If a Calendar event start time arrives as a non-Date value, the helper throws an error that names the label, the bad value, and its JavaScript type — replacing the opaque platform error `Invalid argument: date. Should be of type: Date` with a diagnostic message that identifies the offending event in the execution log.
-
----
-
-## Multi-Site Design
-
-The system is architected to support multiple Reliable Storage locations from a single codebase. Adding a new site requires no changes to business logic.
-
-### Configuration split
-
-Two objects replace the original flat `CONFIG`:
-
-- **`GLOBAL`** holds everything that is genuinely shared: Twilio account credentials, SendGrid API key, DocuSeal key and template IDs, Stripe credentials, shared form URLs, the webhook secret, and policy constants (reminder cadence, days ahead to scan, etc.)
-- **`SITES`** is an array of per-location objects, each holding the fields that differ by site:
-
-```javascript
-const SITES = [
-  {
-    id:           'bainbridge',
-    label:        'Bainbridge',       // must match Google Form Site dropdown exactly
-    sheetName:    'Bookings',
-    calendarId:   PROPS.BAINBRIDGE_CALENDAR_ID,
-    managerEmail: 'site@example.com',
-    managerPhone: '+12065550100',
-    fromEmail:    'site@example.com',
-    replyToEmail: 'site@example.com',
-    twilioFrom:   '+12065550111',
-  },
-  // { id: 'poulsbo', label: 'Poulsbo', ... }
-];
+    P --> Q[processReminders fires within\n24-26 hours of pickup — Col K = Yes]
+    Q --> R[24-hour reminder SMS and email\nPre-trip inspection form link]
+    R --> S([Rental day])
+    S --> T[processReminders fires 1 hour\nafter end time — Col L = Yes]
+    T --> U[Post-rental prompt SMS and email\nPost-trip inspection form link]
+    U --> V([Workflow complete])
 ```
 
-### Per-site trigger isolation
+**Implementation notes:**
 
-Apps Script triggers cannot accept arguments, so a single trigger iterating over all sites would share one six-minute execution budget. Instead, each site gets its own named wrapper functions registered as independent triggers:
-
-```javascript
-function syncCalendarBookings_Bainbridge() {
-  syncCalendarBookingsForSite(getSiteById('bainbridge'));
-}
-function syncCalendarBookings_Poulsbo() {
-  syncCalendarBookingsForSite(getSiteById('poulsbo'));
-}
-```
-
-Each wrapper runs in its own execution context with its own budget. A slow API response at one site cannot starve another site's execution.
-
-### Webhook routing
-
-Stripe and DocuSeal payloads carry no site identifier. For Milestone 1, `doPost` searches all sites' sheets for a row matching the incoming customer email and routes to the first match. The known edge case — the same email appearing at two sites simultaneously — is documented and accepted as a Milestone 1 constraint.
-
-For v9, each Pipedream workflow will append `siteId` and `eventId` to its outbound payload. `doPost` will route directly without any cross-sheet search.
-
-### Onboarding a new location
-
-1. Add an entry to the `SITES` array
-2. Set Script Properties with the site's prefix (e.g., `POULSBO_CALENDAR_ID`)
-3. Create a new sheet tab for the site
-4. Register the site's trigger wrappers in `setupTriggers()` and re-run it
-5. Confirm the Google Form Site dropdown includes the new `site.label` value exactly
-
-No engine functions change. No webhook routing changes. No Pipedream workflow changes.
+- `syncCalendarBookings` extracts customer name, email, phone, and second driver email from the structured HTML in the Calendar event description — not from the event title
+- Column O (`Rental Approved`) is enforced by a data-validation dropdown with exactly three permitted values; the script never writes to this column
+- Deposit and approval can arrive in either order. `markDepositPaid` sends the lease immediately on payment regardless of approval status. `sendLeaseToNewBookings` is a catch-up engine for the case where payment cleared before the lease was sent (e.g., approval arrived after deposit)
+- The 24-hour reminder fires when `hoursUntilStart` is between 0 and 26, covering the 30-minute trigger interval; it only fires for approved bookings
+- Post-rental prompt fires 1 hour after end time; end time defaults to start + 4 hours if the Calendar event has no end time set
+- The manager is automatically BCC'd on every customer-facing email; emails already addressed to the manager or admin are excluded from the BCC
 
 ---
 
 ## Architecture
 
-The system has two distinct execution paths that converge on Google Sheets as the shared system of record.
+Two independent execution paths converge on Google Sheets as the shared system of record.
 
-The **trigger path** runs on time-based schedules inside Google Apps Script. It polls Google Calendar for new bookings, processes each row in the Bookings sheet, and dispatches outbound communications via Twilio, SendGrid, and DocuSeal.
+The **trigger path** runs on time-based schedules inside Google Apps Script. It polls Google Calendar for new bookings, processes each sheet row, and dispatches outbound communications.
 
-The **webhook path** is event-driven. Stripe and DocuSeal post events to Pipedream, which validates upstream signatures, normalises each payload, injects the shared secret, and forwards to the Apps Script web app endpoint (`doPost`).
+The **webhook path** is event-driven. Stripe and DocuSeal post events to Pipedream, which validates upstream signatures, normalises payloads, injects the shared secret, and forwards to the Apps Script web app endpoint.
 
 ```mermaid
 graph TB
@@ -169,7 +100,7 @@ graph TB
         GCAL[(Google Calendar)]
     end
 
-    subgraph GAS["Google Apps Script — 11 source files"]
+    subgraph GAS["Google Apps Script (12 source files)"]
         direction TB
         TRIGGERS["Time-based triggers
         syncCalendarBookings · 5 min
@@ -182,7 +113,7 @@ graph TB
 
     subgraph RECORD["System of Record"]
         SHEETS[(Google Sheets
-        Bookings tab · Columns A–Q)]
+        Bookings tab · Columns A–S)]
     end
 
     subgraph BRIDGE["Pipedream · Webhook Bridge"]
@@ -223,336 +154,382 @@ graph TB
     DOPOST --> DOCUSEAL
 ```
 
-**Google Sheets is the system of record.** Every booking occupies one row (columns A–Q). State flags are written before any outbound API call, so a trigger re-firing mid-execution cannot produce duplicate messages.
+### Multi-site design
 
-**Pipedream is the webhook bridge.** It decouples external event formats from Apps Script and handles upstream signature verification. The shared secret it injects is the only trust mechanism Apps Script requires from inbound requests.
+Multiple locations and vehicle types are driven by `CALENDAR_CONFIGS` in `Config.js` — the single source of truth for which calendars to poll, which location they belong to, and which vehicle type they serve:
 
-**SMS messages are shortened via Bitly** before dispatch through Twilio, transparently inside `sendSms`, to stay within carrier character limits.
-
----
-
-## Booking Workflow
-
-Each booking progresses through four phases: intake, approval, payment and lease, and reminders. All state transitions are written to the Bookings sheet before external calls are made.
-
-```mermaid
-flowchart TD
-    A([Customer books via Google Booking]) --> B[syncCalendarBookings detects\nnew Calendar event · every 5 min]
-    B --> C[Row appended to Bookings sheet\nColumns A–Q initialised]
-    C --> D[Welcome email + SMS sent to customer\nDeposit link · Pre-filled intake form URL]
-    C --> E[Manager notified\nEmail + SMS]
-    C --> F[checkRentalEligibility sends\napproval request to manager\nColumns P and Q updated]
-
-    F --> G{Manager sets\nColumn O}
-    G -->|Denied| STOP([Booking closed])
-    G -->|Approved - Free\nor Approved - Paid| H[Approval gate cleared]
-
-    H --> I([Customer pays $50 deposit via Stripe])
-    I --> J[Stripe → Pipedream validates + forwards\nPOST to doPost with shared secret]
-    J --> K[markDepositPaid\nColumn G = Yes · Column H = amount]
-    K --> L[Deposit confirmation email + SMS\nto customer]
-    K --> M[DocuSeal lease dispatched\nCustomer and manager as co-signers\nColumn J = Yes]
-
-    M --> N([Customer signs lease])
-    N --> O[DocuSeal → Pipedream validates + forwards\nPOST to doPost with shared secret]
-    O --> P[markLeaseSigned\nColumn N = Yes]
-
-    P --> Q[processReminders · 24-hour reminder\nPre-trip inspection form link sent\nColumn K = Yes]
-    Q --> R([Rental day])
-    R --> S[processReminders · post-rental prompt\n1 hour after end time · Column L = Yes]
-    S --> T([Workflow complete])
+```javascript
+const CALENDAR_CONFIGS = [
+  { propKey: 'CALENDAR_ID_BAINBRIDGE_CARGO_VAN',      calendarId: PROPS.CALENDAR_ID_BAINBRIDGE_CARGO_VAN,      location: 'Bainbridge',   vehicleType: 'Cargo Van' },
+  { propKey: 'CALENDAR_ID_POULSBO_MOVING_TRUCK',      calendarId: PROPS.CALENDAR_ID_POULSBO_MOVING_TRUCK,      location: 'Poulsbo',      vehicleType: 'Moving Truck' },
+  { propKey: 'CALENDAR_ID_PORT_ORCHARD_MOVING_TRUCK', calendarId: PROPS.CALENDAR_ID_PORT_ORCHARD_MOVING_TRUCK, location: 'Port Orchard', vehicleType: 'Moving Truck' },
+  { propKey: 'CALENDAR_ID_FAIRGROUNDS_MOVING_TRUCK',  calendarId: PROPS.CALENDAR_ID_FAIRGROUNDS_MOVING_TRUCK,  location: 'Fairgrounds',  vehicleType: 'Moving Truck' },
+];
 ```
 
-**Key implementation notes:**
+`syncCalendarBookings` iterates every entry in one pass. Entries whose `calendarId` Script Property is unset are silently skipped. Each booking row records its location and vehicle type in columns S and R, which drive per-vehicle deposit amounts and Stripe payment URLs downstream. `setupSheetSchema()` derives the column R and S dropdown validation lists directly from `CALENDAR_CONFIGS`, so adding a new entry automatically extends both dropdowns.
 
-- `syncCalendarBookings` extracts customer name, email, phone, and second driver email from the structured HTML in the Calendar event description, not from the event title
-- Column O (`Rental Approved`) is enforced by data-validation dropdown with three permitted values; the script never writes to this column
-- The 24-hour reminder fires when `hoursUntilStart` is between 0 and 26, giving a window that covers the 30-minute trigger polling interval; message content adapts based on whether the deposit has cleared and the lease has been signed
-- The post-rental inspection prompt fires when `hoursAfterEnd >= POST_RENTAL_HOURS` (currently 1 hour); end time defaults to start time + 4 hours if not set in the Calendar event
-- The manager receives a silent BCC on every customer-facing email via `sendEmailHtml`; emails addressed directly to the manager or admin are excluded
+**Vehicle type resolution:** deposit amounts and Stripe URLs are looked up by vehicle type string in `getDepositAmount()` and `getStripePaymentUrl()` in `Helpers.js`. These functions contain explicit lookup tables — adding a new vehicle type requires updating both functions in addition to `CALENDAR_CONFIGS` and Config.js. See [Adding a New Vehicle Type](#adding-a-new-vehicle-type).
+
+### Security model
+
+**Shared-secret webhook authentication:** The Apps Script web app is deployed with "Anyone" access (required for Pipedream). Every `doPost` call validates `data.secret` against `WEBHOOK_SHARED_SECRET` in Script Properties before reading any sheet data or sending any message. Requests with a missing or wrong secret return `{ received: false }` immediately with HTTP 200 (non-200 would trigger Pipedream retry loops).
+
+**Idempotent flag writes:** Every outbound message type has a sentinel flag in the sheet (columns G–N). The flag is written and flushed to the spreadsheet *before* the external API call. A concurrent trigger invocation that re-fires mid-execution sees the flag as set and skips the row, preventing duplicate messages.
+
+**Column O is manager-only:** The script never writes to column O (`Rental Approved`). Only the site manager sets it, using a data-validation dropdown restricted to `Approved - Free`, `Approved - Paid`, or `Denied`.
+
+**Credentials in Script Properties:** No API key, webhook secret, calendar ID, or form URL appears in source code. All are loaded from Script Properties at runtime. Rotating a credential requires one update in the Apps Script console.
+
+### Approval reminder state machine
+
+`checkRentalEligibility` runs every 5 minutes and drives a four-branch state machine tracked in columns P (last notification timestamp) and Q (reminder count):
+
+| Q value | Condition | Action |
+|---|---|---|
+| 0 | intake sent, O blank | Send initial approval email to manager. Set P = now, Q = 1 |
+| 1 or 2 | hours since P ≥ 12 | Send reminder. Set P = now, Q = Q + 1 |
+| 3 | hours since P ≥ 12 | Escalate to ADMIN_EMAIL. Set Q = 4 (permanent skip) |
+| > 3 | — | Skip silently forever |
+
+The script never writes to column O. Only the manager resolves the booking.
 
 ---
 
 ## Repository Structure
 
 ```
-.
-├── src/
-│   ├── Code.js                       # File map comment only — no executable code
-│   ├── Config.js                     # PROPS and CONFIG — all credentials and constants
-│   ├── Forms.js                      # buildIntakeUrl, buildInspectUrl
-│   ├── DocuSeal.js                   # sendLeaseViaDocuSeal
-│   ├── Webhooks.js                   # doPost, doGet, markDepositPaid,
-│   │                                 # markLeaseSigned, verifyStripeSignature,
-│   │                                 # computeHmacSha256
-│   ├── CalendarSync.js               # syncCalendarBookings  (Engine 1)
-│   ├── Leases.js                     # sendLeaseToNewBookings (Engine 2)
-│   ├── Approval.js                   # checkRentalEligibility (Engine 2b)
-│   ├── Reminders.js                  # processReminders       (Engine 3)
-│   ├── Notifications.js              # sendSms, sendEmailHtml, alertAdmin,
-│   │                                 # shortenUrl, shortenUrlsInText
-│   ├── Helpers.js                    # getSheet, field extractors, toDate,
-│   │                                 # formatDate, formatDateForForm, formatDateTime
-│   └── Setup.js                      # setupTriggers
-│
-├── archive/                          # git-ignored — local reference only
-│   ├── v7-original.js                # Baseline before v8 changes
-│   └── current-production-from-andrew.js  # Andrew's latest deployed version
-│
-├── docs/
-│   ├── setup-notes.md                # Script Properties, deployment steps,
-│   │                                 # Pipedream workflows, webhook secret setup
-│   ├── architecture-proposal.md      # Multi-site design decisions and
-│   │                                 # migration strategy
-│   ├── testing-plan.md               # 8-test Bainbridge flow checklist
-│   │                                 # with gate structure
-│   └── production-diff-summary.md    # v7 → v8 change analysis
-│
-├── .gitignore                        # Excludes archive/*.js, secrets, .env
-├── CLAUDE.md                         # Context for AI-assisted development
-└── README.md
+src/                          ← working copy — paste each file into Apps Script
+  Config.js                   ← PROPS, CONFIG, CALENDAR_CONFIGS
+  CalendarSync.js             ← syncCalendarBookings() — Engine 1
+  Leases.js                   ← sendLeaseToNewBookings() — Engine 2 (catch-up)
+  Approval.js                 ← checkRentalEligibility() — Engine 2b
+  Reminders.js                ← processReminders() — Engine 3
+  Notifications.js            ← sendSms(), sendEmailHtml(), alertAdmin()
+  DocuSeal.js                 ← sendLeaseViaDocuSeal()
+  Webhooks.js                 ← doPost(), doGet(), markDepositPaid(), markLeaseSigned()
+  Forms.js                    ← buildIntakeUrl(), buildInspectUrl()
+  Helpers.js                  ← getSheet(), extraction helpers, formatters,
+                                 getDepositAmount(), getStripePaymentUrl()
+  Setup.js                    ← setupTriggers(), setupSheetSchema()
+  SandboxTests.js             ← manual test functions — never wire to triggers
+
+archive/
+  v7-original.js              ← unmodified v7 source — never edit
+
+docs/
+  setup-notes.md              ← Script Properties reference, sheet schema,
+                                 trigger setup, Pipedream workflow config
+  testing-plan.md             ← step-by-step flow test checklist
+  sandbox-plan.md             ← sandbox environment setup notes
+  architecture-proposal.md    ← historical design notes
+  production-diff-summary.md  ← v7 → v8 change analysis
+
+CLAUDE.md                     ← context for AI-assisted development
+README.md                     ← this file
 ```
 
-**Source file conventions**
-
-All eleven `src/*.js` files are deployed into a single Google Apps Script project where they share one global scope — no import or export statements, no module system. Functions defined in one file call functions defined in another freely. `Config.js` is the only file with executable top-level code (`const PROPS` and `const CONFIG`). All other files contain only function declarations, which are not evaluated until called. Load order between files is therefore irrelevant.
-
-**Archive policy**
-
-`archive/` is listed in `.gitignore`. Production source snapshots are stored locally for diff reference and rollback but are not committed to version history. `archive/v7-original.js` predates this policy and remains tracked.
+**All 12 `src/*.js` files share one global scope** when deployed to Apps Script. There is no module system, no imports, no exports. Functions in one file call functions in another freely. Load order between files is irrelevant — no file has top-level code that depends on another file's declarations at parse time. `PROPS`, `CONFIG`, and `CALENDAR_CONFIGS` are declared in `Config.js` and referenced inside function bodies elsewhere.
 
 ---
 
-## Security Model
+## External Integrations
 
-### Web app access: "Anyone" with a shared secret
+### Google Calendar
 
-The Apps Script web app must be deployed with **Who has access: Anyone** because Pipedream's outbound IP ranges are not fixed and cannot be allowlisted at the Apps Script layer. This setting means any HTTP client can reach `doPost`. It does not mean any request is trusted.
+Customer bookings arrive via Google Booking as Calendar events. `syncCalendarBookings` polls each calendar in `CALENDAR_CONFIGS` every 5 minutes. Customer name, email, phone, and second driver email are extracted from the HTML event description using regex helpers in `Helpers.js`.
 
-Trust is established by a shared secret. Every POST body must contain a `secret` field that matches `WEBHOOK_SHARED_SECRET` in Script Properties:
+**Config keys:** `CALENDAR_ID_BAINBRIDGE_CARGO_VAN`, `CALENDAR_ID_POULSBO_MOVING_TRUCK`, `CALENDAR_ID_PORT_ORCHARD_MOVING_TRUCK`, `CALENDAR_ID_FAIRGROUNDS_MOVING_TRUCK`
+
+### Google Sheets
+
+The Bookings tab is the system of record. One row per booking, columns A–S. State flags in columns G–N drive all idempotency. `getSheet()` in `Helpers.js` reads `SHEET_ID` from Script Properties and opens the spreadsheet by ID. The sheet tab must be named `Bookings` exactly.
+
+**Config key:** `SHEET_ID`
+
+### Google Forms
+
+Two Google Forms receive pre-filled URLs generated by the script:
+- **Intake form** — sent in the welcome message with name, email, phone, and rental date pre-filled
+- **Inspection form** — sent in the 24-hour reminder (pre-trip) and the post-rental prompt (post-trip) with name, email, date, and inspection type pre-filled
+
+Form base URLs and entry IDs are stored in Script Properties. The inspection type field uses configurable option text stored as `INSPECT_VAL_PRE` and `INSPECT_VAL_POST`.
+
+**Config keys:** `INTAKE_FORM_BASE`, `INTAKE_ENTRY_NAME`, `INTAKE_ENTRY_EMAIL`, `INTAKE_ENTRY_PHONE`, `INTAKE_ENTRY_DATE`, `INSPECT_FORM_BASE`, `INSPECT_ENTRY_NAME`, `INSPECT_ENTRY_EMAIL`, `INSPECT_ENTRY_DATE`, `INSPECT_ENTRY_TYPE`, `INSPECT_VAL_PRE`, `INSPECT_VAL_POST`
+
+### Stripe
+
+Customers pay deposits via public Stripe Payment Links. Per-vehicle URLs are stored in Script Properties and resolved by `getStripePaymentUrl(vehicleType)` in `Helpers.js`. After payment, Stripe sends a webhook event to Pipedream, which forwards it to `doPost`.
+
+**Config keys:** `STRIPE_PAYMENT_URL_CARGO_VAN`, `STRIPE_PAYMENT_URL_MOVING_TRUCK`, `STRIPE_PAYMENT_URL` (fallback for rows with a blank vehicle type)
+
+### DocuSeal
+
+Rental agreements are sent for e-signature via the DocuSeal API. `sendLeaseViaDocuSeal` in `DocuSeal.js` creates a submission with a configured template, sends the signing request to the customer (and second driver if present), and adds the site manager as a co-signer. Role names in the DocuSeal template must match exactly:
+
+- Single driver: `Driver`, `Reliable Storage Manager`
+- Two drivers: `Driver #1`, `Driver #2`, `Reliable Storage Manager`
+
+After all parties sign, DocuSeal sends a webhook to Pipedream, which forwards a `lease_signed` event to `doPost`, which calls `markLeaseSigned`.
+
+**Config keys:** `DOCUSEAL_KEY`, `DOCUSEAL_TEMPLATE_SINGLE`, `DOCUSEAL_TEMPLATE_TWO_DRIVERS`
+
+### SendGrid
+
+All HTML emails go through the SendGrid API (`sendEmailHtml` in `Notifications.js`). The site manager is automatically BCC'd on every customer-facing email. Emails already addressed to the manager or admin are excluded from the BCC to avoid duplicate copies.
+
+**Config keys:** `SENDGRID_KEY`, `FROM_EMAIL`, `REPLY_TO_EMAIL`
+
+### Twilio
+
+SMS messages go through the Twilio REST API (`sendSms` in `Notifications.js`). All messages send from `TWILIO_NUM`, so the manager can see every customer thread in the Twilio App without any separate copy being sent (Twilio also rejects messages where `To` equals `From`).
+
+**Config keys:** `TWILIO_SID`, `TWILIO_TOKEN`, `TWILIO_NUM`
+
+### Pipedream
+
+Pipedream sits between Stripe/DocuSeal and Apps Script. It validates upstream signatures, filters to the relevant event types, extracts the fields Apps Script needs, injects the `WEBHOOK_SHARED_SECRET`, and POSTs a minimal consistent payload to the Apps Script web app endpoint.
+
+**Do not** register the Apps Script URL directly with Stripe or DocuSeal — always route through Pipedream. If a provider changes their event envelope, only the Pipedream workflow needs updating.
+
+**Stripe Pipedream workflow POSTs:**
+```json
+{ "secret": "...", "customerEmail": "...", "amountPaid": "..." }
+```
+
+**DocuSeal Pipedream workflow POSTs:**
+```json
+{ "secret": "...", "type": "lease_signed", "signerEmail": "..." }
+```
+
+---
+
+## Configuration
+
+### How configuration works
+
+`Config.js` loads all Script Properties once at startup into `PROPS`, then binds them into `CONFIG`:
 
 ```javascript
-const expectedSecret = PROPS.WEBHOOK_SHARED_SECRET;
-if (!expectedSecret) {
-  throw new Error('Setup error: WEBHOOK_SHARED_SECRET is not set in Script Properties.');
-}
-if (!data.secret || data.secret !== expectedSecret) {
-  Logger.log('doPost rejected: missing or invalid secret.');
-  return ContentService.createTextOutput(JSON.stringify({ received: false }))
-    .setMimeType(ContentService.MimeType.JSON);
-}
+const PROPS = PropertiesService.getScriptProperties().getProperties();
+
+const CONFIG = {
+  SHEET_NAME: 'Bookings',           // program constant — not a Script Property
+  ADMIN_EMAIL: PROPS.ADMIN_EMAIL,   // from Script Properties
+  // ...
+};
 ```
 
-This check executes before any sheet read, row update, email, SMS, or DocuSeal call. Rejected requests return HTTP 200 with `{ received: false }` — returning a non-200 would cause Pipedream to enter a retry loop on what is a permanent authentication failure.
+**Program constants** (hardcoded in `Config.js`, not Script Properties): `SHEET_NAME`, `FROM_NAME`, `DAYS_AHEAD`, `POST_RENTAL_HOURS`, `HOURS_BETWEEN_APPROVAL_REMINDERS`, `MAX_APPROVAL_REMINDERS`. These are operational parameters that belong in code, not configuration.
 
-The secret is a 64-character hex string (`openssl rand -hex 32`) stored in Apps Script Script Properties and each Pipedream workflow's environment variables. It never appears in source code.
+**Everything else** is a Script Property. No API key, webhook secret, phone number, email address, form URL, or calendar ID belongs in source code. To rotate a credential, update the value in the Apps Script console — no code change, no redeployment.
 
-### Pipedream as trust boundary
+### Complete Script Properties table
 
-Pipedream is responsible for receiving raw webhook payloads from Stripe and DocuSeal, validating upstream signatures, filtering to the relevant event types, normalising the payload, and injecting the shared secret before forwarding to Apps Script.
+See [`docs/setup-notes.md`](docs/setup-notes.md) for the full table with descriptions. Summary by service:
 
-This division of responsibility keeps `doPost` simple and decouples it from provider-specific payload formats. If Stripe or DocuSeal changes their event envelope, only the Pipedream workflow needs updating — no Apps Script redeployment, no new deployment URL to re-register with providers.
-
-`verifyStripeSignature` and `computeHmacSha256` are present in `Webhooks.js` but are not currently called from `doPost`. They are retained as forward-looking infrastructure for secondary verification if the threat model changes.
-
-### Credentials in Script Properties
-
-No API key, webhook secret, calendar ID, or form URL appears in source code. Every value of that kind is loaded at runtime from Script Properties. Rotating a credential requires one update in the Apps Script console — no code change, no redeployment.
-
-The two hardcoded values (`TWILIO_NUM` and `MANAGER_PHONE`) are structural constants, not rotatable secrets. They are documented explicitly in the codebase as intentional.
-
-`archive/*.js` is listed in `.gitignore`. Production source snapshots received from the operator are excluded from version history.
-
-### Column O: manager-controlled approval gate
-
-Column O (`Rental Approved`) is never written by the script. It accepts exactly three values enforced by Google Sheets data-validation: `Approved - Free`, `Approved - Paid`, `Denied`. Only the site manager sets this value manually. The script's role is to request the decision and wait for it. Writing any script-controlled value to column O — as an earlier version did — caused the five-minute trigger to re-evaluate the row on every run and re-send the approval request email indefinitely.
-
-### Idempotent flag writes
-
-Sentinel flags for each message type are written and flushed to the spreadsheet before the outbound API call:
-
-```javascript
-// *** WRITE FLAG FIRST — before anything can throw ***
-sheet.getRange(i + 1, 11).setValue('Yes');
-SpreadsheetApp.flush();
-// External calls happen after this point
-```
-
-A concurrent trigger invocation reading the row after the flush sees the flag as set and skips the row. A failed API call after the write leaves the flag set with the message undelivered — this is the accepted tradeoff, as a missed reminder is recoverable and a repeated reminder storm is not.
-
-### Known limitation: cross-site webhook routing
-
-`doPost` currently identifies which site a payment or signing event belongs to by searching all sites' sheets for a row whose email matches the incoming address. If the same customer email appears at two sites simultaneously with an unpaid deposit, the payment could be credited to the wrong row. This is accepted as a Milestone 1 constraint. The matched site ID is logged on every `doPost` call.
-
-**Planned v9 fix:** Pipedream workflows will append `siteId` and `eventId` to the outbound payload. `doPost` will route directly without any cross-sheet search. No structural Pipedream change required — only an additional field in each workflow's final POST step.
+| Group | Properties |
+|---|---|
+| Identity | `SHEET_ID`, `ADMIN_EMAIL`, `MANAGER_EMAIL`, `MANAGER_PHONE` |
+| Google Calendar | `CALENDAR_ID_BAINBRIDGE_CARGO_VAN`, `CALENDAR_ID_POULSBO_MOVING_TRUCK`, `CALENDAR_ID_PORT_ORCHARD_MOVING_TRUCK`, `CALENDAR_ID_FAIRGROUNDS_MOVING_TRUCK` |
+| Stripe | `STRIPE_PAYMENT_URL_CARGO_VAN`, `STRIPE_PAYMENT_URL_MOVING_TRUCK`, `STRIPE_PAYMENT_URL` |
+| Deposit amounts | `DEPOSIT_AMOUNT_CARGO_VAN`, `DEPOSIT_AMOUNT_MOVING_TRUCK`, `DEPOSIT_AMOUNT` |
+| Twilio | `TWILIO_SID`, `TWILIO_TOKEN`, `TWILIO_NUM` |
+| SendGrid | `SENDGRID_KEY`, `FROM_EMAIL`, `REPLY_TO_EMAIL` |
+| DocuSeal | `DOCUSEAL_KEY`, `DOCUSEAL_TEMPLATE_SINGLE`, `DOCUSEAL_TEMPLATE_TWO_DRIVERS` |
+| Intake Form | `INTAKE_FORM_BASE`, `INTAKE_ENTRY_NAME`, `INTAKE_ENTRY_EMAIL`, `INTAKE_ENTRY_PHONE`, `INTAKE_ENTRY_DATE` |
+| Inspection Form | `INSPECT_FORM_BASE`, `INSPECT_ENTRY_NAME`, `INSPECT_ENTRY_EMAIL`, `INSPECT_ENTRY_DATE`, `INSPECT_ENTRY_TYPE`, `INSPECT_VAL_PRE`, `INSPECT_VAL_POST` |
+| Webhooks | `WEBHOOK_SHARED_SECRET` |
 
 ---
 
-## Production Challenges Solved
+## Sandbox Setup
 
-### 1. Approval reminder storm
+A sandbox uses a separate Google Spreadsheet and Google Calendar, with a separate Apps Script project pointing at them.
 
-**Problem:** The site manager received one approval request email every five minutes for every pending rental, indefinitely.
+**Minimum Script Properties for sandbox testing:**
 
-**Root cause:** The script wrote `Pending` to column O when the first approval request was sent. The five-minute trigger read `Pending` on its next run, did not recognise it as a terminal state, and sent another email. Column O was simultaneously the manager's decision field and the script's state-tracking field — two uses the column was never designed to support at the same time.
+- `SHEET_ID` — sandbox spreadsheet ID
+- At least one `CALENDAR_ID_*` — a test calendar you control, shared with the script account
+- `MANAGER_EMAIL`, `ADMIN_EMAIL` — your own addresses for test notifications
+- `MANAGER_PHONE` — a real number you can receive SMS on (omit or leave blank to skip manager SMS)
+- `TWILIO_SID`, `TWILIO_TOKEN`, `TWILIO_NUM` — Twilio credentials (test or live)
+- `SENDGRID_KEY`, `FROM_EMAIL`, `REPLY_TO_EMAIL` — SendGrid credentials
+- `DOCUSEAL_KEY`, `DOCUSEAL_TEMPLATE_SINGLE`, `DOCUSEAL_TEMPLATE_TWO_DRIVERS` — DocuSeal credentials
+- `STRIPE_PAYMENT_URL_CARGO_VAN` or `_MOVING_TRUCK` — any URL; deposit links are not validated
+- `DEPOSIT_AMOUNT_CARGO_VAN` or `_MOVING_TRUCK` — e.g. `50`
+- All `INTAKE_*` and `INSPECT_*` properties — required for URL generation in welcome and reminder messages
+- `WEBHOOK_SHARED_SECRET` — generate with `openssl rand -hex 32`
 
-**Solution:** Column O became strictly manager-only. Notification state moved to columns P (last notification timestamp) and Q (reminder count), driving a four-branch state machine: initial request → timed reminders → admin escalation → permanent silence. P and Q are only written on successful send, so failed API calls automatically retry on the next trigger run.
+Properties for inactive sites are safely skipped. You only need to set properties for the calendars you're testing.
 
-**Tradeoffs:** The escalation to `ADMIN_EMAIL` and permanent-skip behaviour means a booking that is never decided disappears from the reminder queue. This is intentional — the escalation transfers responsibility from the script to a human.
-
----
-
-### 2. Duplicate message delivery
-
-**Problem:** Customers and managers intermittently received the same email or SMS twice — deposit confirmations, 24-hour reminders, post-rental prompts.
-
-**Root cause:** Apps Script time-based triggers are not exclusive. When a trigger's execution time approaches the scheduling interval, a second invocation starts before the first finishes. Both read the same row state, both conclude the message has not been sent, and both dispatch. A secondary cause: an API call that succeeded before a script timeout left no flag written, so the next run resent the message.
-
-**Solution:** Write the sentinel flag and call `SpreadsheetApp.flush()` before any external API call. A concurrent trigger invocation reading the row after the flush sees the flag as set and skips. The write ordering ensures the flag is committed to the spreadsheet before any outbound action is attempted.
-
-**Tradeoffs:** A failed API call after the flag write leaves the flag set with the message undelivered. This is the accepted failure mode: a missed notification is a recoverable customer service problem; a notification storm is not.
+For webhook testing (deposit and lease signing events), use the curl commands in [`docs/setup-notes.md`](docs/setup-notes.md).
 
 ---
 
-### 3. Silent date parsing failures
+## Deployment
 
-**Problem:** Calendar sync failed intermittently with `Invalid argument: date. Should be of type: Date`. The error named no value, no variable, and no event. Debugging required manually correlating execution timestamps with the booking calendar.
-
-**Root cause:** `Utilities.formatDate()` throws this error when its first argument is not a native `Date` object. Under certain conditions, `event.getStartTime()` returned a value that failed an `instanceof Date` check inside the Apps Script runtime. The platform error message is a generic type guard with no diagnostic information.
-
-**Solution:** A `toDate(value, label)` helper wraps every call to `Utilities.formatDate`. If the value is not a valid Date, it attempts coercion via `new Date(value)`. If that also fails, it throws an error naming the label (which formatter was called), the JSON-serialised bad value, and its JavaScript type:
-
-```javascript
-function toDate(value, label) {
-  if (value instanceof Date && !isNaN(value.getTime())) return value;
-  const d = new Date(value);
-  if (isNaN(d.getTime())) {
-    throw new Error('Expected a Date for ' + (label || 'value') +
-      ' but got ' + JSON.stringify(value) + ' (type ' + typeof value + ')');
-  }
-  return d;
-}
-```
-
-**Tradeoffs:** The coercion path accepts strings in formats JavaScript's `Date` constructor recognises, but its behaviour is locale- and runtime-dependent. The helper makes failures visible and locatable; it does not eliminate the upstream ambiguity in how Calendar API returns start times.
-
----
-
-### 4. Manager email visibility
-
-**Problem:** The site manager had no visibility into what customers were receiving. When a customer called with a question, the manager had to ask them to read the email back.
-
-**First approach considered:** Send a separate copy to the manager after each customer send. Rejected because the manager already receives direct emails from the script (approval requests, booking notifications), and adding a parallel copy thread would create redundant noise and would not extend to SMS — Twilio rejects a message where `To` equals `From`.
-
-**Solution:** Add the manager as a BCC recipient in SendGrid's `personalizations` block inside `sendEmailHtml`. The guard excludes emails already addressed to the manager or admin, preventing duplicate copies on notifications she is already the primary recipient of:
-
-```javascript
-const personalization = { to: [{ email: toEmail }] };
-if (CONFIG.MANAGER_EMAIL &&
-    toEmail !== CONFIG.MANAGER_EMAIL &&
-    toEmail !== CONFIG.ADMIN_EMAIL) {
-  personalization.bcc = [{ email: CONFIG.MANAGER_EMAIL }];
-}
-```
-
-Centralising this in `sendEmailHtml` means all future customer-facing emails — including those added during multi-site expansion — automatically include the BCC.
-
-**Tradeoffs:** DocuSeal lease emails are sent by DocuSeal directly and are not routed through `sendEmailHtml`, so they are not BCC'd. The manager receives the DocuSeal signing request as a co-signer on every lease, which preserves visibility through a different mechanism. In the multi-site refactor, the BCC guard must compare against `site.managerEmail`, not a global value — this is the highest-risk substitution in the entire refactor.
-
----
-
-### 5. Webhook endpoint trust
-
-**Problem:** The Apps Script web app endpoint was reachable by any HTTP client. A correctly formatted POST body would trigger sheet writes, emails, SMS messages, and DocuSeal submissions with no authentication.
-
-**Root cause:** The "Anyone" access setting is required for Pipedream to reach the endpoint; there is no IP allowlist mechanism at the Apps Script layer. The original design relied implicitly on the obscurity of the deployment URL.
-
-**Solution:** A shared secret is injected into every Pipedream POST body. `doPost` validates it as the first action before reading any sheet data. Rejected requests return HTTP 200 with `{ received: false }` to prevent Pipedream from entering a retry loop on a permanent authentication failure.
-
-**Tradeoffs:** The string comparison uses `!==`, which is not timing-safe. A constant-time comparison equivalent is not available in the Apps Script runtime. For this threat model — a shared secret over a high-latency HTTP endpoint — timing attacks are not a realistic concern. If that assessment changes, the check should move into Pipedream, which has access to Node.js crypto primitives.
-
----
-
-### 6. Apps Script execution budget
-
-**Problem:** Apps Script enforces a six-minute execution limit per trigger invocation. A multi-site design that used `SITES.forEach(site => fn(site))` inside a single trigger function would scale linearly with the number of sites. An API timeout at one site would eat into the budget for all subsequent sites.
-
-**Root cause:** Trigger functions in Apps Script cannot accept arguments, which makes parameterisation impossible without a wrapper. The natural instinct — iterate over all sites inside one trigger — is bounded by the six-minute ceiling.
-
-**Solution:** Each site gets its own named wrapper functions registered as independent triggers:
-
-```javascript
-function syncCalendarBookings_Bainbridge() {
-  syncCalendarBookingsForSite(getSiteById('bainbridge'));
-}
-```
-
-Each wrapper runs in its own execution context with its own six-minute budget. A slow external API response at one site cannot delay or terminate processing at another.
-
-**Tradeoffs:** Apps Script allows a maximum of 20 triggers per project. At four triggers per site, this supports up to five sites before hitting the platform quota. Beyond five, the trigger strategy would need to change — potentially to a dispatcher model that reads a queue rather than invoking per-site functions directly.
-
----
-
-### 7. Pipedream as the normalisation layer
-
-**Problem:** Stripe and DocuSeal each send webhook payloads in different formats. Stripe wraps payment events in a nested envelope; DocuSeal sends one event per signer per submission, including intermediate states (viewed, partially signed, manager signed) that must be filtered before the relevant completion event is processed.
-
-**Root cause of the original approach:** Handling raw payload parsing in `doPost` would require the function to implement Stripe's HMAC-SHA256 signature verification, parse two distinct payload schemas, and filter DocuSeal events by completion status and signer role. It would also mean that any change to a provider's event envelope required an Apps Script redeployment — which generates a new deployment URL that must be re-registered with each provider.
-
-**Solution:** Pipedream was introduced as the normalisation layer. Each provider has its own workflow that receives the raw payload, validates the upstream signature, filters to the relevant event, extracts the fields Apps Script needs, injects the shared secret, and forwards a minimal consistent payload. Apps Script receives only two shapes regardless of how many upstream providers are involved.
-
-Adding a new payment or signature provider requires a new Pipedream workflow pointed at the existing Apps Script endpoint — no Apps Script changes, no redeployment, no new URL to register.
-
-**Tradeoffs:** Pipedream is now in the critical path for payment and signing events. An outage means those events do not reach Apps Script until Pipedream recovers. This dependency is treated the same as depending on Twilio or SendGrid — as external infrastructure with its own SLA, not something this codebase controls. `verifyStripeSignature` and `computeHmacSha256` are retained in the codebase as a forward path for secondary verification in Apps Script if the dependency model changes.
-
----
-
-## Future Roadmap
-
-**v9 — Pipedream payload metadata**
-Add `siteId` and `eventId` to each Pipedream workflow's outbound POST body. `doPost` routes directly to the correct site's sheet without any cross-sheet email search. No structural Pipedream workflow change required — only an additional field in each workflow's final step.
-
-**Multi-site production cutover**
-Add a second site to the `SITES` array, register its per-site trigger wrapper functions in `setupTriggers()`, provision Script Properties with the site's prefix, and create its sheet tab. The first cutover target is Poulsbo.
-
-**Google Form Site dropdown**
-Andrew adds a Site dropdown to the shared intake and inspection forms. The entry IDs for that dropdown are added to `GLOBAL` as `INTAKE_ENTRY_SITE` and `INSPECT_ENTRY_SITE`. `buildIntakeUrl` and `buildInspectUrl` are updated to append `&entry.<entry-id>=<site.label>` to pre-select the location. `site.label` must match the dropdown option text exactly.
-
-**Startup validation**
-A validation pass at the top of each trigger function that logs any `SITES` entry property resolving to `undefined` before any engine logic runs. Catches misconfigured Script Properties before they produce silent runtime failures.
-
-**Stale-row pruning**
-Skip rows whose rental end time is more than 90 days in the past in all trigger functions. Prevents execution time from growing unboundedly as booking history accumulates. Required before multi-site deployment adds concurrent per-site trigger load.
-
-**`clasp` CI integration**
-Automate deployment of all `src/*.js` files to the Apps Script project from a git push using the official `clasp` CLI, replacing the current manual copy-paste workflow.
-
----
-
-## Deployment Notes
-
-Full deployment instructions are in [`docs/setup-notes.md`](docs/setup-notes.md). This is a summary.
-
-### Prerequisites
-
-- Google Workspace account with access to the Reliable Storage Google Sheet and Google Calendar
-- Apps Script project bound to the Google Sheet
-- Pipedream account with the two active workflows (Stripe, DocuSeal) configured
-- All Script Properties set (see `docs/setup-notes.md` for the full table)
-- `WEBHOOK_SHARED_SECRET` generated (`openssl rand -hex 32`) and set in both Apps Script Script Properties and each Pipedream workflow
-
-### Steps
+Full instructions are in [`docs/setup-notes.md`](docs/setup-notes.md). Summary:
 
 1. Open the Google Sheet → **Extensions → Apps Script**
-2. For each file in `src/`, create a matching script file in the Apps Script editor and paste its contents — all 12 files must be present
+2. Create one script file per `src/*.js` file and paste its contents — all 12 files must be present
 3. Set all Script Properties under **Project Settings → Script Properties**
-4. Run `setupTriggers()` once from the editor toolbar — this registers all time-based triggers
+4. Run `setupTriggers()` once from the editor toolbar — registers all 4 triggers and calls `setupSheetSchema()` to add column headers and dropdown validation
 5. Deploy as a Web App: **Deploy → New deployment → Web app**; set *Execute as: Me*, *Who has access: Anyone*
-6. Copy the deployment URL and set it as the destination in each Pipedream workflow's final POST step
-7. Send a controlled test POST with the correct shared secret to verify `doPost` routes correctly before going live
+6. Copy the deployment URL into each Pipedream workflow's final POST step
 
-### Re-deployment note
+**Re-deployment note:** Apps Script generates a new deployment URL only when you create a new *versioned* deployment. Editing and saving source files without creating a new version preserves the existing URL. If you do create a new version, update the URL in both Pipedream workflows.
 
-Apps Script generates a new deployment URL on each new *versioned* deployment. If you create a new version, update the URL in both Pipedream workflows. Editing script files and saving without creating a new deployment version does not change the URL.
+---
 
-See [`docs/setup-notes.md`](docs/setup-notes.md) for the complete Script Properties table, Pipedream workflow configuration, webhook secret rotation procedure, and the full test checklist.
+## Testing
+
+Manual test functions live in `src/SandboxTests.js`. Run them from the Apps Script editor — select the function name in the dropdown and click Run. Never wire these to triggers.
+
+| Function | What it tests |
+|---|---|
+| `testSheetConnection()` | SHEET_ID is set, Bookings tab is accessible |
+| `testCalendarConfigs()` | Every CALENDAR_CONFIGS entry connects to a real calendar |
+| `listAccessibleCalendars()` | Lists all calendars visible to the script account |
+| `testBuildIntakeUrl()` | Intake URL generation (requires a "Test Customer" row in the sheet) |
+| `testVehicleTypeAndLocationMapping()` | CALENDAR_CONFIGS entries match expected metadata |
+| `testMissingCalendarConfig()` | Missing/invalid calendar IDs are handled gracefully |
+| `testSyncCalendarBookingsNoNotifications()` | Full calendar sync without sending any notifications |
+| `testStripePaymentUrls()` | Every vehicle type resolves to a non-empty Stripe payment URL |
+| `testDepositAmounts()` | Every vehicle type resolves to a correct deposit amount |
+
+For a full end-to-end flow test (calendar event → sheet row → deposit webhook → lease → reminder → post-rental), follow the checklist in [`docs/testing-plan.md`](docs/testing-plan.md).
+
+---
+
+## Adding a New Location
+
+Adding a location that uses an existing vehicle type requires only configuration changes — no logic changes.
+
+**Steps:**
+
+1. **Share the calendar** with the Google account that owns the Apps Script project (Calendar Settings → Share with specific people)
+
+2. **Add an entry to `CALENDAR_CONFIGS`** in `src/Config.js`:
+   ```javascript
+   {
+     propKey:     'CALENDAR_ID_NEWTOWN_CARGO_VAN',
+     calendarId:  PROPS.CALENDAR_ID_NEWTOWN_CARGO_VAN,
+     location:    'Newtown',
+     vehicleType: 'Cargo Van',
+   },
+   ```
+
+3. **Set the Script Property** in Apps Script → Project Settings → Script Properties:
+   - Key: `CALENDAR_ID_NEWTOWN_CARGO_VAN`
+   - Value: the Google Calendar ID (found in Google Calendar → Settings → Integrate calendar → Calendar ID)
+
+4. **Re-run `setupSheetSchema()`** (or `setupTriggers()`) to update the Location dropdown in column S
+
+The next `syncCalendarBookings` run picks up events from the new calendar automatically. No engine code changes.
+
+---
+
+## Adding a New Vehicle Type
+
+Adding a vehicle type that does not already exist requires changes in three source files.
+
+**Steps:**
+
+1. **Add an entry to `CALENDAR_CONFIGS`** in `src/Config.js` (same structure as adding a location, with the new `vehicleType` string)
+
+2. **Add the vehicle type to the lookup tables** in `src/Helpers.js`:
+   ```javascript
+   function getDepositAmount(vehicleType) {
+     const amounts = {
+       'Cargo Van':    CONFIG.DEPOSIT_AMOUNT_CARGO_VAN,
+       'Moving Truck': CONFIG.DEPOSIT_AMOUNT_MOVING_TRUCK,
+       'Box Truck':    CONFIG.DEPOSIT_AMOUNT_BOX_TRUCK,    // ← add
+     };
+     ...
+   }
+
+   function getStripePaymentUrl(vehicleType) {
+     const urls = {
+       'Cargo Van':    CONFIG.STRIPE_PAYMENT_URL_CARGO_VAN,
+       'Moving Truck': CONFIG.STRIPE_PAYMENT_URL_MOVING_TRUCK,
+       'Box Truck':    CONFIG.STRIPE_PAYMENT_URL_BOX_TRUCK, // ← add
+     };
+     ...
+   }
+   ```
+
+3. **Add the corresponding CONFIG entries** in `src/Config.js`:
+   ```javascript
+   DEPOSIT_AMOUNT_BOX_TRUCK:    PROPS.DEPOSIT_AMOUNT_BOX_TRUCK    || '75',
+   STRIPE_PAYMENT_URL_BOX_TRUCK: PROPS.STRIPE_PAYMENT_URL_BOX_TRUCK,
+   ```
+
+4. **Set the new Script Properties** in the Apps Script console:
+   - `DEPOSIT_AMOUNT_BOX_TRUCK`
+   - `STRIPE_PAYMENT_URL_BOX_TRUCK`
+   - `CALENDAR_ID_<LOCATION>_BOX_TRUCK` (one per location using this vehicle type)
+
+5. **Re-run `setupSheetSchema()`** to update the Vehicle Type dropdown in column R
+
+---
+
+## Development Workflow
+
+This project runs entirely inside Google Apps Script. There is no local execution environment — code must be deployed to Apps Script to run.
+
+**Editing source files:**
+
+Edit files in `src/` using your preferred editor. To deploy changes, paste the updated file's contents into the matching script file in the Apps Script editor and save. Or use [clasp](https://github.com/google/clasp) to push all `src/*.js` files at once.
+
+Changes to trigger-path functions (anything called by `syncCalendarBookings`, `checkRentalEligibility`, `sendLeaseToNewBookings`, or `processReminders`) take effect immediately after saving in the editor — no new deployment needed.
+
+Changes to `doPost` (the webhook path) require a new versioned deployment to take effect.
+
+**Testing a change:**
+
+1. Deploy the changed file(s) to Apps Script
+2. Run the relevant test function from `SandboxTests.js` in the editor
+3. For workflow changes, add a test row to the sandbox sheet and run the engine function manually (e.g. select `syncCalendarBookings` and click Run)
+
+**Viewing logs:**
+
+Apps Script Editor → **Executions** (left sidebar). Each trigger run and manual execution has an entry with its `Logger.log()` output.
+
+---
+
+## Troubleshooting
+
+### No new rows are being added from a calendar
+
+1. Run `testCalendarConfigs()` — confirms each calendar Script Property is set and the calendar is accessible from the script account
+2. Run `listAccessibleCalendars()` — confirms the target calendar is visible to the script account; if it doesn't appear, the calendar needs to be shared with the account
+3. Check the Executions log for `syncCalendarBookings` — look for `skipping` (unset property) or `calendar not found` log lines
+
+### A customer received a duplicate message
+
+The flag-before-send pattern prevents most duplicates. Duplicates can happen if a flag column was manually cleared in the sheet, or if two trigger invocations started within the same flush window. Check the Executions log for two `syncCalendarBookings` or `processReminders` runs overlapping by a few seconds.
+
+### A webhook POST arrived but nothing happened
+
+1. Check the Executions log for `doPost` — look for `doPost rejected: missing or invalid secret`
+2. Verify `WEBHOOK_SHARED_SECRET` is set and matches the value in each Pipedream workflow's POST step
+3. Verify the Pipedream workflow is posting to the current Apps Script web app deployment URL (not a stale URL from a previous deployment)
+
+### Approval reminders are not sending
+
+1. Confirm column I (Intake Sent) = `Yes` for the row — `checkRentalEligibility` skips rows where intake has not been sent
+2. Confirm column O (Rental Approved) is blank — rows with any of the three decision values are skipped
+3. Check column Q (Approval Reminder Count) — if it is > `MAX_APPROVAL_REMINDERS` (3), the row has been permanently silenced after escalation to admin
+
+### The DocuSeal lease is not sending
+
+1. Confirm `DOCUSEAL_KEY`, `DOCUSEAL_TEMPLATE_SINGLE`, and `DOCUSEAL_TEMPLATE_TWO_DRIVERS` are set correctly
+2. Verify the DocuSeal template role names match exactly: `Driver` / `Reliable Storage Manager` (single driver), `Driver #1` / `Driver #2` / `Reliable Storage Manager` (two drivers)
+3. Check the Executions log for DocuSeal error messages from `sendLeaseViaDocuSeal`
+
+### The 24-hour reminder did not fire
+
+1. Confirm column O (Rental Approved) is `Approved - Free` or `Approved - Paid` — the reminder only fires for approved bookings
+2. Confirm column K (24hr Sent) is blank — a `Yes` value means it already fired
+3. Check the Executions log for `processReminders` runs around 26–24 hours before the booking start time

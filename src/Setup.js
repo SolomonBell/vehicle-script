@@ -33,19 +33,21 @@ function setupSheetSchema() {
   const headerCell = sheet.getRange('R1');
   if (!headerCell.getValue()) headerCell.setValue('Vehicle Type');
 
-  // Column R data validation: Cargo Van / Moving Truck
+  // Column R data validation: derive vehicle types from CALENDAR_CONFIGS (single source of truth)
+  const vehicleTypes = [...new Set(CALENDAR_CONFIGS.map(c => c.vehicleType))];
   const rule = SpreadsheetApp.newDataValidation()
-    .requireValueInList(['Cargo Van', 'Moving Truck'], true)
+    .requireValueInList(vehicleTypes, true)
     .setAllowInvalid(true)   // allow blank (existing rows) and script-written empty strings
     .build();
   sheet.getRange('R2:R').setDataValidation(rule);
 
-  // Column S: Location
+  // Column S: Location — derive from CALENDAR_CONFIGS
   const sHeaderCell = sheet.getRange('S1');
   if (!sHeaderCell.getValue()) sHeaderCell.setValue('Location');
 
+  const locations = [...new Set(CALENDAR_CONFIGS.map(c => c.location))];
   const locationRule = SpreadsheetApp.newDataValidation()
-    .requireValueInList(['Bainbridge', 'Poulsbo', 'Port Orchard', 'Fairgrounds'], true)
+    .requireValueInList(locations, true)
     .setAllowInvalid(true)
     .build();
   sheet.getRange('S2:S').setDataValidation(locationRule);

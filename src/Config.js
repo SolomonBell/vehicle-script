@@ -113,11 +113,10 @@ const CONFIG = {
   HOURS_BETWEEN_APPROVAL_REMINDERS: 12,
   MAX_APPROVAL_REMINDERS: 3,   // 1 initial + 2 follow-ups; 3rd = escalation
 
-  // ---- Bitly (URL shortening) ----------------------------------
-  BITLY_TOKEN: PROPS.BITLY_TOKEN,
-
-  // ---- Deposit amount (customer-facing messages) ---------------
-  DEPOSIT_AMOUNT: PROPS.DEPOSIT_AMOUNT || '50',
+  // ---- Deposit amounts (customer-facing messages) ---------------
+  DEPOSIT_AMOUNT:              PROPS.DEPOSIT_AMOUNT              || '50',
+  DEPOSIT_AMOUNT_CARGO_VAN:    PROPS.DEPOSIT_AMOUNT_CARGO_VAN    || '50',
+  DEPOSIT_AMOUNT_MOVING_TRUCK: PROPS.DEPOSIT_AMOUNT_MOVING_TRUCK || '100',
 };
 
 // Maps each calendar Script Property to its location and vehicle type.

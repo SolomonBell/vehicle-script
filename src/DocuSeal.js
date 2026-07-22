@@ -30,9 +30,9 @@ function sendLeaseViaDocuSeal(name, email, secondEmail, dateStr) {
   // Manager must sign both template types
   if (CONFIG.MANAGER_EMAIL) {
     submitters.push({
-      role:  'Reliable Storage Manager',
+      role:  'Reliable Storage Manager', // must match DocuSeal template role name exactly
       email: CONFIG.MANAGER_EMAIL,
-      name:  'Reliable Storage'
+      name:  CONFIG.FROM_NAME
     });
   }
 
@@ -40,7 +40,7 @@ function sendLeaseViaDocuSeal(name, email, secondEmail, dateStr) {
     template_id: templateId,
     send_email:  true,
     message: {
-      subject: 'Your Reliable Storage Rental Agreement -- ' + dateStr,
+      subject: 'Your ' + CONFIG.FROM_NAME + ' Rental Agreement -- ' + dateStr,
       body:    'Hi ' + name + ', please review and sign your truck rental agreement.\n\nClick here to sign: {{submitter.link}}\n\nThank you!'
     },
     submitters: submitters

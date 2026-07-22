@@ -71,7 +71,7 @@ function syncCalendarBookings() {
         // Welcome SMS
         const welcomeSms =
           'Reliable Storage: Hi ' + firstName + '! Your truck is reserved for ' + dateStr + '. ' +
-          'Step 1 -- pay your $' + CONFIG.DEPOSIT_AMOUNT + ' deposit: ' + stripeUrl + ' ' +
+          'Step 1 -- pay your $' + getDepositAmount(calCfg.vehicleType) + ' deposit: ' + stripeUrl + ' ' +
           'Step 2 -- complete intake form: ' + intakeUrl;
 
         // Welcome HTML email
@@ -79,7 +79,7 @@ function syncCalendarBookings() {
           '<p>Hi ' + name + ',</p>' +
           '<p>Your moving truck is reserved for <strong>' + dateStr + '</strong>.</p>' +
           '<p>Please complete these two steps to confirm your booking:</p>' +
-          '<p><strong>1. Pay your $' + CONFIG.DEPOSIT_AMOUNT + ' deposit:</strong><br>' +
+          '<p><strong>1. Pay your $' + getDepositAmount(calCfg.vehicleType) + ' deposit:</strong><br>' +
           '<a href="' + stripeUrl + '">Click here to pay deposit</a></p>' +
           '<p><strong>2. Complete your intake form</strong> (your info is pre-filled — just verify and submit):<br>' +
           '<a href="' + intakeUrl + '">Click here to complete intake form</a></p>' +

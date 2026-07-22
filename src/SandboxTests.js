@@ -173,7 +173,7 @@ function testMissingCalendarConfig() {
 // ---------------------------------------------------------------------------
 // TEST 7: Calendar sync dry run — no notifications sent
 // Reads every calendar in CALENDAR_CONFIGS and appends new events to the
-// sheet without sending any emails, SMS, Bitly requests, or Stripe links.
+// sheet without sending any emails, SMS messages, or Stripe links.
 // Vehicle Type (col R) and Location (col S) are written from the calendar
 // config, matching the production syncCalendarBookings() behavior exactly.
 // ---------------------------------------------------------------------------
@@ -294,5 +294,53 @@ function testStripePaymentUrls() {
 
   Logger.log(failed === 0
     ? 'All ' + passed + ' Stripe URL checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+}
+
+// ---------------------------------------------------------------------------
+// TEST 9: Deposit amount resolution
+// Verifies each vehicle type returns the correct deposit amount and that
+// unknown/blank vehicle types fall back gracefully.
+// ---------------------------------------------------------------------------
+function testDepositAmounts() {
+  let passed = 0;
+  let failed = 0;
+
+  const EXPECTED = {
+    'Cargo Van':    CONFIG.DEPOSIT_AMOUNT_CARGO_VAN,
+    'Moving Truck': CONFIG.DEPOSIT_AMOUNT_MOVING_TRUCK,
+  };
+
+  // Verify each vehicle type present in CALENDAR_CONFIGS gets the right amount
+  const seenTypes = {};
+  CALENDAR_CONFIGS.forEach(function(calCfg) {
+    if (seenTypes[calCfg.vehicleType]) return;
+    seenTypes[calCfg.vehicleType] = true;
+
+    const amount   = getDepositAmount(calCfg.vehicleType);
+    const expected = EXPECTED[calCfg.vehicleType];
+
+    if (!amount) {
+      Logger.log('FAIL [' + calCfg.vehicleType + ']: getDepositAmount returned empty — check Script Property');
+      failed++;
+    } else if (expected && amount !== expected) {
+      Logger.log('FAIL [' + calCfg.vehicleType + ']: expected "' + expected + '", got "' + amount + '"');
+      failed++;
+    } else {
+      Logger.log('OK [' + calCfg.vehicleType + ']: $' + amount);
+      passed++;
+    }
+  });
+
+  // Unknown vehicle type should fall back, not throw
+  const unknownAmount = getDepositAmount('Unknown Vehicle');
+  Logger.log('Unknown type → fallback amount: ' + (unknownAmount || 'not set (DEPOSIT_AMOUNT is blank)'));
+
+  // Blank vehicle type (old rows with empty column R)
+  const blankAmount = getDepositAmount('');
+  Logger.log('Blank type   → fallback amount: ' + (blankAmount || 'not set (DEPOSIT_AMOUNT is blank)'));
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' deposit amount checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
 }
