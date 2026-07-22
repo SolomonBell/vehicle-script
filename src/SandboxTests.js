@@ -484,3 +484,39 @@ function validateConfig() {
 
   Logger.log('validateConfig: all required numeric Script Properties are set and valid.');
 }
+
+// ============================================================
+// TEST RUNNERS
+// ============================================================
+
+// ---------------------------------------------------------------------------
+// RUNNER: runAllSandboxConfigurationTests
+// Runs configuration-only tests in sequence. Stops and re-throws on first
+// failure. Does not include sync, intake-form, or response-parsing tests.
+// ---------------------------------------------------------------------------
+function runAllSandboxConfigurationTests() {
+  Logger.log('===== Running Sandbox Configuration Tests =====');
+
+  const tests = [
+    validateConfig,
+    testSheetConnection,
+    testCalendarConfigs,
+    testVehicleTypeAndLocationMapping,
+    testStripePaymentUrls,
+    testDepositAmounts,
+    testDocuSealPropertyNames,
+  ];
+
+  try {
+    tests.forEach(function(fn) {
+      Logger.log('Running ' + fn.name + '...');
+      fn();
+    });
+  } catch (e) {
+    Logger.log('Configuration test runner failed.');
+    Logger.log(e.message);
+    throw e;
+  }
+
+  Logger.log('===== All Sandbox Configuration Tests Completed Successfully =====');
+}
