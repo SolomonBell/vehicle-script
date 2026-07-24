@@ -321,14 +321,20 @@ function testLogStripeUrlForExistingBooking() {
     return;
   }
 
-  const eventId     = row[0];
-  const vehicleType = row[17]; // R: Vehicle Type (0-indexed 17)
-  const stripeUrl   = getStripePaymentUrl(vehicleType) +
-                      '?client_reference_id=' + encodeURIComponent(eventId);
+  const eventId           = row[0];
+  const vehicleType       = row[17]; // R: Vehicle Type (0-indexed 17)
+  const clientReferenceId = Utilities.base64EncodeWebSafe(eventId).replace(/=+$/, '');
+  const stripeUrl         = getStripePaymentUrl(vehicleType) +
+                            '?client_reference_id=' + clientReferenceId;
 
-  Logger.log('Event ID:     ' + eventId);
-  Logger.log('Vehicle type: ' + vehicleType);
-  Logger.log('Stripe URL:   ' + stripeUrl);
+  Logger.log('Event ID (original):  ' + eventId);
+  Logger.log('client_reference_id:  ' + clientReferenceId);
+  Logger.log('Stripe URL:           ' + stripeUrl);
+
+  // Round-trip decode check — proves the encoded value restores to the exact original event ID
+  const padded  = clientReferenceId + '==='.slice(0, (4 - clientReferenceId.length % 4) % 4);
+  const decoded = Utilities.newBlob(Utilities.base64DecodeWebSafe(padded)).getDataAsString();
+  Logger.log('Decode check: ' + (decoded === eventId ? 'PASS' : 'FAIL — got "' + decoded + '"'));
 }
 
 // ---------------------------------------------------------------------------

@@ -31,7 +31,18 @@ function doPost(e) {
     // Handle Stripe payment event
     const customerEmail = data.customerEmail;
     const amountPaid    = data.amountPaid;
-    const eventId       = data.eventId || null;
+    const encodedEventId = data.eventId || null;
+
+    let eventId = null;
+    if (encodedEventId) {
+      try {
+        const padded = encodedEventId + '==='.slice(0, (4 - encodedEventId.length % 4) % 4);
+        eventId = Utilities.newBlob(Utilities.base64DecodeWebSafe(padded)).getDataAsString();
+      } catch (e) {
+        Logger.log('doPost: could not decode client_reference_id "' + encodedEventId + '": ' + e);
+      }
+    }
+
     Logger.log('doPost received: ' + customerEmail + ' / $' + amountPaid +
                (eventId ? ' / eventId=' + eventId : ' / no eventId'));
 
