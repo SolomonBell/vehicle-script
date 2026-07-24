@@ -43,7 +43,8 @@ function syncCalendarBookings() {
         const endTime   = event.getEndTime();
         const dateStr   = formatDateTime(startTime);
         const firstName = name.split(' ')[0];
-        const stripeUrl = getStripePaymentUrl(calCfg.vehicleType);
+        const stripeUrl = getStripePaymentUrl(calCfg.vehicleType) +
+                          '?client_reference_id=' + encodeURIComponent(eventId);
         const intakeUrl = buildIntakeUrl(name, email || '', phone || '', startTime);
 
         sheet.appendRow([

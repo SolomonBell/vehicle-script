@@ -445,6 +445,110 @@ function testExtractDocuSealSubmissionId() {
     : passed + ' passed, ' + failed + ' failed.');
 }
 
+// ---------------------------------------------------------------------------
+// TEST 13: Deposit webhook row-lookup logic (no side effects)
+// Simulates the eventId-first, email-fallback matching logic in markDepositPaid
+// without writing to the sheet, sending SMS/email, or calling DocuSeal/Stripe.
+// Requires at least one unpaid booking row (column G ≠ 'Yes') with both an
+// eventId in column A and an email in column C.
+// ---------------------------------------------------------------------------
+function testMarkDepositPaidRowLookup() {
+  const sheet = getSheet();
+  const data  = sheet.getDataRange().getValues();
+
+  // Find the first row with an eventId, a real email, and an unpaid deposit.
+  let testEventId = null;
+  let testEmail   = null;
+  let testRowIdx  = -1;
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] && data[i][2] && data[i][2] !== 'No Email' && data[i][6] !== 'Yes') {
+      testEventId = data[i][0];
+      testEmail   = (data[i][2] || '').toLowerCase().trim();
+      testRowIdx  = i;
+      break;
+    }
+  }
+
+  if (testRowIdx === -1) {
+    Logger.log('SKIP: No unpaid row found with both an eventId (col A) and an email (col C). ' +
+               'Add a test booking row with column G blank to run this test.');
+    return;
+  }
+
+  Logger.log('Test row: index=' + (testRowIdx + 1) +
+             ' | eventId=' + testEventId + ' | email=' + testEmail);
+
+  let passed = 0;
+  let failed = 0;
+
+  // ---- Sub-test A: correct eventId finds the right row (primary lookup) ---
+  (function testPrimaryLookup() {
+    let found = -1;
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === testEventId && data[i][6] !== 'Yes') { found = i; break; }
+    }
+    if (found === testRowIdx) {
+      Logger.log('OK (primary eventId lookup): found correct row ' + (found + 1));
+      passed++;
+    } else {
+      Logger.log('FAIL (primary eventId lookup): expected row ' + (testRowIdx + 1) +
+                 ', got ' + (found === -1 ? 'no match' : 'row ' + (found + 1)));
+      failed++;
+    }
+  })();
+
+  // ---- Sub-test B: wrong eventId misses → email fallback finds the row ----
+  (function testFallback() {
+    const bogusId = 'nonexistent-id@google.com';
+    let foundById = -1;
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === bogusId && data[i][6] !== 'Yes') { foundById = i; break; }
+    }
+    let foundByEmail = -1;
+    for (let i = 1; i < data.length; i++) {
+      if ((data[i][2] || '').toLowerCase().trim() === testEmail && data[i][6] !== 'Yes') {
+        foundByEmail = i; break;
+      }
+    }
+    if (foundById !== -1) {
+      Logger.log('FAIL (fallback): bogus eventId unexpectedly matched a row');
+      failed++;
+    } else if (foundByEmail === testRowIdx) {
+      Logger.log('OK (email fallback): eventId miss → email found correct row ' + (foundByEmail + 1));
+      passed++;
+    } else {
+      Logger.log('FAIL (email fallback): expected row ' + (testRowIdx + 1) +
+                 ', got ' + (foundByEmail === -1 ? 'no match' : 'row ' + (foundByEmail + 1)));
+      failed++;
+    }
+  })();
+
+  // ---- Sub-test C: null eventId → email-only backward-compatible path -----
+  (function testEmailOnly() {
+    const noEventId = null;
+    let found = -1;
+    if (!noEventId) {
+      for (let i = 1; i < data.length; i++) {
+        if ((data[i][2] || '').toLowerCase().trim() === testEmail && data[i][6] !== 'Yes') {
+          found = i; break;
+        }
+      }
+    }
+    if (found === testRowIdx) {
+      Logger.log('OK (email-only path): null eventId → email found correct row ' + (found + 1));
+      passed++;
+    } else {
+      Logger.log('FAIL (email-only path): expected row ' + (testRowIdx + 1) +
+                 ', got ' + (found === -1 ? 'no match' : 'row ' + (found + 1)));
+      failed++;
+    }
+  })();
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' row-lookup checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+}
+
 // ============================================================
 // CONFIGURATION TESTS
 // ============================================================
