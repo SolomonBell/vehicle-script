@@ -57,16 +57,17 @@ function syncCalendarBookings() {
           '',                               // G: Deposit Paid
           '',                               // H: Stripe Amount
           '',                               // I: Intake Sent
-          '',                               // J: Lease Sent
-          '',                               // K: 24hr Sent
-          '',                               // L: Post-Rental Sent
-          secondEmail || 'No Second Email', // M: Second Driver Email
-          '',                               // N: Lease Signed
-          '',                               // O: Rental Approved (manager only)
-          '',                               // P: Approval Notified At
-          '',                               // Q: Approval Reminder Count
-          calCfg.vehicleType,               // R: Vehicle Type
-          calCfg.location,                  // S: Location
+          '',                               // J: DocuSeal Submission ID
+          '',                               // K: Lease Sent
+          '',                               // L: 24hr Sent
+          '',                               // M: Post-Rental Sent
+          secondEmail || 'No Second Email', // N: Second Driver Email
+          '',                               // O: Lease Signed
+          '',                               // P: Rental Approved (manager only)
+          '',                               // Q: Approval Notified At
+          '',                               // R: Approval Reminder Count
+          calCfg.vehicleType,               // S: Vehicle Type
+          calCfg.location,                  // T: Location
         ]);
 
         // Welcome SMS
