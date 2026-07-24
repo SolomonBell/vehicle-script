@@ -67,23 +67,77 @@ function sendLeaseViaDocuSeal(name, email, secondEmail, dateStr) {
   return JSON.parse(resp.getContentText());
 }
 
-// Extracts the submission ID from a DocuSeal API response.
-// The DocuSeal API response shape is not documented in this repo. This function
-// logs top-level response keys (not values) so one live sandbox submission can
-// confirm the exact field path. The most likely field is response.id per REST
-// convention. If the response shape differs, update this function after reviewing
-// the logged keys.
+// Extracts the shared submission ID from a DocuSeal API response.
+// The /submissions endpoint returns an array of submitter objects, one per
+// submitter. Each element carries submission_id (the shared identifier) and
+// id (the per-submitter identifier). This function prefers submission_id /
+// submission.id over the per-submitter id, and returns null if IDs conflict.
 function extractDocuSealSubmissionId(response) {
   if (!response || typeof response !== 'object') {
-    Logger.log('Warning: DocuSeal response is missing or not an object.');
+    Logger.log('extractDocuSealSubmissionId: response is missing or not an object (got ' + typeof response + ')');
     return null;
   }
-  // Log keys only — no values logged here, so no sensitive data is exposed.
-  Logger.log('DocuSeal response top-level keys: ' + Object.keys(response).join(', '));
-  const id = response.id;
-  if (id == null) {
-    Logger.log('Warning: DocuSeal response has no "id" field. Check log for key list to find correct path.');
+
+  const isArray = Array.isArray(response);
+  Logger.log('extractDocuSealSubmissionId: isArray=' + isArray +
+             (isArray ? ', length=' + response.length
+                      : ', keys=[' + Object.keys(response).join(', ') + ']'));
+
+  if (isArray) {
+    response.forEach(function(item, idx) {
+      if (!item || typeof item !== 'object') {
+        Logger.log('  [' + idx + ']: not an object');
+        return;
+      }
+      Logger.log('  [' + idx + '] keys: ' + Object.keys(item).join(', '));
+      Logger.log('  [' + idx + '] id=' + item.id +
+                 ', submission_id=' + item.submission_id +
+                 ', submitter_id=' + item.submitter_id +
+                 ', submission.id=' + (item.submission && item.submission.id != null
+                                       ? item.submission.id : '(none)'));
+    });
+  } else {
+    Logger.log('  id=' + response.id +
+               ', submission_id=' + response.submission_id +
+               ', submitter_id=' + response.submitter_id +
+               ', submission.id=' + (response.submission && response.submission.id != null
+                                     ? response.submission.id : '(none)'));
+  }
+
+  // ---- Single object ----
+  if (!isArray) {
+    if (response.id != null)                                   return response.id;
+    if (response.submission_id != null)                        return response.submission_id;
+    if (response.submission && response.submission.id != null) return response.submission.id;
+    Logger.log('extractDocuSealSubmissionId: no id field found in object response');
     return null;
   }
-  return id;
+
+  // ---- Array of submitter objects ----
+  // Collect the shared submission ID from each element.
+  // submission_id and submission.id are the shared identifier;
+  // item.id is the per-submitter ID and is intentionally not used here.
+  const ids = [];
+  response.forEach(function(item) {
+    if (!item || typeof item !== 'object') return;
+    if (item.submission_id != null) {
+      ids.push(item.submission_id);
+    } else if (item.submission && item.submission.id != null) {
+      ids.push(item.submission.id);
+    }
+  });
+
+  if (ids.length === 0) {
+    Logger.log('extractDocuSealSubmissionId: no submission_id found in any array element');
+    return null;
+  }
+
+  const unique = ids.filter(function(id, i, arr) { return arr.indexOf(id) === i; });
+  if (unique.length > 1) {
+    Logger.log('extractDocuSealSubmissionId: WARNING — conflicting submission IDs: ' +
+               unique.join(', ') + ' — returning null');
+    return null;
+  }
+
+  return ids[0];
 }

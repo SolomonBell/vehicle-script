@@ -431,26 +431,24 @@ function testDocuSealPropertyNames() {
 // ---------------------------------------------------------------------------
 // TEST 12: extractDocuSealSubmissionId response parsing
 // Uses mocked response objects to verify extraction logic without a live call.
-//
-// NOTE: Run one live sandbox DocuSeal submission after deploying to confirm
-// that response.id is the correct field. The helper logs top-level response
-// keys (not values) on every real call so you can verify the actual shape.
+// Cases 1-4 are retained from before. Cases 5-9 cover the actual live response
+// shape (array of submitter objects) confirmed in sandbox testing.
 // ---------------------------------------------------------------------------
 function testExtractDocuSealSubmissionId() {
   let passed = 0;
   let failed = 0;
 
-  // Case 1: expected happy-path shape — { id: <number>, ... }
+  // Case 1: single object with top-level id
   const id1 = extractDocuSealSubmissionId({ id: 12345, status: 'pending', submitters: [] });
   if (id1 === 12345) {
-    Logger.log('OK (valid response): id = ' + id1);
+    Logger.log('OK (object with id): ' + id1);
     passed++;
   } else {
-    Logger.log('FAIL (valid response): expected 12345, got ' + id1);
+    Logger.log('FAIL (object with id): expected 12345, got ' + id1);
     failed++;
   }
 
-  // Case 2: null response (e.g. caller received nothing)
+  // Case 2: null response
   const id2 = extractDocuSealSubmissionId(null);
   if (id2 === null) {
     Logger.log('OK (null response): returned null');
@@ -460,23 +458,82 @@ function testExtractDocuSealSubmissionId() {
     failed++;
   }
 
-  // Case 3: response object with no id field
+  // Case 3: single object with no id field
   const id3 = extractDocuSealSubmissionId({ status: 'error', message: 'bad request' });
   if (id3 === null) {
-    Logger.log('OK (missing id field): returned null with warning logged');
+    Logger.log('OK (no id field): returned null');
     passed++;
   } else {
-    Logger.log('FAIL (missing id field): expected null, got ' + id3);
+    Logger.log('FAIL (no id field): expected null, got ' + id3);
     failed++;
   }
 
-  // Case 4: non-object type (unexpected response)
+  // Case 4: non-object response
   const id4 = extractDocuSealSubmissionId('unexpected string');
   if (id4 === null) {
     Logger.log('OK (string response): returned null');
     passed++;
   } else {
     Logger.log('FAIL (string response): expected null, got ' + id4);
+    failed++;
+  }
+
+  // Case 5: single object with submission_id (no top-level id)
+  const id5 = extractDocuSealSubmissionId({ submission_id: 99, email: 'a@b.com' });
+  if (id5 === 99) {
+    Logger.log('OK (object with submission_id): ' + id5);
+    passed++;
+  } else {
+    Logger.log('FAIL (object with submission_id): expected 99, got ' + id5);
+    failed++;
+  }
+
+  // Case 6: single object with nested submission.id
+  const id6 = extractDocuSealSubmissionId({ submission: { id: 77 }, email: 'a@b.com' });
+  if (id6 === 77) {
+    Logger.log('OK (object with submission.id): ' + id6);
+    passed++;
+  } else {
+    Logger.log('FAIL (object with submission.id): expected 77, got ' + id6);
+    failed++;
+  }
+
+  // Case 7: array where all entries share the same submission_id (live response shape)
+  const id7 = extractDocuSealSubmissionId([
+    { id: 1, submission_id: 500, role: 'Driver',                   email: 'customer@example.com' },
+    { id: 2, submission_id: 500, role: 'Reliable Storage Manager', email: 'mgr@example.com' },
+  ]);
+  if (id7 === 500) {
+    Logger.log('OK (array with shared submission_id): ' + id7);
+    passed++;
+  } else {
+    Logger.log('FAIL (array with shared submission_id): expected 500, got ' + id7);
+    failed++;
+  }
+
+  // Case 8: array where entries share nested submission.id
+  const id8 = extractDocuSealSubmissionId([
+    { id: 1, submission: { id: 600 }, role: 'Driver' },
+    { id: 2, submission: { id: 600 }, role: 'Reliable Storage Manager' },
+  ]);
+  if (id8 === 600) {
+    Logger.log('OK (array with shared submission.id): ' + id8);
+    passed++;
+  } else {
+    Logger.log('FAIL (array with shared submission.id): expected 600, got ' + id8);
+    failed++;
+  }
+
+  // Case 9: array with conflicting submission IDs — must return null
+  const id9 = extractDocuSealSubmissionId([
+    { id: 1, submission_id: 500 },
+    { id: 2, submission_id: 501 },
+  ]);
+  if (id9 === null) {
+    Logger.log('OK (conflicting submission IDs): returned null with warning logged');
+    passed++;
+  } else {
+    Logger.log('FAIL (conflicting submission IDs): expected null, got ' + id9);
     failed++;
   }
 
