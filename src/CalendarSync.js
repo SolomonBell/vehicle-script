@@ -57,17 +57,16 @@ function syncCalendarBookings() {
           '',                               // G: Deposit Paid
           '',                               // H: Stripe Amount
           '',                               // I: Intake Sent
-          '',                               // J: DocuSeal Submission ID
-          '',                               // K: Lease Sent
-          '',                               // L: 24hr Sent
-          '',                               // M: Post-Rental Sent
-          secondEmail || 'No Second Email', // N: Second Driver Email
-          '',                               // O: Lease Signed
-          '',                               // P: Rental Approved (manager only)
-          '',                               // Q: Approval Notified At
-          '',                               // R: Approval Reminder Count
-          calCfg.vehicleType,               // S: Vehicle Type
-          calCfg.location,                  // T: Location
+          '',                               // J: Lease Sent
+          '',                               // K: 24hr Sent
+          '',                               // L: Post-Rental Sent
+          secondEmail || 'No Second Email', // M: Second Driver Email
+          '',                               // N: Lease Signed
+          '',                               // O: Rental Approved (manager only)
+          '',                               // P: Approval Notified At
+          '',                               // Q: Approval Reminder Count
+          calCfg.vehicleType,               // R: Vehicle Type
+          calCfg.location,                  // S: Location
         ]);
 
         // Welcome SMS
@@ -115,6 +114,7 @@ function syncCalendarBookings() {
         }
 
         const newRow = sheet.getLastRow();
+        sheet.getRange(newRow, 5, 1, 2).setNumberFormat('m/d/yy h:mm AM/PM');
         sheet.getRange(newRow, 9).setValue('Yes'); // I: Intake Sent
 
       } catch(e) {
