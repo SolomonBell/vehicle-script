@@ -21,9 +21,13 @@ function doPost(e) {
 
     // Handle DocuSeal lease signed event
     if (data.type === 'lease_signed') {
-      const signerEmail = data.signerEmail;
-      Logger.log('Lease signed by: ' + signerEmail);
-      if (signerEmail) markLeaseSigned(signerEmail);
+      const submissionId = data.submissionId || null;
+      const signerEmail  = data.signerEmail  || null;
+      const signerRole   = data.signerRole   || null;
+      Logger.log('Lease signed — role: ' + signerRole +
+                 ', email: ' + signerEmail +
+                 (submissionId ? ', submissionId: ' + submissionId : ', no submissionId'));
+      if (signerEmail || submissionId) markLeaseSigned(submissionId, signerEmail);
       return ContentService.createTextOutput(JSON.stringify({ received: true }))
         .setMimeType(ContentService.MimeType.JSON);
     }
@@ -170,19 +174,41 @@ function markDepositPaid(customerEmail, amountPaid, eventId) {
 // ============================================================
 // MARK LEASE SIGNED
 // ============================================================
-function markLeaseSigned(signerEmail) {
+function markLeaseSigned(submissionId, signerEmail) {
   const sheet = getSheet();
   const data  = sheet.getDataRange().getValues();
 
-  for (let i = 1; i < data.length; i++) {
-    const rowEmail    = (data[i][2] || '').toLowerCase().trim();
-    const leaseSigned = data[i][13]; // N: Lease Signed
+  // Primary lookup: match by DocuSeal Submission ID in column T (index 19).
+  // Normalize to string because IDs may arrive as numbers or strings.
+  if (submissionId != null) {
+    const needle = String(submissionId).trim();
+    for (let i = 1; i < data.length; i++) {
+      const rowSubId    = String(data[i][19] || '').trim(); // T: DocuSeal Submission ID
+      const leaseSigned = data[i][13];                      // N: Lease Signed
+      if (rowSubId !== '' && rowSubId === needle && leaseSigned !== 'Yes') {
+        sheet.getRange(i + 1, 14).setValue('Yes');
+        Logger.log('Lease signed (by submissionId ' + submissionId + '): row ' + (i + 1));
+        return;
+      }
+    }
+    Logger.log('markLeaseSigned: no submissionId match for ' + submissionId + ' — trying email fallback');
+  }
 
-    if (rowEmail === signerEmail.toLowerCase().trim() && leaseSigned !== 'Yes') {
+  // Fallback: match by email in column C (index 2).
+  if (!signerEmail) {
+    Logger.log('markLeaseSigned: no submissionId and no signerEmail — cannot match');
+    return;
+  }
+  const emailNeedle = signerEmail.toLowerCase().trim();
+  for (let i = 1; i < data.length; i++) {
+    const rowEmail    = (data[i][2] || '').toLowerCase().trim(); // C: Email
+    const leaseSigned = data[i][13];                             // N: Lease Signed
+    if (rowEmail === emailNeedle && leaseSigned !== 'Yes') {
       sheet.getRange(i + 1, 14).setValue('Yes');
-      Logger.log('Lease signed marked for: ' + signerEmail);
+      Logger.log('Lease signed (by email fallback ' + signerEmail + '): row ' + (i + 1));
       return;
     }
   }
-  Logger.log('No booking found for lease signer: ' + signerEmail);
+  Logger.log('markLeaseSigned: no booking found for submissionId=' + submissionId +
+             ', email=' + signerEmail);
 }

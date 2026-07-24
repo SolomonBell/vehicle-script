@@ -589,6 +589,123 @@ function testMarkDepositPaidRowLookup() {
     : passed + ' passed, ' + failed + ' failed.');
 }
 
+// ---------------------------------------------------------------------------
+// TEST 14: Lease-signed webhook row-lookup logic (no side effects)
+// Simulates the submissionId-first, email-fallback matching logic in
+// markLeaseSigned without writing to the sheet or calling any external API.
+// Requires at least one unsigned booking row (column N ≠ 'Yes') with an email
+// in column C. Sub-test A additionally requires a value in column T.
+// ---------------------------------------------------------------------------
+function testMarkLeaseSignedRowLookup() {
+  const sheet = getSheet();
+  const data  = sheet.getDataRange().getValues();
+
+  // Find the first unsigned row with a real email.
+  let testRowIdx = -1;
+  let testEmail  = null;
+  let testSubId  = null;
+
+  for (let i = 1; i < data.length; i++) {
+    const email  = (data[i][2] || '').toLowerCase().trim();
+    const signed = data[i][13]; // N: Lease Signed
+    if (email && email !== 'no email' && signed !== 'Yes') {
+      testRowIdx = i;
+      testEmail  = email;
+      testSubId  = data[i][19] ? String(data[i][19]).trim() : null; // T: DocuSeal Submission ID
+      break;
+    }
+  }
+
+  if (testRowIdx === -1) {
+    Logger.log('SKIP: No unsigned row found with an email (col C, N ≠ "Yes"). ' +
+               'Add a test booking row to run this test.');
+    return;
+  }
+
+  Logger.log('Test row: index=' + (testRowIdx + 1) +
+             ' | email=' + testEmail +
+             ' | submissionId=' + (testSubId || '(none in col T)'));
+
+  let passed = 0;
+  let failed = 0;
+
+  // ---- Sub-test A: submission ID matches column T (primary lookup) ----------
+  (function testSubmissionIdMatch() {
+    if (!testSubId) {
+      Logger.log('SKIP (submissionId match): column T is blank on test row — ' +
+                 'trigger a live DocuSeal submission first to populate it');
+      return;
+    }
+    let found = -1;
+    for (let i = 1; i < data.length; i++) {
+      const rowSubId = String(data[i][19] || '').trim();
+      const signed   = data[i][13];
+      if (rowSubId !== '' && rowSubId === testSubId && signed !== 'Yes') { found = i; break; }
+    }
+    if (found === testRowIdx) {
+      Logger.log('OK (submissionId match): id="' + testSubId + '" found correct row ' + (found + 1));
+      passed++;
+    } else {
+      Logger.log('FAIL (submissionId match): expected row ' + (testRowIdx + 1) +
+                 ', got ' + (found === -1 ? 'no match' : 'row ' + (found + 1)));
+      failed++;
+    }
+  })();
+
+  // ---- Sub-test B: bogus submission ID misses → email fallback finds row ----
+  (function testBogusSubIdEmailFallback() {
+    const bogusSubId = '000000';
+    let foundById    = -1;
+    for (let i = 1; i < data.length; i++) {
+      const rowSubId = String(data[i][19] || '').trim();
+      const signed   = data[i][13];
+      if (rowSubId !== '' && rowSubId === bogusSubId && signed !== 'Yes') { foundById = i; break; }
+    }
+    let foundByEmail = -1;
+    for (let i = 1; i < data.length; i++) {
+      const rowEmail = (data[i][2] || '').toLowerCase().trim();
+      const signed   = data[i][13];
+      if (rowEmail === testEmail && signed !== 'Yes') { foundByEmail = i; break; }
+    }
+    if (foundById !== -1) {
+      Logger.log('FAIL (bogus subId + email fallback): bogus submissionId unexpectedly matched a row');
+      failed++;
+    } else if (foundByEmail === testRowIdx) {
+      Logger.log('OK (bogus subId + email fallback): subId miss → email found correct row ' + (foundByEmail + 1));
+      passed++;
+    } else {
+      Logger.log('FAIL (bogus subId + email fallback): expected row ' + (testRowIdx + 1) +
+                 ', got ' + (foundByEmail === -1 ? 'no match' : 'row ' + (foundByEmail + 1)));
+      failed++;
+    }
+  })();
+
+  // ---- Sub-test C: null submission ID → email-only path --------------------
+  (function testNullSubIdEmailOnly() {
+    const noSubId = null;
+    let found = -1;
+    if (!noSubId) {
+      for (let i = 1; i < data.length; i++) {
+        const rowEmail = (data[i][2] || '').toLowerCase().trim();
+        const signed   = data[i][13];
+        if (rowEmail === testEmail && signed !== 'Yes') { found = i; break; }
+      }
+    }
+    if (found === testRowIdx) {
+      Logger.log('OK (null subId + email): email found correct row ' + (found + 1));
+      passed++;
+    } else {
+      Logger.log('FAIL (null subId + email): expected row ' + (testRowIdx + 1) +
+                 ', got ' + (found === -1 ? 'no match' : 'row ' + (found + 1)));
+      failed++;
+    }
+  })();
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' lease-signed row-lookup checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+}
+
 // ============================================================
 // CONFIGURATION TESTS
 // ============================================================
