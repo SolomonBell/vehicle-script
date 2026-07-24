@@ -298,6 +298,40 @@ function testStripePaymentUrls() {
 }
 
 // ---------------------------------------------------------------------------
+// TEST 8b: Log Stripe URL for an existing booking row
+// Reads the first row with both an eventId (col A) and a vehicle type (col R),
+// builds the full Stripe URL using the same production logic as
+// syncCalendarBookings, and logs it. No messages sent, no sheet writes.
+// ---------------------------------------------------------------------------
+function testLogStripeUrlForExistingBooking() {
+  const sheet = getSheet();
+  const data  = sheet.getDataRange().getValues();
+
+  let row = null;
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] && data[i][17]) {
+      row = data[i];
+      break;
+    }
+  }
+
+  if (!row) {
+    Logger.log('testLogStripeUrlForExistingBooking: no row found with both an ' +
+               'eventId (col A) and a vehicle type (col R). Add a booking row first.');
+    return;
+  }
+
+  const eventId     = row[0];
+  const vehicleType = row[17]; // R: Vehicle Type (0-indexed 17)
+  const stripeUrl   = getStripePaymentUrl(vehicleType) +
+                      '?client_reference_id=' + encodeURIComponent(eventId);
+
+  Logger.log('Event ID:     ' + eventId);
+  Logger.log('Vehicle type: ' + vehicleType);
+  Logger.log('Stripe URL:   ' + stripeUrl);
+}
+
+// ---------------------------------------------------------------------------
 // TEST 9: Deposit amount resolution
 // Verifies each vehicle type returns the correct deposit amount and that
 // unknown/blank vehicle types fall back gracefully.
