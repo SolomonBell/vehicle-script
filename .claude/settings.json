@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(grep -rn \"CONFIG\\\\.DEPOSIT_AMOUNT\\\\|PROPS\\\\.DEPOSIT_AMOUNT\\\\|\\\\$.*deposit\\\\|deposit.*\\\\$\" src/ --include=\"*.js\" -i)"
+      "Bash(grep -rn \"CONFIG\\\\.DEPOSIT_AMOUNT\\\\|PROPS\\\\.DEPOSIT_AMOUNT\\\\|\\\\$.*deposit\\\\|deposit.*\\\\$\" src/ --include=\"*.js\" -i)",
+      "Bash(clasp push *)"
     ]
   }
 }
