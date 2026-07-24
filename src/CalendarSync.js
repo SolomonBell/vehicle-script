@@ -70,12 +70,11 @@ function syncCalendarBookings() {
           calCfg.location,                  // S: Location
         ]);
 
-        // Welcome SMS
+        // Welcome SMS — keep to one action (deposit link); intake form is in the email
         const welcomeSms =
-          CONFIG.COMPANY_NAME + ': Hi ' + firstName + ', your ' + calCfg.vehicleType + ' reservation at ' +
-          calCfg.location + ' is scheduled for ' + dateStr + '. ' +
-          'Pay the $' + getDepositAmount(calCfg.vehicleType) + ' deposit: ' + stripeUrl + ' ' +
-          'Complete your intake form: ' + intakeUrl;
+          CONFIG.COMPANY_NAME + ': Hi ' + firstName + ', your ' + calCfg.vehicleType +
+          ' at ' + calCfg.location + ' is reserved for ' + dateStr + '. ' +
+          'Pay your $' + getDepositAmount(calCfg.vehicleType) + ' deposit to confirm: ' + stripeUrl;
 
         // Welcome HTML email
         const welcomeEmailHtml =
@@ -87,8 +86,8 @@ function syncCalendarBookings() {
           '<a href="' + stripeUrl + '">Pay deposit</a></p>' +
           '<p><strong>2. Review and submit your pre-filled intake form:</strong><br>' +
           '<a href="' + intakeUrl + '">Complete intake form</a></p>' +
-          '<p>After your deposit is received and the booking is approved, DocuSeal will email ' +
-          'your rental agreement for electronic signature.</p>' +
+          '<p>After your deposit is received and the booking is approved, you\'ll receive ' +
+          'a rental agreement by email for electronic signature.</p>' +
           '<p>Reply to this email or call us if you have any questions.</p>' +
           '<p>Thank you,<br>' + CONFIG.COMPANY_NAME + '</p>';
 

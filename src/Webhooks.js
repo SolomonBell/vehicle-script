@@ -141,9 +141,9 @@ function markDepositPaid(customerEmail, amountPaid, eventId) {
 
       // SMS confirmation
       const customerSms =
-        CONFIG.COMPANY_NAME + ': Your $' + amountPaid + ' deposit is confirmed for your ' +
-        vehicleType + ' rental at ' + location + ' on ' + dateStr + '. ' +
-        'DocuSeal will email your rental agreement for signature. Questions? Call or text us.';
+        CONFIG.COMPANY_NAME + ': Your $' + amountPaid + ' deposit is confirmed — ' +
+        vehicleType + ' at ' + location + ' on ' + dateStr + '. ' +
+        'Check your email for the rental agreement to sign.';
 
       // HTML email confirmation
       const customerEmailHtml =
@@ -151,9 +151,8 @@ function markDepositPaid(customerEmail, amountPaid, eventId) {
         '<p>We received your <strong>$' + amountPaid + ' deposit</strong> for your <strong>' +
         vehicleType + '</strong> rental at our <strong>' + location +
         '</strong> location, scheduled for <strong>' + dateStr + '</strong>.</p>' +
-        '<p>DocuSeal will email your rental agreement separately for electronic signature. ' +
-        'Please review and sign it before pickup.</p>' +
-        '<p>You will receive another reminder before your scheduled pickup.</p>' +
+        '<p>You\'ll receive a rental agreement by email shortly — please sign it before your pickup.</p>' +
+        '<p>We\'ll send a reminder the day before your pickup.</p>' +
         '<p>Reply to this email or call us if you have any questions.</p>' +
         '<p>Thank you,<br>' + CONFIG.COMPANY_NAME + '</p>';
 

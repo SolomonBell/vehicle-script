@@ -73,7 +73,7 @@ function processReminders() {
             if (leaseSigned !== 'Yes') {
               emailHtml +=
                 '<p><strong>Action needed:</strong> Your rental agreement has not been signed. ' +
-                'Please check your email for the DocuSeal agreement and sign it before your pickup.</p>';
+                'Please check your email for your rental agreement and sign it before your pickup.</p>';
             }
             emailHtml +=
               '<p>Reply to this email or call us if you have any questions.</p>' +
@@ -152,14 +152,13 @@ function processReminders() {
           if (CONFIG.MANAGER_EMAIL) {
             try {
               const mgrPostHtml =
-                '<p>The post-trip inspection form has been sent to:</p>' +
-                '<p><strong>Customer:</strong> ' + name + '</p>' +
-                '<p><strong>Rental date:</strong> ' + dateStr + '</p>' +
+                '<p>Post-trip inspection form sent to <strong>' + name + '</strong>.</p>' +
                 '<p><strong>Vehicle:</strong> ' + vehicleType + '</p>' +
                 '<p><strong>Location:</strong> ' + location + '</p>' +
-                '<p><strong>Post-trip inspection form:</strong><br>' +
-                '<a href="' + postUrl + '">Inspection form link</a></p>' +
-                '<p>If the customer has not submitted the form within 24 hours, please follow up directly.</p>';
+                '<p><strong>Rental date:</strong> ' + dateStr + '</p>' +
+                '<p><strong>Email:</strong> ' + email + '</p>' +
+                '<p><strong>Post-trip form:</strong><br><a href="' + postUrl + '">View inspection form</a></p>' +
+                '<p>If the form is not submitted within 24 hours, please follow up directly.</p>';
               sendEmailHtml(CONFIG.MANAGER_EMAIL, 'Post-rental inspection — ' + name + ' — ' + vehicleType, mgrPostHtml);
             } catch(e) { Logger.log('Post-rental manager email failed for ' + name + ': ' + e); }
           }
