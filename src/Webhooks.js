@@ -68,7 +68,7 @@ function doPost(e) {
 }
 
 function doGet() {
-  return ContentService.createTextOutput('Reliable Storage webhook endpoint is live.')
+  return ContentService.createTextOutput(CONFIG.COMPANY_NAME + ' webhook endpoint is live.')
     .setMimeType(ContentService.MimeType.TEXT);
 }
 
@@ -132,6 +132,8 @@ function markDepositPaid(customerEmail, amountPaid, eventId) {
   const startTime   = new Date(data[i][4]);
   const dateStr     = formatDateTime(startTime);
   const leaseSent   = data[i][9];
+  const vehicleType = data[i][17] || '';  // R: Vehicle Type
+  const location    = data[i][18] || '';  // S: Location
 
   if (leaseSent !== 'Yes' && email !== 'No Email') {
     try {
@@ -139,24 +141,27 @@ function markDepositPaid(customerEmail, amountPaid, eventId) {
 
       // SMS confirmation
       const customerSms =
-        'Reliable Storage: Your $' + amountPaid + ' deposit is confirmed for ' + dateStr + '! ' +
-        'Your rental agreement will arrive by email shortly for e-signature. ' +
-        'Questions? Call or text us.';
+        CONFIG.COMPANY_NAME + ': Your $' + amountPaid + ' deposit is confirmed for your ' +
+        vehicleType + ' rental at ' + location + ' on ' + dateStr + '. ' +
+        'DocuSeal will email your rental agreement for signature. Questions? Call or text us.';
 
       // HTML email confirmation
       const customerEmailHtml =
         '<p>Hi ' + name + ',</p>' +
-        '<p>Your <strong>$' + amountPaid + ' deposit</strong> is confirmed for your truck rental on <strong>' + dateStr + '</strong>.</p>' +
-        '<p>Your rental agreement will be emailed to you shortly for e-signature — please watch for it and sign promptly.</p>' +
-        '<p>You will also receive a reminder 24 hours before your pickup with pre-trip inspection instructions.</p>' +
-        '<p>Questions? Reply to this email or call us.</p>' +
-        '<p>— Reliable Storage</p>';
+        '<p>We received your <strong>$' + amountPaid + ' deposit</strong> for your <strong>' +
+        vehicleType + '</strong> rental at our <strong>' + location +
+        '</strong> location, scheduled for <strong>' + dateStr + '</strong>.</p>' +
+        '<p>DocuSeal will email your rental agreement separately for electronic signature. ' +
+        'Please review and sign it before pickup.</p>' +
+        '<p>You will receive another reminder before your scheduled pickup.</p>' +
+        '<p>Reply to this email or call us if you have any questions.</p>' +
+        '<p>Thank you,<br>' + CONFIG.COMPANY_NAME + '</p>';
 
       if (phone !== 'No Phone') sendSms(phone, customerSms);
-      sendEmailHtml(email, 'Deposit confirmed — ' + dateStr, customerEmailHtml);
+      sendEmailHtml(email, 'Deposit confirmed — ' + vehicleType + ' rental on ' + dateStr, customerEmailHtml);
 
       // Send lease via DocuSeal
-      const docuSealResp = sendLeaseViaDocuSeal(name, email, secondEmail, dateStr);
+      const docuSealResp = sendLeaseViaDocuSeal(name, email, secondEmail, dateStr, vehicleType, location);
       const submissionId = extractDocuSealSubmissionId(docuSealResp);
 
       sheet.getRange(i + 1, 10).setValue('Yes'); // J: Lease Sent

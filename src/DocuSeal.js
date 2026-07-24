@@ -1,7 +1,7 @@
 // ============================================================
 // DOCUSEAL -- SEND LEASE FOR E-SIGNATURE
 // ============================================================
-function sendLeaseViaDocuSeal(name, email, secondEmail, dateStr) {
+function sendLeaseViaDocuSeal(name, email, secondEmail, dateStr, vehicleType, location) {
   const hasTwoDrivers = secondEmail &&
                         secondEmail !== 'No Second Email' &&
                         secondEmail !== '';
@@ -40,8 +40,15 @@ function sendLeaseViaDocuSeal(name, email, secondEmail, dateStr) {
     template_id: templateId,
     send_email:  true,
     message: {
-      subject: 'Your ' + CONFIG.FROM_NAME + ' Rental Agreement -- ' + dateStr,
-      body:    'Hi ' + name + ', please review and sign your truck rental agreement.\n\nClick here to sign: {{submitter.link}}\n\nThank you!'
+      subject: 'Your ' + CONFIG.COMPANY_NAME + ' rental agreement — ' + dateStr,
+      body:    '<p>Hi ' + name + ',</p>' +
+               '<p>Please review and sign your ' + CONFIG.COMPANY_NAME + ' rental agreement for your <strong>' +
+               (vehicleType || 'rental') + '</strong>' +
+               (location ? ' at our <strong>' + location + '</strong> location' : '') +
+               ', scheduled for <strong>' + dateStr + '</strong>.</p>' +
+               '<p><a href="{{submitter.link}}"><strong>Review and sign rental agreement</strong></a></p>' +
+               '<p>Please complete the agreement before your scheduled pickup.</p>' +
+               '<p>Thank you,<br>' + CONFIG.COMPANY_NAME + '</p>'
     },
     submitters: submitters
   };

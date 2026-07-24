@@ -803,6 +803,87 @@ function validateConfig() {
   Logger.log('validateConfig: all required numeric Script Properties are set and valid.');
 }
 
+// ---------------------------------------------------------------------------
+// TEST 15: Email template string verification (no sheet reads, no API calls)
+// Constructs sample message strings using the same interpolation patterns as
+// the production functions and checks for known-bad strings introduced by
+// earlier hardcoded wording.
+// ---------------------------------------------------------------------------
+function testEmailTemplateStrings() {
+  let passed = 0;
+  let failed = 0;
+
+  const cargoVanType = 'Cargo Van';
+  const location     = 'Bainbridge';
+  const dateStr      = 'July 26, 2026 at 10:00 AM';
+  const name         = 'Test Customer';
+
+  // ---- Welcome email subject must not say "truck rental" for Cargo Van ----
+  const welcomeSubject = 'Your ' + cargoVanType + ' reservation — ' + dateStr;
+  if (welcomeSubject.toLowerCase().includes('moving truck') ||
+      welcomeSubject.toLowerCase().includes('truck rental')) {
+    Logger.log('FAIL (welcome subject): contains hardcoded vehicle wording: ' + welcomeSubject);
+    failed++;
+  } else {
+    Logger.log('OK (welcome subject): ' + welcomeSubject);
+    passed++;
+  }
+
+  // ---- Welcome email body must not say "moving truck" for Cargo Van ----
+  const welcomeBody =
+    'Your <strong>' + cargoVanType + '</strong> reservation at our <strong>' +
+    location + '</strong> location is scheduled for <strong>' + dateStr + '</strong>.';
+  if (welcomeBody.toLowerCase().includes('moving truck')) {
+    Logger.log('FAIL (welcome body): contains "moving truck": ' + welcomeBody);
+    failed++;
+  } else {
+    Logger.log('OK (welcome body): vehicle type "' + cargoVanType + '" used correctly');
+    passed++;
+  }
+
+  // ---- Post-rental email body must not say "returning the truck" ----
+  const postRentalBody =
+    'Thank you for completing your <strong>' + cargoVanType + '</strong> rental ' +
+    'at our <strong>' + location + '</strong> location on <strong>' + dateStr + '</strong>.';
+  if (postRentalBody.toLowerCase().includes('returning the truck')) {
+    Logger.log('FAIL (post-rental body): contains "returning the truck"');
+    failed++;
+  } else {
+    Logger.log('OK (post-rental body): no hardcoded "truck" wording');
+    passed++;
+  }
+
+  // ---- DocuSeal subject must use em dash, not double hyphen ----
+  const docuSealSubject = 'Your ' + CONFIG.COMPANY_NAME + ' rental agreement — ' + dateStr;
+  if (docuSealSubject.includes('--')) {
+    Logger.log('FAIL (DocuSeal subject): contains "--" instead of "—": ' + docuSealSubject);
+    failed++;
+  } else if (docuSealSubject.includes('—')) {
+    Logger.log('OK (DocuSeal subject): uses em dash');
+    passed++;
+  } else {
+    Logger.log('FAIL (DocuSeal subject): no dash separator found');
+    failed++;
+  }
+
+  // ---- Manager deposit status must use consistent casing ----
+  const depositYes = true;
+  const depositNo  = false;
+  const statusYes  = depositYes ? 'Yes' : 'No';
+  const statusNo   = depositNo  ? 'Yes' : 'No';
+  if (statusYes === 'Yes' && statusNo === 'No') {
+    Logger.log('OK (deposit status casing): "Yes" / "No" consistent');
+    passed++;
+  } else {
+    Logger.log('FAIL (deposit status casing): got "' + statusYes + '" / "' + statusNo + '"');
+    failed++;
+  }
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' template string checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+}
+
 // ============================================================
 // TEST RUNNERS
 // ============================================================

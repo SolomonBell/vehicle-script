@@ -72,38 +72,42 @@ function syncCalendarBookings() {
 
         // Welcome SMS
         const welcomeSms =
-          'Reliable Storage: Hi ' + firstName + '! Your truck is reserved for ' + dateStr + '. ' +
-          'Step 1 -- pay your $' + getDepositAmount(calCfg.vehicleType) + ' deposit: ' + stripeUrl + ' ' +
-          'Step 2 -- complete intake form: ' + intakeUrl;
+          CONFIG.COMPANY_NAME + ': Hi ' + firstName + ', your ' + calCfg.vehicleType + ' reservation at ' +
+          calCfg.location + ' is scheduled for ' + dateStr + '. ' +
+          'Pay the $' + getDepositAmount(calCfg.vehicleType) + ' deposit: ' + stripeUrl + ' ' +
+          'Complete your intake form: ' + intakeUrl;
 
         // Welcome HTML email
         const welcomeEmailHtml =
           '<p>Hi ' + name + ',</p>' +
-          '<p>Your moving truck is reserved for <strong>' + dateStr + '</strong>.</p>' +
-          '<p>Please complete these two steps to confirm your booking:</p>' +
-          '<p><strong>1. Pay your $' + getDepositAmount(calCfg.vehicleType) + ' deposit:</strong><br>' +
-          '<a href="' + stripeUrl + '">Click here to pay deposit</a></p>' +
-          '<p><strong>2. Complete your intake form</strong> (your info is pre-filled — just verify and submit):<br>' +
-          '<a href="' + intakeUrl + '">Click here to complete intake form</a></p>' +
-          '<p>Your rental agreement will be emailed for e-signature once your deposit is received.</p>' +
-          '<p>Questions? Reply to this email or call us.</p>' +
-          '<p>— Reliable Storage</p>';
+          '<p>Your <strong>' + calCfg.vehicleType + '</strong> reservation at our <strong>' +
+          calCfg.location + '</strong> location is scheduled for <strong>' + dateStr + '</strong>.</p>' +
+          '<p>Please complete the following steps to continue your reservation:</p>' +
+          '<p><strong>1. Pay the $' + getDepositAmount(calCfg.vehicleType) + ' deposit:</strong><br>' +
+          '<a href="' + stripeUrl + '">Pay deposit</a></p>' +
+          '<p><strong>2. Review and submit your pre-filled intake form:</strong><br>' +
+          '<a href="' + intakeUrl + '">Complete intake form</a></p>' +
+          '<p>After your deposit is received and the booking is approved, DocuSeal will email ' +
+          'your rental agreement for electronic signature.</p>' +
+          '<p>Reply to this email or call us if you have any questions.</p>' +
+          '<p>Thank you,<br>' + CONFIG.COMPANY_NAME + '</p>';
 
         if (phone && phone !== 'No Phone') sendSms(phone, welcomeSms);
-        if (email && email !== 'No Email') sendEmailHtml(email, 'Your truck rental — ' + dateStr, welcomeEmailHtml);
+        if (email && email !== 'No Email') sendEmailHtml(email, 'Your ' + calCfg.vehicleType + ' reservation — ' + dateStr, welcomeEmailHtml);
 
         // Manager notification
         if (CONFIG.MANAGER_EMAIL) {
           try {
             const mgrHtml =
-              '<p>New truck booking:</p>' +
-              '<p><strong>' + name + '</strong></p>' +
-              '<p>Date/time: ' + dateStr + '</p>' +
-              '<p>Location: ' + calCfg.location + '</p>' +
-              '<p>Vehicle: ' + calCfg.vehicleType + '</p>' +
-              '<p>Email: ' + (email || 'No Email') + '</p>' +
-              '<p>Phone: ' + (phone || 'No Phone') + '</p>';
-            sendEmailHtml(CONFIG.MANAGER_EMAIL, 'New truck booking — ' + name + ' on ' + dateStr, mgrHtml);
+              '<p>A new booking has been created:</p>' +
+              '<p><strong>Customer:</strong> ' + name + '</p>' +
+              '<p><strong>Date/time:</strong> ' + dateStr + '</p>' +
+              '<p><strong>Vehicle:</strong> ' + calCfg.vehicleType + '</p>' +
+              '<p><strong>Location:</strong> ' + calCfg.location + '</p>' +
+              '<p><strong>Email:</strong> ' + (email || 'No Email') + '</p>' +
+              '<p><strong>Phone:</strong> ' + (phone || 'No Phone') + '</p>' +
+              '<p><strong>Deposit due:</strong> $' + getDepositAmount(calCfg.vehicleType) + '</p>';
+            sendEmailHtml(CONFIG.MANAGER_EMAIL, 'New booking — ' + name + ' — ' + calCfg.vehicleType, mgrHtml);
           } catch(e) { Logger.log('Manager email failed for new booking ' + name + ': ' + e); }
         }
         if (CONFIG.MANAGER_PHONE) {

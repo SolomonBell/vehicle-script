@@ -14,6 +14,8 @@ function sendLeaseToNewBookings() {
     const secondEmail = data[i][12] || '';
     const startTime   = new Date(data[i][4]);
     const dateStr     = formatDateTime(startTime);
+    const vehicleType = data[i][17] || '';  // R: Vehicle Type
+    const location    = data[i][18] || '';  // S: Location
 
     const approved = data[i][14]; // O: Rental Approved
     Logger.log('Row ' + (i + 1) + ': G(DepositPaid)="' + depositPaid +
@@ -30,7 +32,7 @@ function sendLeaseToNewBookings() {
         && (approved === 'Approved - Free' || approved === 'Approved - Paid')) {
       Logger.log('Row ' + (i + 1) + ': ELIGIBLE — calling sendLeaseViaDocuSeal() for ' + email);
       try {
-        const docuSealResp = sendLeaseViaDocuSeal(name, email, secondEmail, dateStr);
+        const docuSealResp = sendLeaseViaDocuSeal(name, email, secondEmail, dateStr, vehicleType, location);
         const submissionId = extractDocuSealSubmissionId(docuSealResp);
         Logger.log('Row ' + (i + 1) + ': DocuSeal response submissionId=' + submissionId);
 
