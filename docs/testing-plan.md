@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - [ ] All Script Properties set (see setup-notes.md)
-- [ ] Bookings sheet exists with correct headers (A–Q)
+- [ ] Bookings sheet exists with correct headers (A–T)
 - [ ] Column O has dropdown validation (Approved - Free / Approved - Paid / Denied)
 - [ ] `setupTriggers()` has been run
 - [ ] Script deployed as Web App with correct access settings
@@ -28,7 +28,7 @@
 - [ ] Manager receives "New truck booking" email
 - [ ] Manager receives "New booking" SMS
 
-**Check in sheet:** Columns A–I populated; O, P, Q all blank.
+**Check in sheet:** Columns A–I, R–S populated; O, P, Q, T all blank.
 
 ---
 

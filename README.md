@@ -104,7 +104,7 @@ Customer books vehicle via Google Booking
   Row appended to Bookings sheet (columns A–T initialized)
             │
             ├──▶  Welcome SMS + email sent to customer
-            │       • Deposit payment link (Stripe)
+            │       • Deposit payment link (Stripe, per vehicle type)
             │       • Pre-filled intake form URL
             │
             ├──▶  Manager notified (email + SMS)
@@ -196,6 +196,11 @@ Customer books vehicle via Google Booking
 - Column O (`Rental Approved`) is enforced by a data-validation dropdown. The script never writes
   to this column under any circumstance. Only the site manager sets it.
 
+- Stripe embeds the Google Calendar event ID (base64 URL-safe encoded) as the
+  `client_reference_id` on each payment link. When a deposit clears, Pipedream passes this
+  encoded ID to `doPost` as `eventId`. `markDepositPaid` decodes it and matches the payment to
+  the correct booking row by event ID first, falling back to email matching for older rows.
+
 - The 24-hour reminder fires when `hoursUntilStart` is between 0 and 26, covering the full
   30-minute trigger interval without gaps. It only fires for approved bookings.
 
@@ -223,7 +228,7 @@ flowchart TD
     G -->|Approved - Free or Approved - Paid| H[Approval gate cleared]
 
     H --> I([Customer pays deposit via Stripe])
-    I --> J[Stripe → Pipedream validates + forwards\nPOST to doPost with shared secret]
+    I --> J[Stripe → Pipedream validates + forwards\nPOST to doPost with shared secret + eventId]
     J --> K[markDepositPaid\nCol G = Yes · Col H = amount]
     K --> L[Deposit confirmation SMS and email]
     K --> M[DocuSeal lease dispatched\nCol J = Yes · Col T = submission ID]
@@ -282,7 +287,7 @@ system of record.
 │               ▼                                     │
 │  Pipedream (validates signatures,                    │
 │             normalises payloads,                     │
-│             injects shared secret)                   │
+│             injects shared secret + eventId)         │
 │               │                                     │
 │               ▼                                     │
 │  Apps Script Web App (doPost)                        │
@@ -443,7 +448,7 @@ properties are wrapped in `Number()` at this point so all downstream code receiv
 type. `CALENDAR_CONFIGS` is an array of location/vehicle/calendar entries built from `PROPS`.
 
 > **Important:** The internal CONFIG key names for DocuSeal differ from the Script Property
-> names. `CONFIG.DOCUSEAL_KEY` reads from Script Property `DOCUSEAL_API_KEY`. 
+> names. `CONFIG.DOCUSEAL_KEY` reads from Script Property `DOCUSEAL_API_KEY`.
 > `CONFIG.DOCUSEAL_TEMPLATE_SINGLE` reads from Script Property `DOCUSEAL_TEMPLATE_ONE_DRIVER`.
 > This mapping is intentional — internal keys are stable; Script Property names match the
 > external service's terminology.
@@ -460,12 +465,14 @@ extracts customer data from the event description HTML, appends a 19-column row 
 left blank), sends the welcome SMS and email, notifies the manager, and marks column I
 (Intake Sent) = `Yes`.
 
+The Stripe payment link embedded in the welcome message appends the Google Calendar event ID
+(base64 URL-safe encoded via `Utilities.base64EncodeWebSafe`) as `?client_reference_id=...`.
+Stripe includes this value in its webhook events, which Pipedream passes to `doPost` as `eventId`.
+This allows `markDepositPaid` to match payments to rows by event ID rather than by email alone.
+
 **Deduplication:** Uses event IDs, not the Intake Sent flag. `getExistingEventIds()` loads all
 event IDs from column A before the loop. An event already in the sheet is skipped before any
-message is sent. If the script crashes after `appendRow` but before setting Intake Sent, the row
-will exist but Intake Sent will be blank — `checkRentalEligibility` skips such rows, so the
-approval loop does not start until Intake Sent is set. This is the known gap; in practice the
-failure window is very small.
+message is sent.
 
 ---
 
@@ -531,43 +538,60 @@ must not cause further exceptions).
 
 ### DocuSeal.js
 
-**Functions:** `sendLeaseViaDocuSeal(name, email, secondEmail, dateStr)`,
+**Functions:** `sendLeaseViaDocuSeal(name, email, secondEmail, startTime, endTime, vehicleType, location)`,
 `extractDocuSealSubmissionId(response)`
 
 `sendLeaseViaDocuSeal` selects the correct template based on whether a second driver email is
-present, builds the submitters array with exact role names, and POSTs to
-`https://api.docuseal.com/submissions` using `CONFIG.DOCUSEAL_KEY` as the `X-Auth-Token` header.
-Returns the parsed JSON response. Throws on HTTP 4xx/5xx.
+present, builds the submitters array with exact role names (`Driver #1` for both single- and
+two-driver templates), and POSTs to `https://api.docuseal.com/submissions` using
+`CONFIG.DOCUSEAL_KEY` as the `X-Auth-Token` header. The `startTime` and `endTime` Date objects
+are used to prefill `pickup_datetime`, `return_datetime`, and `reservation_date` fields on the
+lease document. Returns the parsed JSON response. Throws on HTTP 4xx/5xx.
 
-`extractDocuSealSubmissionId` takes the parsed response object, logs its top-level keys (not
-values) to the execution log, and returns `response.id`. Returns `null` with a warning if the
-response is missing or lacks an `id` field.
-
-> **One-time verification needed:** The DocuSeal API response shape has not been verified against
-> a live submission in this codebase. The helper logs top-level response keys on every call. After
-> the first real submission, confirm `response.id` is present in the execution log. If a different
-> field holds the submission ID, update `extractDocuSealSubmissionId` accordingly.
+`extractDocuSealSubmissionId` takes the parsed response and returns the shared submission ID.
+The DocuSeal API returns an array of submitter objects. This function collects `submission_id`
+(or `submission.id`) from each array element — these are the shared identifier common to all
+signers. It returns null with a warning log if no ID is found or if IDs conflict across elements.
+The response structure is logged on every call (keys and ID fields, not values).
 
 ---
 
 ### Webhooks.js
 
-**Functions:** `doPost(e)`, `doGet()`, `markDepositPaid(customerEmail, amountPaid)`,
-`markLeaseSigned(signerEmail)`
+**Functions:** `doPost(e)`, `doGet()`, `markDepositPaid(customerEmail, amountPaid, eventId)`,
+`markLeaseSigned(submissionId, signerEmail)`
 
 `doPost` is the Apps Script web app entry point. It validates the shared secret, then routes to
 either `markLeaseSigned` (for `type === 'lease_signed'`) or `markDepositPaid` (for Stripe
 payment events). Always returns HTTP 200 with `{ received: true }` — non-200 would trigger
 Pipedream retry loops. Secret validation failures return `{ received: false }`.
 
-`doGet` returns a plain-text "live" confirmation. Used to verify the deployment URL is reachable.
+`doGet` returns `{COMPANY_NAME} webhook endpoint is live.` as plain text (where `{COMPANY_NAME}`
+is the value of the `COMPANY_NAME` Script Property). Used to verify the deployment URL is
+reachable.
 
-`markDepositPaid` matches by email (case-insensitive, trimmed), writes G = Yes and H = amount,
-sends confirmation SMS and email, then calls `sendLeaseViaDocuSeal`. **The lease send is inside a
-try/catch** — if DocuSeal fails, J and T are not written (the catch-up engine handles it).
-Writes J = Yes and T = submission ID after a successful DocuSeal call.
+`markDepositPaid` matches the incoming payment to a booking row using two strategies in order:
 
-`markLeaseSigned` matches by email and writes N = Yes.
+1. **Primary — event ID match:** Stripe passes the Google Calendar event ID (base64 URL-safe
+   encoded) as `client_reference_id`. `doPost` decodes it and passes it as `eventId`.
+   `markDepositPaid` searches column A for a row with a matching event ID and an unpaid deposit.
+
+2. **Fallback — email match:** If no event ID is present (or no match found), searches column C
+   for a case-insensitive email match with an unpaid deposit. This covers rows created before
+   the `client_reference_id` feature was added.
+
+After matching, it writes G = Yes and H = amount, sends confirmation SMS (in an isolated
+try/catch so SMS failure cannot block email or DocuSeal) and email, then calls
+`sendLeaseViaDocuSeal`. **The lease send is inside a try/catch** — if DocuSeal fails, J and T
+are not written (the catch-up engine handles it). Writes J = Yes and T = submission ID after a
+successful DocuSeal call.
+
+`markLeaseSigned(submissionId, signerEmail)` uses the same two-strategy lookup:
+
+1. **Primary — submission ID match:** Searches column T for a matching DocuSeal submission ID
+   (normalized to string).
+
+2. **Fallback — email match:** If no submission ID is provided or found, searches column C.
 
 > **Note:** `WEBHOOK_SHARED_SECRET` is read directly from `PROPS` in `doPost`, not from
 > `CONFIG`. This is intentional — the shared secret is needed before `CONFIG` is guaranteed to be
@@ -646,7 +670,7 @@ at row 2.
 
 | Col | Header | Written by | Notes |
 |---|---|---|---|
-| A | Event ID | `syncCalendarBookings` | Google Calendar event ID; used for deduplication |
+| A | Event ID | `syncCalendarBookings` | Google Calendar event ID; used for deduplication and payment matching |
 | B | Customer Name | `syncCalendarBookings` | Extracted from event description HTML |
 | C | Email | `syncCalendarBookings` | Primary customer email; `No Email` if absent |
 | D | Phone | `syncCalendarBookings` | E.164 format with leading `'` to prevent spreadsheet reformatting; `No Phone` if absent |
@@ -700,10 +724,6 @@ Column T was added after the initial deployment. It is not initialised to empty 
 `appendRow` call in `syncCalendarBookings` (which writes 19 values, A–S). New rows leave T blank
 until a lease is successfully sent. Existing rows from before T was added will also have a blank T
 unless a lease is resent.
-
-`extractDocuSealSubmissionId` logs the top-level keys of the DocuSeal API response on every call.
-Check the Apps Script Executions log after the first real submission to confirm `response.id` is
-the correct field. If the submission ID is at a different path, update that helper function.
 
 ### Location tabs and QUERY formulas
 
@@ -777,7 +797,7 @@ Form's dropdown field.
 
 ## 8. Script Properties Reference
 
-All 42 Script Properties must be set in **Apps Script → Project Settings → Script Properties**.
+All 43 Script Properties must be set in **Apps Script → Project Settings → Script Properties**.
 No value ever belongs in source code.
 
 ### Identity and routing
@@ -786,6 +806,7 @@ No value ever belongs in source code.
 |---|---|---|---|---|---|
 | `SHEET_ID` | Google Spreadsheet ID (from sheet URL) | `1BxiM...` | No | Yes | `Helpers.js` |
 | `SHEET_NAME` | Bookings tab name | `Bookings` | No | Yes | `Config.js` |
+| `COMPANY_NAME` | Business name used in customer-facing emails, SMS, and the webhook liveness response | `Reliable Storage` | No | Yes | `Config.js` |
 | `ADMIN_EMAIL` | Escalation address for unanswered approvals and script errors | `admin@example.com` | No | Yes | `Config.js` |
 | `MANAGER_EMAIL` | Site manager — BCC'd on all customer emails, receives booking/approval notices | `manager@example.com` | No | Yes | `Config.js` |
 | `MANAGER_PHONE` | Site manager phone in E.164 format | `+12065551234` | No | No | `Config.js` |
@@ -794,6 +815,10 @@ No value ever belongs in source code.
 > **`SHEET_ID` note:** Unlike all other properties, `SHEET_ID` is read directly via
 > `getProperty('SHEET_ID')` inside `Helpers.js`, not through the `PROPS`/`CONFIG` pattern. This
 > is the one property that bypasses `Config.js`.
+
+> **`COMPANY_NAME` note:** Used in `doGet()` for the liveness response, in DocuSeal email
+> subjects and bodies, and in customer-facing SMS. If unset, these messages will include the
+> string `undefined`.
 
 ### Google Calendar
 
@@ -818,6 +843,10 @@ each calendar with at least read access.
 | `STRIPE_PAYMENT_URL_MOVING_TRUCK` | Public Stripe payment link for moving truck deposit | `https://buy.stripe.com/...` | No | Yes (for Moving Truck) |
 | `STRIPE_PAYMENT_URL` | Fallback payment link for rows with blank Vehicle Type column | `https://buy.stripe.com/...` | No | Recommended |
 
+The payment links embedded in welcome messages automatically include
+`?client_reference_id=<base64-encoded-event-id>`. This allows `markDepositPaid` to identify
+which booking row a payment belongs to by event ID rather than email alone.
+
 ### Deposit amounts
 
 | Property | Description | Example | Secret | Required |
@@ -833,20 +862,30 @@ for any financial calculation.
 
 | Property | Description | Secret | Required |
 |---|---|---|---|
-| `TWILIO_SID` | Twilio Account SID | **Yes** | Yes |
-| `TWILIO_TOKEN` | Twilio Auth Token | **Yes** | Yes |
-| `TWILIO_NUM` | Sending number in E.164 format | No | Yes |
+| `TWILIO_SID` | Twilio Account SID — begins with `AC`, followed by 32 alphanumeric characters (34 chars total) | **Yes** | Yes |
+| `TWILIO_TOKEN` | Twilio Auth Token — used for Basic Auth alongside the SID | **Yes** | Yes |
+| `TWILIO_NUM` | Sending number in E.164 format — must be SMS-capable | No | Yes |
 
-All outbound SMS messages send from `TWILIO_NUM`. The manager sees every customer SMS thread in
-the Twilio console without needing a separate copy (Twilio also rejects `To == From`).
+All outbound SMS messages send from `TWILIO_NUM`. The site manager can see every customer
+conversation in the Twilio App under that number's thread without needing a separate copy
+(Twilio also rejects `To == From`).
+
+Both `TWILIO_NUM` and `MANAGER_PHONE` must be in E.164 format: `+` followed by 7–15 digits
+(e.g., `+12065551234`). A missing country code produces Twilio "Invalid To Phone Number" errors.
+
+On a Twilio trial account, all outbound SMS are prefixed with "Sent from your Twilio trial
+account — " and can only be delivered to individually verified phone numbers.
 
 ### SendGrid (email)
 
 | Property | Description | Secret | Required |
 |---|---|---|---|
-| `SENDGRID_KEY` | SendGrid API key (`SG....`) | **Yes** | Yes |
-| `FROM_EMAIL` | Sender address | No | Yes |
+| `SENDGRID_KEY` | SendGrid API key (`SG....`) — must have the **Mail Send** permission scope | **Yes** | Yes |
+| `FROM_EMAIL` | Sender address — must be a verified sender in SendGrid | No | Yes |
 | `REPLY_TO_EMAIL` | Reply-to address (typically the site manager) | No | Yes |
+
+`FROM_EMAIL` must be either a verified single sender or belong to an authenticated domain in your
+SendGrid account. An unverified sender produces HTTP 403 errors logged as admin alerts.
 
 ### DocuSeal (e-signature)
 
@@ -859,7 +898,7 @@ the Twilio console without needing a separate copy (Twilio also rejects `To == F
 > **CONFIG key mapping:** The internal code uses `CONFIG.DOCUSEAL_KEY` and
 > `CONFIG.DOCUSEAL_TEMPLATE_SINGLE` — these names appear throughout the source. They map from the
 > Script Properties `DOCUSEAL_API_KEY` and `DOCUSEAL_TEMPLATE_ONE_DRIVER` respectively. The
-> mapping is in `Config.js` lines 90–91. Do not rename the internal CONFIG keys; only the Script
+> mapping is in `Config.js` lines 87–89. Do not rename the internal CONFIG keys; only the Script
 > Property names matter for the Apps Script console.
 
 ### Intake Form (Form 1)
@@ -884,7 +923,7 @@ Entry IDs are numeric strings found by inspecting the form's pre-fill URL or via
 | `INSPECT_ENTRY_EMAIL` | Form entry ID for email field |
 | `INSPECT_ENTRY_DATE` | Form entry ID for date field |
 | `INSPECT_ENTRY_TYPE` | Form entry ID for inspection type dropdown |
-| `INSPECT_VAL_PRE` | Exact text of the pre-trip option | 
+| `INSPECT_VAL_PRE` | Exact text of the pre-trip option |
 | `INSPECT_VAL_POST` | Exact text of the post-trip option |
 
 `INSPECT_VAL_PRE` and `INSPECT_VAL_POST` must exactly match the option text in the Google Form
@@ -897,7 +936,7 @@ These control timing and reminder behaviour. All are parsed as numbers with `Num
 | Property | Description | Example | Notes |
 |---|---|---|---|
 | `DAYS_AHEAD` | How many days ahead to scan each calendar for new bookings | `60` | Lower values reduce API calls; higher values give earlier notice |
-| `POST_RENTAL_HOURS` | Hours after rental end time before sending post-rental prompt | `1` | DocuSeal sends `1` = prompt fires ~1 hour after end |
+| `POST_RENTAL_HOURS` | Hours after rental end time before sending post-rental prompt | `1` | Set to `1` = prompt fires ~1 hour after end |
 | `HOURS_BETWEEN_APPROVAL_REMINDERS` | Hours between manager approval reminder emails | `12` | Set to 12 for one reminder per half-day |
 | `MAX_APPROVAL_REMINDERS` | Total approval notifications before escalating to admin | `3` | 1 initial + 2 follow-ups + 1 escalation, then permanent silence |
 
@@ -923,7 +962,7 @@ used:
 **Single-driver template** (`DOCUSEAL_TEMPLATE_ONE_DRIVER`)
 
 Signing roles (must match exactly in the DocuSeal template):
-- `Driver` — the primary customer
+- `Driver #1` — the primary customer
 - `Reliable Storage Manager` — the site manager
 
 **Two-driver template** (`DOCUSEAL_TEMPLATE_TWO_DRIVERS`)
@@ -933,8 +972,24 @@ Signing roles:
 - `Driver #2` — the second driver
 - `Reliable Storage Manager` — the site manager
 
-The role names are hardcoded in `DocuSeal.js`. If a template's role names differ, update the
-strings in `sendLeaseViaDocuSeal`.
+The role name `Driver #1` is used for the primary customer in **both** templates. The role names
+are hardcoded in `DocuSeal.js`. If a template's role names differ, update the strings in
+`sendLeaseViaDocuSeal`.
+
+### Pre-filled document fields
+
+The script prefills the following fields on the lease document via the `values` object in the
+Driver #1 submitter entry:
+
+| Field name | Value |
+|---|---|
+| `storage_location` | Location string from column S (e.g., `Bainbridge`) |
+| `vehicle_type` | Vehicle type string from column R (e.g., `Cargo Van`) |
+| `reservation_date` | Rental date in `MMMM d, yyyy` format |
+| `pickup_datetime` | Start time formatted as date + time |
+| `return_datetime` | End time formatted as date + time |
+
+Signer names are **not** prefilled — DocuSeal collects these when each party signs.
 
 ### Submission flow
 
@@ -942,13 +997,35 @@ strings in `sendLeaseViaDocuSeal`.
 2. `sendLeaseViaDocuSeal` selects the template based on whether a second driver email is present
    and not `No Second Email`.
 3. A POST is made to `https://api.docuseal.com/submissions` with the template ID, submitters
-   array, and an email subject/body.
+   array, prefill values, and an email subject/body.
 4. If successful (HTTP < 400), the parsed JSON response is returned.
-5. `extractDocuSealSubmissionId` reads `response.id` from the parsed response.
+5. `extractDocuSealSubmissionId` reads the shared submission ID from the response.
 6. Column J (Lease Sent) = `Yes` and column T (DocuSeal Submission ID) = the submission ID are
    written to the sheet.
 7. If the DocuSeal call fails (throws), neither J nor T is written. The catch-up engine
    (`sendLeaseToNewBookings`) will retry on its next 15-minute run.
+
+### DocuSeal response shape
+
+The `/submissions` endpoint returns an array of submitter objects — one per signer. Each object
+has a per-submitter `id` field and a `submission_id` field (or `submission.id`) that is the same
+across all signers. `extractDocuSealSubmissionId` collects `submission_id` / `submission.id`
+from each element, verifies they all agree, and returns the common value. The per-submitter `id`
+is intentionally not used here, as it uniquely identifies a single signer rather than the
+submission.
+
+The function logs the response structure on every call:
+```
+extractDocuSealSubmissionId: isArray=true, length=2
+  [0] keys: id, submission_id, role, email, ...
+  [0] id=1, submission_id=12345, submitter_id=..., submission.id=(none)
+  [1] keys: id, submission_id, role, email, ...
+  [1] id=2, submission_id=12345, submitter_id=..., submission.id=(none)
+```
+
+After the first real submission, confirm in the Executions log that `submission_id` appears in
+each element. If the DocuSeal response shape differs from this, update `extractDocuSealSubmissionId`
+in `DocuSeal.js` accordingly.
 
 ### Lease email
 
@@ -960,38 +1037,36 @@ manager already receives a DocuSeal signing request as a co-signer on every leas
 
 After all parties sign, DocuSeal sends a webhook event to Pipedream. Pipedream validates the
 request, filters to completed signing events, skips the manager signing step (to avoid marking
-the lease signed before the customer signs), extracts `signerEmail`, and POSTs to `doPost`:
+the lease signed before the customer signs), extracts `signerEmail` and `submissionId`, and POSTs
+to `doPost`:
 
 ```json
-{ "secret": "...", "type": "lease_signed", "signerEmail": "..." }
+{ "secret": "...", "type": "lease_signed", "submissionId": "...", "signerEmail": "..." }
 ```
 
-`doPost` routes this to `markLeaseSigned`, which sets column N (Lease Signed) = `Yes` for the
-matching row.
+`doPost` routes this to `markLeaseSigned`, which first matches by `submissionId` against column T,
+then falls back to email match against column C, and sets column N (Lease Signed) = `Yes`.
 
 ### DocuSeal Submission ID (Column T)
 
-The submission ID is returned by the DocuSeal API in `response.id`. It is written to column T by
-both callers:
+The submission ID written to column T is used by `markLeaseSigned` as the primary row-lookup key
+when a signing event arrives. This eliminates the ambiguity that would occur if the same email
+address appeared in multiple booking rows.
 
 ```javascript
-const docuSealResp = sendLeaseViaDocuSeal(name, email, secondEmail, dateStr);
+const docuSealResp = sendLeaseViaDocuSeal(
+  name, email, secondEmail, startTime, endTime, vehicleType, location
+);
 const submissionId = extractDocuSealSubmissionId(docuSealResp);
-sheet.getRange(i + 1, 10).setValue('Yes');    // J: Lease Sent
+sheet.getRange(i + 1, 10).setValue('Yes');       // J: Lease Sent
 if (submissionId != null) {
   sheet.getRange(i + 1, 20).setValue(submissionId); // T: DocuSeal Submission ID
 }
 ```
 
-If `extractDocuSealSubmissionId` returns null (missing field or unexpected response shape), a
-warning is logged and column T is left blank. Column J is written regardless — the lease was sent
-even if the ID could not be captured.
-
-> **First-run verification:** After deploying and sending the first real lease, check the Apps
-> Script Executions log for the line:
-> `DocuSeal response top-level keys: id, slug, ...`
-> This confirms `response.id` is the correct field. If the keys list looks different (e.g.,
-> numeric indices from an array), update `extractDocuSealSubmissionId` accordingly.
+If `extractDocuSealSubmissionId` returns null (missing field or conflicting IDs), a warning is
+logged and column T is left blank. Column J is written regardless — the lease was sent even if
+the ID could not be captured. In this case `markLeaseSigned` falls back to email matching.
 
 ---
 
@@ -1007,21 +1082,29 @@ stores one per vehicle type and one fallback:
 - `STRIPE_PAYMENT_URL_MOVING_TRUCK` — sent to all Moving Truck customers
 - `STRIPE_PAYMENT_URL` — fallback for rows where column R is blank (pre-migration rows)
 
+Each link is appended with `?client_reference_id=<encoded-event-id>` where the encoded event ID
+is `Utilities.base64EncodeWebSafe(eventId)` with trailing `=` padding stripped. Stripe passes
+this value back in its webhook payload, enabling exact row matching on payment.
+
 ### Webhook flow
 
 After a customer pays, Stripe sends a webhook event to the Pipedream "Stripe Connection to Google
 App" workflow:
 
 1. **Pipedream** validates the Stripe signature using the Stripe webhook secret.
-2. Pipedream extracts `customerEmail` and `amountPaid` from the Stripe event.
-3. Pipedream injects the `WEBHOOK_SHARED_SECRET` as `secret`.
+2. Pipedream extracts `customerEmail`, `amountPaid`, and the `client_reference_id` (the encoded
+   event ID) from the Stripe event.
+3. Pipedream injects the `WEBHOOK_SHARED_SECRET` as `secret` and the encoded event ID as
+   `eventId`.
 4. Pipedream POSTs to the Apps Script web app URL:
    ```json
-   { "secret": "...", "customerEmail": "...", "amountPaid": "..." }
+   { "secret": "...", "customerEmail": "...", "amountPaid": "...", "eventId": "..." }
    ```
-5. `doPost` validates the secret and calls `markDepositPaid`.
-6. `markDepositPaid` matches the email to a sheet row (case-insensitive), writes G = Yes and
-   H = amount, sends confirmation messages, and dispatches the DocuSeal lease.
+5. `doPost` validates the secret, base64-decodes `eventId` (padding is applied as needed), and
+   calls `markDepositPaid(customerEmail, amountPaid, decodedEventId)`.
+6. `markDepositPaid` matches the row by event ID (column A, primary), falls back to email (column
+   C), writes G = Yes and H = amount, sends confirmation messages, and dispatches the DocuSeal
+   lease.
 
 If no matching row is found for the customer email, an admin alert is sent and the payment is
 logged for manual follow-up.
@@ -1057,6 +1140,9 @@ encoding of `TWILIO_SID:TWILIO_TOKEN`. All messages send from `CONFIG.TWILIO_NUM
 
 Because all outbound messages come from the same number, the site manager can see every customer
 conversation in the Twilio App under that number's thread without any additional routing.
+
+In `markDepositPaid`, the customer SMS is wrapped in its own `try/catch`. A Twilio failure does
+not block the confirmation email or the DocuSeal lease send.
 
 ### Customer notifications
 
@@ -1114,8 +1200,7 @@ Q = 1 or 2, hours since P >= HOURS_BETWEEN_APPROVAL_REMINDERS
 Q = MAX_APPROVAL_REMINDERS, hours since P >= HOURS_BETWEEN_APPROVAL_REMINDERS
      │
      ├── Send escalation email to ADMIN_EMAIL
-     ├── Set Q = MAX_APPROVAL_REMINDERS + 1 (permanent skip)
-     └── [script never touches this row again]
+     └── Set Q = MAX_APPROVAL_REMINDERS + 1 (permanent skip)
           │
           ▼
 Q > MAX_APPROVAL_REMINDERS
@@ -1136,9 +1221,7 @@ silence.
 | 3 | hours since P ≥ 12 | Escalate to admin | 4 (permanent skip) |
 | > 3 | — | Skip silently | unchanged |
 
-P is only updated when an approval notification is sent. It is not updated at escalation time
-(there is nothing more to time off of after escalation).
-
+P is updated when the initial email and each reminder are sent. P is not updated at escalation.
 Rows where the manager sets column O to any decision value are excluded at the top of the loop
 and never receive another notification.
 
@@ -1235,6 +1318,7 @@ These operations are safe to run in the sandbox at any time:
 ```
 SHEET_ID                          = sandbox spreadsheet ID
 SHEET_NAME                        = Bookings
+COMPANY_NAME                      = Reliable Storage (Test)
 ADMIN_EMAIL                       = your-email@example.com
 MANAGER_EMAIL                     = your-email@example.com
 MANAGER_PHONE                     = +1XXXXXXXXXX  (or leave blank)
@@ -1283,15 +1367,20 @@ curl -X POST "YOUR_SANDBOX_URL" \
   -H "Content-Type: application/json" \
   -d '{"customerEmail":"test@example.com","amountPaid":50}'
 
-# Stripe payment event
+# Stripe payment event (with eventId for primary lookup)
+curl -X POST "YOUR_SANDBOX_URL" \
+  -H "Content-Type: application/json" \
+  -d '{"secret":"YOUR_SANDBOX_SECRET","customerEmail":"email-in-sheet@example.com","amountPaid":50,"eventId":"CALENDAR_EVENT_ID"}'
+
+# Stripe payment event (email-only fallback, for rows without eventId)
 curl -X POST "YOUR_SANDBOX_URL" \
   -H "Content-Type: application/json" \
   -d '{"secret":"YOUR_SANDBOX_SECRET","customerEmail":"email-in-sheet@example.com","amountPaid":50}'
 
-# DocuSeal lease signed event
+# DocuSeal lease signed event (with submissionId for primary lookup)
 curl -X POST "YOUR_SANDBOX_URL" \
   -H "Content-Type: application/json" \
-  -d '{"secret":"YOUR_SANDBOX_SECRET","type":"lease_signed","signerEmail":"email-in-sheet@example.com"}'
+  -d '{"secret":"YOUR_SANDBOX_SECRET","type":"lease_signed","submissionId":"12345","signerEmail":"email-in-sheet@example.com"}'
 ```
 
 ### Testing philosophy
@@ -1315,9 +1404,9 @@ triggers.
 ### Quick start
 
 ```
-1. runAllSandboxConfigurationTests()  — run first; validates the entire config
-2. testCalendarConfigs()             — confirm calendar connectivity
-3. testSyncCalendarBookingsNoNotifications()  — add rows without sending messages
+1. runAllSandboxConfigurationTests()           — run first; validates entire config (9 tests)
+2. testCalendarConfigs()                       — confirm calendar connectivity
+3. testSyncCalendarBookingsNoNotifications()   — add rows without sending messages
 4. Then test the full webhook flow with curl (see Sandbox section)
 ```
 
@@ -1325,8 +1414,10 @@ triggers.
 
 | Function | What it verifies |
 |---|---|
-| `validateConfig()` | All required numeric Script Properties are set and contain valid finite numbers (not empty, not non-numeric). Reports every problem before throwing. |
-| `testDocuSealPropertyNames()` | `DOCUSEAL_API_KEY` is set (does not log the value); `DOCUSEAL_TEMPLATE_ONE_DRIVER` and `DOCUSEAL_TEMPLATE_TWO_DRIVERS` are set and numeric. |
+| `validateConfig()` | All required numeric Script Properties are set and contain valid finite numbers. Reports every problem before throwing. |
+| `testDocuSealPropertyNames()` | `DOCUSEAL_API_KEY` is set (value not logged); `DOCUSEAL_TEMPLATE_ONE_DRIVER` and `DOCUSEAL_TEMPLATE_TWO_DRIVERS` are set and numeric. |
+| `testSendGridConfiguration()` | `SENDGRID_KEY` is set (value not logged); `FROM_NAME`, `COMPANY_NAME`, `SHEET_NAME` are non-blank; `FROM_EMAIL`, `REPLY_TO_EMAIL`, `MANAGER_EMAIL`, `ADMIN_EMAIL` are set and look like email addresses. No API call. |
+| `testTwilioConfiguration()` | `TWILIO_SID` matches `AC` + 32 alphanumeric chars; `TWILIO_TOKEN` is set (value not logged); `TWILIO_NUM` and `MANAGER_PHONE` are in E.164 format. No API call. |
 
 ### Connectivity tests
 
@@ -1341,14 +1432,21 @@ triggers.
 | Function | What it verifies |
 |---|---|
 | `testVehicleTypeAndLocationMapping()` | Every entry in `CALENDAR_CONFIGS` has the correct `propKey`, `location`, and `vehicleType` values. Useful after adding a new location. |
-| `testStripePaymentUrls()` | Every vehicle type in `CALENDAR_CONFIGS` resolves to a non-empty Stripe URL via `getStripePaymentUrl()`. Also tests the unknown-type fallback. |
+| `testStripePaymentUrls()` | Every vehicle type in `CALENDAR_CONFIGS` resolves to a non-empty Stripe URL via `getStripePaymentUrl()`. Also tests the unknown-type and blank-type fallbacks. |
 | `testDepositAmounts()` | Every vehicle type in `CALENDAR_CONFIGS` resolves to a deposit amount via `getDepositAmount()`. Also tests the unknown-type and blank-type fallbacks. |
 
 ### Response parsing tests
 
 | Function | What it verifies |
 |---|---|
-| `testExtractDocuSealSubmissionId()` | Four mock cases: valid response `{ id: 12345, ... }`, null response, response with no id field, non-object type. No live API call. |
+| `testExtractDocuSealSubmissionId()` | Nine mock cases: single object with `id`, null response, object with no id field, non-object, object with `submission_id`, object with `submission.id`, array with shared `submission_id`, array with shared `submission.id`, array with conflicting IDs. No live API call. |
+
+### Webhook row-lookup tests (no side effects)
+
+| Function | What it verifies |
+|---|---|
+| `testMarkDepositPaidRowLookup()` | Simulates the eventId-first / email-fallback matching logic in `markDepositPaid` against the live sheet. Three sub-tests: correct eventId finds right row, bogus eventId misses then email fallback succeeds, null eventId uses email-only path. Requires at least one unpaid booking row with an event ID in column A. |
+| `testMarkLeaseSignedRowLookup()` | Simulates the submissionId-first / email-fallback matching logic in `markLeaseSigned`. Three sub-tests: submissionId match, bogus submissionId + email fallback, null submissionId + email only. Requires at least one unsigned booking row with an email in column C. |
 
 ### Robustness tests
 
@@ -1357,17 +1455,30 @@ triggers.
 | `testMissingCalendarConfig()` | A null calendarId is detected and logged (not thrown). An invalid calendar ID returns null from CalendarApp without throwing. |
 | `testBuildIntakeUrl()` | Requires a row containing "Test Customer" in column B. Logs the generated intake URL for visual inspection. |
 
+### Template and message tests
+
+| Function | What it verifies |
+|---|---|
+| `testEmailTemplateStrings()` | Constructs sample message strings using production interpolation patterns and checks for known-bad strings: hardcoded vehicle-type wording, wrong dash type in DocuSeal subject, inconsistent deposit status casing. No sheet reads, no API calls. |
+
 ### Dry-run tests
 
 | Function | What it verifies |
 |---|---|
-| `testSyncCalendarBookingsNoNotifications()` | Full calendar sync — appends rows to the sheet for new events — without sending any email, SMS, or Stripe links. Mirrors `syncCalendarBookings` exactly (including columns R and S). Safe to run repeatedly. |
+| `testSyncCalendarBookingsNoNotifications()` | Full calendar sync — appends rows to the sheet for new events — without sending any email, SMS, or Stripe links. Mirrors `syncCalendarBookings` exactly (including columns R and S). Safe to run repeatedly; test rows must be cleaned up manually afterward. |
+| `testLogStripeUrlForExistingBooking()` | Reads the first row with an event ID (col A) and vehicle type (col R) and logs the full Stripe payment URL with encoded `client_reference_id`. Also performs a round-trip decode to verify the encoding. No sends, no sheet writes. |
 
 ### Test runners
 
 | Function | What it does |
 |---|---|
-| `runAllSandboxConfigurationTests()` | Runs `validateConfig`, `testSheetConnection`, `testCalendarConfigs`, `testVehicleTypeAndLocationMapping`, `testStripePaymentUrls`, `testDepositAmounts`, `testDocuSealPropertyNames` in sequence. Logs a clear header before starting and a completion banner when all pass. If any test throws, logs the error and re-throws so the execution is marked failed. |
+| `runAllSandboxConfigurationTests()` | Runs the following 9 tests in sequence: `validateConfig`, `testSheetConnection`, `testCalendarConfigs`, `testVehicleTypeAndLocationMapping`, `testStripePaymentUrls`, `testDepositAmounts`, `testDocuSealPropertyNames`, `testSendGridConfiguration`, `testTwilioConfiguration`. Logs a clear header before starting and a completion banner when all pass. If any test throws, logs the error and re-throws so the execution is marked failed. |
+
+### Standalone manual tests (not in runner)
+
+| Function | What it does |
+|---|---|
+| `testSendSingleSms()` | Sends a real Twilio SMS to the configured test number with a timestamped message. Use to verify Twilio delivery end-to-end. Run manually; never add to the runner. |
 
 ### End-to-end flow tests
 
@@ -1453,26 +1564,26 @@ projects.
         (Config, CalendarSync, Leases, Approval, Reminders, Notifications,
          DocuSeal, Webhooks, Forms, Helpers, Setup, SandboxTests)
 [ ] 3. Paste the contents of each src/*.js file into its matching editor file
-[ ] 4. Set all 42 Script Properties in Project Settings → Script Properties
+[ ] 4. Set all 43 Script Properties in Project Settings → Script Properties
 [ ] 5. Run validateConfig() from the editor — confirm no errors
 [ ] 6. Run testSheetConnection() — confirm Bookings tab is accessible
 [ ] 7. Run testCalendarConfigs() — confirm each active calendar is reachable
 [ ] 8. Run setupTriggers() — creates all 4 triggers and applies sheet schema
 [ ] 9. Confirm column R (Vehicle Type) and S (Location) have dropdown validation
-[  ] 10. Set up column O dropdown validation manually:
+[ ] 10. Set up column O dropdown validation manually:
          Approved - Free | Approved - Paid | Denied
-[  ] 11. Confirm column T (DocuSeal Submission ID) header exists in row 1
-[  ] 12. Deploy as Web App: Deploy → New deployment → Web app
+[ ] 11. Confirm column T (DocuSeal Submission ID) header exists in row 1
+[ ] 12. Deploy as Web App: Deploy → New deployment → Web app
          Execute as: Me
          Who has access: Anyone
-[  ] 13. Copy the deployment URL
-[  ] 14. Set that URL as the destination in each Pipedream workflow's POST step
-[  ] 15. Configure Stripe webhook to point to the Pipedream Stripe workflow URL
-[  ] 16. Configure DocuSeal webhook to point to the Pipedream DocuSeal workflow URL
-[  ] 17. Test unauthorized POST (expect { "received": false } and no sheet changes)
-[  ] 18. Run testSyncCalendarBookingsNoNotifications() — confirm calendar rows appear
-[  ] 19. Create a real test booking and let syncCalendarBookings detect it naturally
-[  ] 20. Follow docs/testing-plan.md for full end-to-end flow verification
+[ ] 13. Copy the deployment URL
+[ ] 14. Set that URL as the destination in each Pipedream workflow's POST step
+[ ] 15. Configure Stripe webhook to point to the Pipedream Stripe workflow URL
+[ ] 16. Configure DocuSeal webhook to point to the Pipedream DocuSeal workflow URL
+[ ] 17. Test unauthorized POST (expect { "received": false } and no sheet changes)
+[ ] 18. Run testSyncCalendarBookingsNoNotifications() — confirm calendar rows appear
+[ ] 19. Create a real test booking and let syncCalendarBookings detect it naturally
+[ ] 20. Follow docs/testing-plan.md for full end-to-end flow verification
 ```
 
 ### Updating deployed code
@@ -1619,7 +1730,7 @@ Duplicates can happen in two scenarios:
 3. Verify the Pipedream workflow is posting to the current Apps Script deployment URL. If a new
    versioned deployment was created, the URL may have changed.
 4. Use `doGet` to verify the URL is reachable: `curl YOUR_DEPLOYMENT_URL` should return
-   `Reliable Storage webhook endpoint is live.`
+   `{COMPANY_NAME} webhook endpoint is live.` (the value of your `COMPANY_NAME` Script Property).
 
 ### Approval reminders are not sending
 
@@ -1638,23 +1749,22 @@ Duplicates can happen in two scenarios:
 1. Run `testDocuSealPropertyNames()` — confirms `DOCUSEAL_API_KEY` is set and both template IDs
    are numeric.
 2. Verify the DocuSeal template role names match exactly:
-   - Single driver: `Driver`, `Reliable Storage Manager`
+   - Single driver: `Driver #1`, `Reliable Storage Manager`
    - Two drivers: `Driver #1`, `Driver #2`, `Reliable Storage Manager`
 3. Check the Executions log for `sendLeaseViaDocuSeal` — any HTTP 4xx/5xx from DocuSeal will
    appear as `DocuSeal error:` followed by the response body.
 4. Confirm `MANAGER_EMAIL` is set — the manager is added as a co-signer on every lease; if the
-   email is missing, the submitters array may be malformed.
+   email is missing, the submitters array will omit the manager role.
 
 ### Column T (DocuSeal Submission ID) is blank after lease sent
 
-1. Check the Executions log for `DocuSeal response top-level keys:` — this line is logged by
-   `extractDocuSealSubmissionId` on every lease send.
-2. If the keys list does not include `id`, the API is returning the submission ID under a
-   different field name. Update `extractDocuSealSubmissionId` in `DocuSeal.js` to read that
-   field.
-3. If no `DocuSeal response top-level keys:` line appears, the function was not called — check
-   whether `sendLeaseViaDocuSeal` threw before returning (which would also prevent J from being
-   written).
+1. Check the Executions log for `extractDocuSealSubmissionId: isArray=` — this line is logged on
+   every lease send.
+2. If the log shows `isArray=true`, look for the per-element logs showing `submission_id` values.
+   If `submission_id` is absent from all elements, DocuSeal may be using a different field.
+   Update `extractDocuSealSubmissionId` in `DocuSeal.js` accordingly.
+3. If no `extractDocuSealSubmissionId:` line appears, the function was not called — check whether
+   `sendLeaseViaDocuSeal` threw before returning (which would also prevent J from being written).
 
 ### The 24-hour reminder did not fire
 
@@ -1664,6 +1774,19 @@ Duplicates can happen in two scenarios:
 3. The window is `hoursUntilStart` between 0 and 26. If `processReminders` ran when
    `hoursUntilStart` was exactly 0 or exactly 26, verify the actual timestamp difference.
 4. Check the Executions log for `processReminders` runs during the expected window.
+
+### Stripe deposit paid but wrong row updated (or row not found)
+
+1. Check the Executions log for `markDepositPaid` — look for lines indicating whether the eventId
+   primary lookup or email fallback was used.
+2. If `no eventId match` appears and the email fallback also fails, verify that Pipedream is
+   extracting `client_reference_id` from the Stripe event and passing it as `eventId` in the POST
+   body.
+3. Run `testLogStripeUrlForExistingBooking()` to confirm the encoded `client_reference_id` in the
+   payment link round-trips correctly back to the original event ID.
+4. If the `eventId` decoding log line shows `could not decode client_reference_id`, the value may
+   not be valid base64 — check that no URL-encoding happened to the `+` and `/` characters in
+   the Stripe payload before Pipedream passes it to Apps Script.
 
 ---
 
@@ -1682,11 +1805,6 @@ but there is no automated recovery path.
 ID is not available at row creation time — but it means `getDataRange().getValues()` returns an
 array where index 19 is undefined for new rows.
 
-**DocuSeal response shape unverified in production:** `extractDocuSealSubmissionId` reads
-`response.id` based on REST convention. This field path has not been verified against a live
-DocuSeal API response in this codebase. The function logs top-level response keys on every call
-to facilitate verification.
-
 **Single lock for processReminders only:** `processReminders` uses `LockService` to prevent
 overlapping executions. `syncCalendarBookings` and `checkRentalEligibility` do not. Concurrent
 runs of those functions could, in theory, both see the same new booking event (before column A is
@@ -1697,6 +1815,9 @@ perspective, but the race window exists.
 manually. If a column is accidentally deleted or renamed, the script will silently read the wrong
 data.
 
+**Lease email not BCC'd to manager:** DocuSeal sends lease emails directly — they do not pass
+through `sendEmailHtml`. The manager receives a DocuSeal co-signer request instead of a BCC copy.
+
 ### Future improvements
 
 - Add `LockService` to `syncCalendarBookings` to fully close the concurrent-add race window
@@ -1705,7 +1826,6 @@ data.
   re-attempt if I is blank and the event is already in the sheet)
 - Add per-location or per-vehicle-type customisation of email/SMS content
 - Extend `setupSheetSchema` to write and verify all column headers A–T
-- Store DocuSeal submission IDs and provide a lookup function for querying submission status
 - Add rate-limiting awareness for Twilio and SendGrid (both have per-second limits)
 
 ### Technical debt
@@ -1796,7 +1916,7 @@ numbers with a comment identifying the column header (e.g., `data[i][14] // O: R
 
 Use `Logger.log` throughout. Messages include the function name when the context is not obvious.
 Sensitive values (API keys, secrets, phone numbers, email addresses) are never logged. DocuSeal
-response keys are logged but not values.
+response structure (keys and ID fields) is logged on every submission, but not response values.
 
 ### Comments
 
