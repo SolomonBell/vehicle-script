@@ -99,13 +99,15 @@ function processReminders() {
 
           const managerHtml =
             '<p>Upcoming rental tomorrow:</p>' +
-            '<p><strong>Customer:</strong> ' + name + '</p>' +
-            '<p><strong>Date/time:</strong> ' + dateStr + '</p>' +
-            '<p><strong>Vehicle:</strong> ' + vehicleType + '</p>' +
-            '<p><strong>Location:</strong> ' + location + '</p>' +
-            '<p><strong>Deposit paid:</strong> ' + (depositPaid === 'Yes' ? '✅ Yes' : '❌ No') + '</p>' +
-            '<p><strong>Lease signed:</strong> ' + (leaseSigned === 'Yes' ? '✅ Yes' : '❌ Not yet') + '</p>' +
-            '<p><strong>Pre-trip inspection form:</strong><br><a href="' + preUrl + '">Inspection form link</a></p>';
+            '<p>' +
+            '<strong>Customer:</strong> ' + name + '<br>' +
+            '<strong>Vehicle:</strong> ' + vehicleType + '<br>' +
+            '<strong>Location:</strong> ' + location + '<br>' +
+            '<strong>Date/time:</strong> ' + dateStr + '<br>' +
+            '<strong>Deposit paid:</strong> ' + (depositPaid === 'Yes' ? '✅ Yes' : '❌ No') + '<br>' +
+            '<strong>Lease signed:</strong> ' + (leaseSigned === 'Yes' ? '✅ Yes' : '❌ Not yet') + '<br>' +
+            '<strong>Pre-trip inspection form:</strong> <a href="' + preUrl + '">Inspection form link</a>' +
+            '</p>';
 
           if (CONFIG.MANAGER_EMAIL) {
             try { sendEmailHtml(CONFIG.MANAGER_EMAIL, "Tomorrow's rental — " + name + ' — ' + vehicleType, managerHtml); }
@@ -153,11 +155,13 @@ function processReminders() {
             try {
               const mgrPostHtml =
                 '<p>Post-trip inspection form sent to <strong>' + name + '</strong>.</p>' +
-                '<p><strong>Vehicle:</strong> ' + vehicleType + '</p>' +
-                '<p><strong>Location:</strong> ' + location + '</p>' +
-                '<p><strong>Rental date:</strong> ' + dateStr + '</p>' +
-                '<p><strong>Email:</strong> ' + email + '</p>' +
-                '<p><strong>Post-trip form:</strong><br><a href="' + postUrl + '">View inspection form</a></p>' +
+                '<p>' +
+                '<strong>Vehicle:</strong> ' + vehicleType + '<br>' +
+                '<strong>Location:</strong> ' + location + '<br>' +
+                '<strong>Rental date:</strong> ' + dateStr + '<br>' +
+                '<strong>Email:</strong> ' + email + '<br>' +
+                '<strong>Post-trip form:</strong> <a href="' + postUrl + '">View inspection form</a>' +
+                '</p>' +
                 '<p>If the form is not submitted within 24 hours, please follow up directly.</p>';
               sendEmailHtml(CONFIG.MANAGER_EMAIL, 'Post-rental inspection — ' + name + ' — ' + vehicleType, mgrPostHtml);
             } catch(e) { Logger.log('Post-rental manager email failed for ' + name + ': ' + e); }

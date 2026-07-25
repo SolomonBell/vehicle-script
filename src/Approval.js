@@ -47,12 +47,14 @@ function checkRentalEligibility() {
       '</ul>';
 
     const customerBlock =
-      '<p><strong>Customer:</strong> ' + name + '</p>' +
-      '<p><strong>Date/time:</strong> ' + dateStr + '</p>' +
-      '<p><strong>Vehicle:</strong> ' + vehicleType + '</p>' +
-      '<p><strong>Location:</strong> ' + location + '</p>' +
-      '<p><strong>Email:</strong> ' + (email || 'No Email') + '</p>' +
-      '<p><strong>Phone:</strong> ' + (phone || 'No Phone') + '</p>';
+      '<p>' +
+      '<strong>Customer:</strong> ' + name + '<br>' +
+      '<strong>Vehicle:</strong> ' + vehicleType + '<br>' +
+      '<strong>Location:</strong> ' + location + '<br>' +
+      '<strong>Date/time:</strong> ' + dateStr + '<br>' +
+      '<strong>Email:</strong> ' + (email || 'No Email') + '<br>' +
+      '<strong>Phone:</strong> ' + (phone || 'No Phone') +
+      '</p>';
 
     // Branch A — First send (no email has gone out yet)
     if (reminderCount === 0) {

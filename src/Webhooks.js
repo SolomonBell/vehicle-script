@@ -130,6 +130,7 @@ function markDepositPaid(customerEmail, amountPaid, eventId) {
   const phone       = data[i][3];
   const secondEmail = data[i][12] || '';
   const startTime   = new Date(data[i][4]);
+  const endTime     = new Date(data[i][5]);
   const dateStr     = formatDateTime(startTime);
   const leaseSent   = data[i][9];
   const vehicleType = data[i][17] || '';  // R: Vehicle Type
@@ -160,7 +161,7 @@ function markDepositPaid(customerEmail, amountPaid, eventId) {
       sendEmailHtml(email, 'Deposit confirmed — ' + vehicleType + ' rental on ' + dateStr, customerEmailHtml);
 
       // Send lease via DocuSeal
-      const docuSealResp = sendLeaseViaDocuSeal(name, email, secondEmail, dateStr, vehicleType, location);
+      const docuSealResp = sendLeaseViaDocuSeal(name, email, secondEmail, startTime, endTime, vehicleType, location);
       const submissionId = extractDocuSealSubmissionId(docuSealResp);
 
       sheet.getRange(i + 1, 10).setValue('Yes'); // J: Lease Sent

@@ -1,7 +1,7 @@
 // ============================================================
 // DOCUSEAL -- SEND LEASE FOR E-SIGNATURE
 // ============================================================
-function sendLeaseViaDocuSeal(name, email, secondEmail, dateStr, vehicleType, location) {
+function sendLeaseViaDocuSeal(name, email, secondEmail, startTime, endTime, vehicleType, location) {
   const hasTwoDrivers = secondEmail &&
                         secondEmail !== 'No Second Email' &&
                         secondEmail !== '';
@@ -10,12 +10,24 @@ function sendLeaseViaDocuSeal(name, email, secondEmail, dateStr, vehicleType, lo
     ? CONFIG.DOCUSEAL_TEMPLATE_TWO_DRIVERS
     : CONFIG.DOCUSEAL_TEMPLATE_SINGLE;
 
+  const dateStr         = formatDateTime(startTime);
+  const reservationDate = formatDate(startTime);
+  const returnDateTime  = formatDateTime(endTime);
+
   // Build submitters array — role names must match template exactly
   const submitters = [
     {
-      role:  hasTwoDrivers ? 'Driver #1' : 'Driver',
-      email: email,
-      name:  name
+      role:   hasTwoDrivers ? 'Driver #1' : 'Driver',
+      email:  email,
+      name:   name,
+      values: {
+        storage_location: location,
+        vehicle_type:     vehicleType,
+        reservation_date: reservationDate,
+        pickup_datetime:  dateStr,
+        return_datetime:  returnDateTime,
+        driver1_name:     name,
+      }
     }
   ];
 
@@ -30,9 +42,12 @@ function sendLeaseViaDocuSeal(name, email, secondEmail, dateStr, vehicleType, lo
   // Manager must sign both template types
   if (CONFIG.MANAGER_EMAIL) {
     submitters.push({
-      role:  'Reliable Storage Manager', // must match DocuSeal template role name exactly
-      email: CONFIG.MANAGER_EMAIL,
-      name:  CONFIG.FROM_NAME
+      role:   'Reliable Storage Manager', // must match DocuSeal template role name exactly
+      email:  CONFIG.MANAGER_EMAIL,
+      name:   CONFIG.FROM_NAME,
+      values: {
+        manager_name: CONFIG.COMPANY_NAME,
+      }
     });
   }
 
@@ -44,12 +59,11 @@ function sendLeaseViaDocuSeal(name, email, secondEmail, dateStr, vehicleType, lo
       // DocuSeal message.body is plain text — HTML tags are displayed literally.
       // {{submitter.link}} is substituted by DocuSeal with the signing URL.
       body: 'Hi ' + name + ',\n\n' +
-            'Please review and sign your ' + CONFIG.COMPANY_NAME + ' rental agreement for your ' +
-            (vehicleType || 'rental') +
-            (location ? ' at our ' + location + ' location' : '') +
-            ', scheduled for ' + dateStr + '.\n\n' +
-            'Sign here:\n' +
-            '{{submitter.link}}\n\n' +
+            'Please review and sign your ' + CONFIG.COMPANY_NAME + ' rental agreement.\n\n' +
+            (vehicleType ? 'Vehicle: '  + vehicleType + '\n' : '') +
+            (location   ? 'Location: ' + location   + '\n' : '') +
+            'Pickup: '    + dateStr + '\n' +
+            'Sign here: {{submitter.link}}\n\n' +
             'Please complete the agreement before your scheduled pickup.\n\n' +
             'Thank you,\n' +
             CONFIG.COMPANY_NAME

@@ -82,9 +82,9 @@ function syncCalendarBookings() {
           '<p>Your <strong>' + calCfg.vehicleType + '</strong> reservation at our <strong>' +
           calCfg.location + '</strong> location is scheduled for <strong>' + dateStr + '</strong>.</p>' +
           '<p>Please complete the following steps to continue your reservation:</p>' +
-          '<p><strong>1. Pay the $' + getDepositAmount(calCfg.vehicleType) + ' deposit:</strong><br>' +
+          '<p><strong>1. Pay the $' + getDepositAmount(calCfg.vehicleType) + ' deposit:</strong> ' +
           '<a href="' + stripeUrl + '">Pay deposit</a></p>' +
-          '<p><strong>2. Review and submit your pre-filled intake form:</strong><br>' +
+          '<p><strong>2. Review and submit your pre-filled intake form:</strong> ' +
           '<a href="' + intakeUrl + '">Complete intake form</a></p>' +
           '<p>After your deposit is received and the booking is approved, you\'ll receive ' +
           'a rental agreement by email for electronic signature.</p>' +
@@ -98,14 +98,16 @@ function syncCalendarBookings() {
         if (CONFIG.MANAGER_EMAIL) {
           try {
             const mgrHtml =
-              '<p>A new booking has been created:</p>' +
-              '<p><strong>Customer:</strong> ' + name + '</p>' +
-              '<p><strong>Date/time:</strong> ' + dateStr + '</p>' +
-              '<p><strong>Vehicle:</strong> ' + calCfg.vehicleType + '</p>' +
-              '<p><strong>Location:</strong> ' + calCfg.location + '</p>' +
-              '<p><strong>Email:</strong> ' + (email || 'No Email') + '</p>' +
-              '<p><strong>Phone:</strong> ' + (phone || 'No Phone') + '</p>' +
-              '<p><strong>Deposit due:</strong> $' + getDepositAmount(calCfg.vehicleType) + '</p>';
+              '<p>A new booking has been created.</p>' +
+              '<p>' +
+              '<strong>Customer:</strong> ' + name + '<br>' +
+              '<strong>Vehicle:</strong> ' + calCfg.vehicleType + '<br>' +
+              '<strong>Location:</strong> ' + calCfg.location + '<br>' +
+              '<strong>Date/time:</strong> ' + dateStr + '<br>' +
+              '<strong>Email:</strong> ' + (email || 'No Email') + '<br>' +
+              '<strong>Phone:</strong> ' + (phone || 'No Phone') + '<br>' +
+              '<strong>Deposit due:</strong> $' + getDepositAmount(calCfg.vehicleType) +
+              '</p>';
             sendEmailHtml(CONFIG.MANAGER_EMAIL, 'New booking — ' + name + ' — ' + calCfg.vehicleType, mgrHtml);
           } catch(e) { Logger.log('Manager email failed for new booking ' + name + ': ' + e); }
         }
