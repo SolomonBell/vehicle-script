@@ -26,7 +26,6 @@ function sendLeaseViaDocuSeal(name, email, secondEmail, startTime, endTime, vehi
         reservation_date: reservationDate,
         pickup_datetime:  dateStr,
         return_datetime:  returnDateTime,
-        driver1_name:     name,
       }
     }
   ];
@@ -42,12 +41,9 @@ function sendLeaseViaDocuSeal(name, email, secondEmail, startTime, endTime, vehi
   // Manager must sign both template types
   if (CONFIG.MANAGER_EMAIL) {
     submitters.push({
-      role:   'Reliable Storage Manager', // must match DocuSeal template role name exactly
-      email:  CONFIG.MANAGER_EMAIL,
-      name:   CONFIG.FROM_NAME,
-      values: {
-        manager_name: CONFIG.COMPANY_NAME,
-      }
+      role:  'Reliable Storage Manager', // must match DocuSeal template role name exactly
+      email: CONFIG.MANAGER_EMAIL,
+      name:  CONFIG.FROM_NAME,
     });
   }
 
