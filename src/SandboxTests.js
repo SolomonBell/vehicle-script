@@ -884,6 +884,82 @@ function testEmailTemplateStrings() {
     : passed + ' passed, ' + failed + ' failed.');
 }
 
+// ---------------------------------------------------------------------------
+// TEST 16: SendGrid configuration check (no email sent, no API call)
+// Verifies that all Script Properties consumed by sendEmailHtml() and
+// alertAdmin() are set and non-blank, and that address fields look like
+// email addresses. Does not verify SendGrid sender status — that requires
+// a live API call and is outside the scope of this offline check.
+// ---------------------------------------------------------------------------
+function testSendGridConfiguration() {
+  let passed = 0;
+  let failed = 0;
+
+  // Basic email format — avoids the most common config mistakes
+  // (blank value, accidentally pasting a name instead of an address, etc.)
+  function looksLikeEmail(val) {
+    return typeof val === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val.trim());
+  }
+
+  // ---- API key: confirm it is set but never log the value ----
+  if (CONFIG.SENDGRID_KEY && CONFIG.SENDGRID_KEY.trim() !== '') {
+    Logger.log('OK: SENDGRID_KEY is set (value not logged).');
+    passed++;
+  } else {
+    Logger.log('FAIL: SENDGRID_KEY is not set in Script Properties (needs Mail Send permission scope).');
+    failed++;
+  }
+
+  // ---- String properties: set and non-blank ----
+  const STRING_PROPS = [
+    { key: 'FROM_NAME',    label: 'FROM_NAME',    hint: 'Display name shown in the From field' },
+    { key: 'COMPANY_NAME', label: 'COMPANY_NAME', hint: 'Business name used in customer-facing messages' },
+    { key: 'SHEET_NAME',   label: 'SHEET_NAME',   hint: 'Booking sheet tab name — normally "Bookings"' },
+  ];
+
+  STRING_PROPS.forEach(function(p) {
+    const val = CONFIG[p.key] || PROPS[p.key]; // COMPANY_NAME and SHEET_NAME come from PROPS via CONFIG
+    if (val && val.trim() !== '') {
+      Logger.log('OK: ' + p.label + ' is set.');
+      passed++;
+    } else {
+      Logger.log('FAIL: ' + p.label + ' is not set. (' + p.hint + ')');
+      failed++;
+    }
+  });
+
+  // ---- Email address properties: set, non-blank, and look like addresses ----
+  const EMAIL_PROPS = [
+    { key: 'FROM_EMAIL',     label: 'FROM_EMAIL',     hint: 'Must be a verified sender in SendGrid' },
+    { key: 'REPLY_TO_EMAIL', label: 'REPLY_TO_EMAIL', hint: 'Reply-to address on all customer emails' },
+    { key: 'MANAGER_EMAIL',  label: 'MANAGER_EMAIL',  hint: 'BCC recipient and direct notification recipient' },
+    { key: 'ADMIN_EMAIL',    label: 'ADMIN_EMAIL',    hint: 'Escalation and error alert recipient' },
+  ];
+
+  EMAIL_PROPS.forEach(function(p) {
+    const val = CONFIG[p.key];
+    if (!val || val.trim() === '') {
+      Logger.log('FAIL: ' + p.label + ' is not set. (' + p.hint + ')');
+      failed++;
+    } else if (!looksLikeEmail(val)) {
+      Logger.log('FAIL: ' + p.label + ' does not look like an email address (got "' + val + '").');
+      failed++;
+    } else {
+      Logger.log('OK: ' + p.label + ' is set and looks like an email address.');
+      passed++;
+    }
+  });
+
+  // ---- Summary ----
+  if (failed === 0) {
+    Logger.log('SendGrid configuration: all ' + passed + ' checks passed. ' +
+               'Note: sender verification for FROM_EMAIL must be confirmed in the SendGrid dashboard — ' +
+               'this check cannot verify it without a live API call.');
+  } else {
+    Logger.log(passed + ' passed, ' + failed + ' failed. Fix the issues above before testing email delivery.');
+  }
+}
+
 // ============================================================
 // TEST RUNNERS
 // ============================================================
@@ -904,6 +980,7 @@ function runAllSandboxConfigurationTests() {
     testStripePaymentUrls,
     testDepositAmounts,
     testDocuSealPropertyNames,
+    testSendGridConfiguration,
   ];
 
   try {

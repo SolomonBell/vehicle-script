@@ -3,20 +3,16 @@
 // Google Apps Script | Paste into Extensions > Apps Script
 // ============================================================
 // CHANGES IN v8:
-//   - Manager (site@example.com) is now BCC'd on
-//     every customer-facing email so she can track what
-//     customers receive. Emails already addressed to her or to
-//     the admin are excluded to avoid duplicate copies.
+//   - Manager is now BCC'd on every customer-facing email so she
+//     can track what customers receive. Emails already addressed
+//     to her or to the admin are excluded to avoid duplicate copies.
 //     (Centralized in sendEmailHtml — covers future messages.)
-//   - Primary sending address (FROM_EMAIL) changed from
-//     info@ to site@example.com.
-//   - Customer reply-to changed from andrew@ to bainbridge@
-//     so replies reach the site manager.
+//   - Primary sending address (FROM_EMAIL) was updated.
+//   - Customer reply-to was updated so replies reach the site manager.
 //   - SMS: no copy logic added. All texts are already sent FROM
-//     the Bainbridge Twilio number (+12065550111 / TWILIO_NUM),
-//     so every customer text and manager alert already appears
-//     in the App's thread for that number. (A copy to that
-//     number is impossible anyway — Twilio rejects To == From.)
+//     TWILIO_NUM, so every customer text and manager alert already
+//     appears in the App's thread for that number. (A copy is
+//     impossible anyway — Twilio rejects To == From.)
 //   - NOTE: the DocuSeal lease email is sent by DocuSeal, not
 //     through sendEmailHtml, so it is not BCC'd here. The
 //     manager already signs every lease as a DocuSeal submitter.
@@ -43,15 +39,15 @@
 //   - All secrets, API keys, and form/calendar URLs moved out
 //     of CONFIG and into Script Properties. Rotate via Project
 //     Settings > Script Properties; no code change required.
-//   - MANAGER_PHONE corrected to +12065550100 (missing country
-//     code was causing Twilio "Invalid To Phone Number" errors).
-//   - Deposit amount in customer-facing messages updated from
-//     $100 to $50 to match the current Stripe payment link.
+//   - MANAGER_PHONE corrected (missing country code was causing
+//     Twilio "Invalid To Phone Number" errors).
+//   - Deposit amount in customer-facing messages updated to match
+//     the current Stripe payment link.
 // ============================================================
 // CHANGES IN v6:
 //   - Customer name now extracted from event description
-//     ("Andrew Sherrard") instead of event title
-//     ("Bainbridge Cargo Van (Andrew Sherrard)")
+//     ("Booked by / Name") instead of event title
+//     ("Vehicle Type (Name)")
 //   - Rental date now pre-fills correctly in intake form URL
 //   - All emails switched to HTML for clean clickable links
 //   - alertAdmin now uses SendGrid instead of Gmail
