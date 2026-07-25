@@ -1076,3 +1076,27 @@ function runAllSandboxConfigurationTests() {
 
   Logger.log('===== All Sandbox Configuration Tests Completed Successfully =====');
 }
+
+// ---------------------------------------------------------------------------
+// MANUAL STANDALONE TEST: One-time Twilio SMS send
+// Run this manually from the Apps Script editor to verify Twilio delivery.
+// Do NOT add to runAllSandboxConfigurationTests() — this sends a real SMS.
+// ---------------------------------------------------------------------------
+function testSendSingleSms() {
+  Logger.log('Starting sandbox SMS test...');
+
+  const to      = '+12065550199';
+  const message =
+    'Reliable Storage Sandbox Test\n\n' +
+    'This is a manual Twilio SMS test from the sandbox environment.\n\n' +
+    'If you received this message, Twilio is configured correctly.\n\n' +
+    'Timestamp:\n' +
+    formatDateTime(new Date());
+
+  try {
+    sendSms(to, message);
+    Logger.log('Sandbox SMS test completed successfully.');
+  } catch(e) {
+    Logger.log('Sandbox SMS test FAILED: ' + e);
+  }
+}
