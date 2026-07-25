@@ -960,6 +960,85 @@ function testSendGridConfiguration() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// TEST 17: Twilio configuration check (no SMS sent, no API call)
+// Verifies that all Script Properties consumed by sendSms() and the manager
+// SMS paths are set and correctly formatted. Does not call Twilio.
+// ---------------------------------------------------------------------------
+function testTwilioConfiguration() {
+  let passed = 0;
+  let failed = 0;
+
+  // E.164: '+' followed by 7–15 digits (covers all valid international numbers)
+  function looksLikeE164(val) {
+    return typeof val === 'string' && /^\+\d{7,15}$/.test(val.trim());
+  }
+
+  // ---- TWILIO_SID: 'AC' followed by exactly 32 alphanumeric characters ----
+  const sid = CONFIG.TWILIO_SID;
+  if (!sid || sid.trim() === '') {
+    Logger.log('FAIL: TWILIO_SID is not set in Script Properties.');
+    failed++;
+  } else if (!/^AC[a-zA-Z0-9]{32}$/.test(sid.trim())) {
+    Logger.log('FAIL: TWILIO_SID does not match the expected Twilio Account SID format ' +
+               '(should be "AC" followed by 32 alphanumeric characters; got ' +
+               sid.trim().length + ' chars).');
+    failed++;
+  } else {
+    Logger.log('OK: TWILIO_SID starts with AC and has the expected 34-character format.');
+    passed++;
+  }
+
+  // ---- TWILIO_TOKEN: present and non-blank — value never logged ----
+  if (!CONFIG.TWILIO_TOKEN || CONFIG.TWILIO_TOKEN.trim() === '') {
+    Logger.log('FAIL: TWILIO_TOKEN is not set in Script Properties.');
+    failed++;
+  } else {
+    Logger.log('OK: TWILIO_TOKEN is set (value not logged).');
+    passed++;
+  }
+
+  // ---- TWILIO_NUM: SMS-capable Twilio number in E.164 format ----
+  const twilioNum = CONFIG.TWILIO_NUM;
+  if (!twilioNum || twilioNum.trim() === '') {
+    Logger.log('FAIL: TWILIO_NUM is not set in Script Properties ' +
+               '(must be an SMS-capable Twilio number in E.164 format).');
+    failed++;
+  } else if (!looksLikeE164(twilioNum)) {
+    Logger.log('FAIL: TWILIO_NUM does not look like an E.164 phone number ' +
+               '(must start with + followed by 7–15 digits; got "' + twilioNum + '").');
+    failed++;
+  } else {
+    Logger.log('OK: TWILIO_NUM is set and looks like an E.164 number.');
+    passed++;
+  }
+
+  // ---- MANAGER_PHONE: E.164 format required; missing country code caused errors in v7 ----
+  const managerPhone = CONFIG.MANAGER_PHONE;
+  if (!managerPhone || managerPhone.trim() === '') {
+    Logger.log('FAIL: MANAGER_PHONE is not set in Script Properties ' +
+               '(used for manager SMS notifications).');
+    failed++;
+  } else if (!looksLikeE164(managerPhone)) {
+    Logger.log('FAIL: MANAGER_PHONE does not look like an E.164 phone number ' +
+               '(must start with + followed by 7–15 digits; got "' + managerPhone + '"). ' +
+               'Include the country code — e.g. +12065551234 for a US number.');
+    failed++;
+  } else {
+    Logger.log('OK: MANAGER_PHONE is set and looks like an E.164 number.');
+    passed++;
+  }
+
+  // ---- Summary ----
+  if (failed === 0) {
+    Logger.log('Twilio configuration: all ' + passed + ' checks passed. ' +
+               'Note: on a Twilio trial account, all recipient numbers must be individually ' +
+               'verified in the Twilio console before SMS can be delivered to them.');
+  } else {
+    Logger.log(passed + ' passed, ' + failed + ' failed. Fix the issues above before testing SMS delivery.');
+  }
+}
+
 // ============================================================
 // TEST RUNNERS
 // ============================================================
@@ -981,6 +1060,7 @@ function runAllSandboxConfigurationTests() {
     testDepositAmounts,
     testDocuSealPropertyNames,
     testSendGridConfiguration,
+    testTwilioConfiguration,
   ];
 
   try {

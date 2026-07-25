@@ -157,7 +157,10 @@ function markDepositPaid(customerEmail, amountPaid, eventId) {
         '<p>Reply to this email or call us if you have any questions.</p>' +
         '<p>Thank you,<br>' + CONFIG.COMPANY_NAME + '</p>';
 
-      if (phone !== 'No Phone') sendSms(phone, customerSms);
+      if (phone !== 'No Phone') {
+        try { sendSms(phone, customerSms); }
+        catch(e) { Logger.log('markDepositPaid: SMS failed for ' + email + ' — ' + e); }
+      }
       sendEmailHtml(email, 'Deposit confirmed — ' + vehicleType + ' rental on ' + dateStr, customerEmailHtml);
 
       // Send lease via DocuSeal

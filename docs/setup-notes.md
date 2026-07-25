@@ -76,11 +76,17 @@ Calendars with an unset property are silently skipped at sync time. You can add 
 
 ### Twilio (SMS)
 
-| Property key   | What it is                    |
-|----------------|-------------------------------|
-| `TWILIO_SID`   | Twilio Account SID            |
-| `TWILIO_TOKEN` | Twilio Auth Token             |
-| `TWILIO_NUM`   | From-number in E.164 format   |
+| Property key   | What it is                                                                        |
+|----------------|-----------------------------------------------------------------------------------|
+| `TWILIO_SID`   | Twilio Account SID — begins with `AC`, followed by 32 alphanumeric characters     |
+| `TWILIO_TOKEN` | Twilio Auth Token — used for Basic Auth alongside the SID                         |
+| `TWILIO_NUM`   | Twilio phone number used as the sender for all outbound SMS — must be SMS-capable |
+
+`MANAGER_PHONE` (listed under Identity and routing above) is also consumed by the SMS system — it receives new-booking and 24-hour pre-rental notifications.
+
+**E.164 format**: both `TWILIO_NUM` and `MANAGER_PHONE` must begin with `+` followed by the country code and number with no spaces or dashes (e.g. `+12065550100` for a US number). A missing country code produces Twilio "Invalid To Phone Number" errors at send time.
+
+**Trial account**: on a Twilio trial account, all outbound SMS are prefixed with "Sent from your Twilio trial account — " and can only be delivered to phone numbers that have been individually verified in the Twilio console. Verify `MANAGER_PHONE` and any test customer phone numbers before running end-to-end tests.
 
 ### SendGrid (email)
 
