@@ -17,7 +17,7 @@ function sendLeaseViaDocuSeal(name, email, secondEmail, startTime, endTime, vehi
   // Build submitters array — role names must match template exactly
   const submitters = [
     {
-      role:   hasTwoDrivers ? 'Driver #1' : 'Driver',
+      role:   'Driver #1',
       email:  email,
       name:   name,
       values: {

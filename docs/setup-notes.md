@@ -97,7 +97,7 @@ Calendars with an unset property are silently skipped at sync time. You can add 
 | `DOCUSEAL_TEMPLATE_TWO_DRIVERS`   | Template ID for two-driver lease (numeric)     |
 
 Role names in DocuSeal templates must match exactly what the script sends:
-- Single driver: `Driver`, `Reliable Storage Manager`
+- Single driver: `Driver #1`, `Reliable Storage Manager`
 - Two drivers: `Driver #1`, `Driver #2`, `Reliable Storage Manager`
 
 ### Intake Form (Form 1)
