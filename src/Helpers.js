@@ -91,15 +91,50 @@ function getDepositAmount(vehicleType) {
   return CONFIG.DEPOSIT_AMOUNT;
 }
 
-function getStripePaymentUrl(vehicleType) {
-  const urls = {
-    'Cargo Van':    CONFIG.STRIPE_PAYMENT_URL_CARGO_VAN,
-    'Moving Truck': CONFIG.STRIPE_PAYMENT_URL_MOVING_TRUCK,
+function getStripePriceId(vehicleType) {
+  const ids = {
+    'Cargo Van':    CONFIG.STRIPE_PRICE_ID_CARGO_VAN,
+    'Moving Truck': CONFIG.STRIPE_PRICE_ID_MOVING_TRUCK,
   };
-  const url = urls[vehicleType];
-  if (url) return url;
-  if (vehicleType) Logger.log('WARNING: getStripePaymentUrl — unknown vehicleType "' + vehicleType + '"');
-  return CONFIG.STRIPE_PAYMENT_URL;
+  const id = ids[vehicleType];
+  if (id) return id;
+  if (vehicleType) Logger.log('WARNING: getStripePriceId — unknown vehicleType "' + vehicleType + '"');
+  return null;
+}
+
+function createStripeCheckoutSession(vehicleType, clientReferenceId, customerEmail) {
+  const priceId = getStripePriceId(vehicleType);
+  if (!priceId) {
+    throw new Error('createStripeCheckoutSession: no Price ID configured for vehicle type "' +
+                    vehicleType + '"');
+  }
+
+  const payload = {
+    mode:                                    'payment',
+    'line_items[0][price]':                  priceId,
+    'line_items[0][quantity]':               '1',
+    'payment_intent_data[capture_method]':   'manual',
+    'client_reference_id':                   clientReferenceId,
+    success_url:                             'https://reliablestorage.com',
+  };
+  if (customerEmail && customerEmail !== 'No Email') {
+    payload['customer_email'] = customerEmail;
+  }
+
+  const options = {
+    method:  'post',
+    headers: { Authorization: 'Bearer ' + CONFIG.STRIPE_SECRET_KEY },
+    payload: payload,
+    muteHttpExceptions: true,
+  };
+
+  const resp = UrlFetchApp.fetch('https://api.stripe.com/v1/checkout/sessions', options);
+  if (resp.getResponseCode() >= 400) {
+    throw new Error('Stripe API error ' + resp.getResponseCode() +
+                    ' creating checkout session for "' + vehicleType + '"');
+  }
+
+  return JSON.parse(resp.getContentText()).url;
 }
 
 // Returns { email, phone } for the given booking location — the from-address and

@@ -338,6 +338,45 @@ function testLogStripeUrlForExistingBooking() {
 }
 
 // ---------------------------------------------------------------------------
+// MANUAL STANDALONE TEST: Create a live Stripe Checkout Session
+// MAKES A LIVE STRIPE API CALL and creates a real live Checkout Session.
+// Run only when intentionally testing the live Stripe integration.
+// Reads the first booking row that has an Event ID and a Vehicle Type,
+// generates the clientReferenceId using the same encoding as CalendarSync.js,
+// and calls createStripeCheckoutSession(). Logs the returned session URL.
+// Does not send any messages, write to the sheet, or log the Stripe secret key.
+// ---------------------------------------------------------------------------
+function testCreateStripeCheckoutSession() {
+  const sheet = getSheet();
+  const data  = sheet.getDataRange().getValues();
+
+  let row = null;
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] && data[i][17]) {
+      row = data[i];
+      break;
+    }
+  }
+
+  if (!row) {
+    Logger.log('testCreateStripeCheckoutSession: no row found with both an ' +
+               'eventId (col A) and a vehicle type (col R). Add a booking row first.');
+    return;
+  }
+
+  const eventId           = row[0];
+  const vehicleType       = row[17]; // R: Vehicle Type (0-indexed 17)
+  const clientReferenceId = Utilities.base64EncodeWebSafe(eventId).replace(/=+$/, '');
+
+  Logger.log('Vehicle type:         ' + vehicleType);
+  Logger.log('client_reference_id:  ' + clientReferenceId);
+
+  const sessionUrl = createStripeCheckoutSession(vehicleType, clientReferenceId, null);
+
+  Logger.log('Checkout Session URL: ' + sessionUrl);
+}
+
+// ---------------------------------------------------------------------------
 // TEST 9: Deposit amount resolution
 // Verifies each vehicle type returns the correct deposit amount and that
 // unknown/blank vehicle types fall back gracefully.
