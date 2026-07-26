@@ -5,7 +5,12 @@
       "Bash(clasp push *)",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(git -C /Users/solomonbell/vehicle-script diff src/Config.js)",
+      "Bash(git -C /Users/solomonbell/vehicle-script diff src/Helpers.js --no-color)",
+      "Bash(git -C /Users/solomonbell/vehicle-script --no-pager diff --no-color src/Helpers.js)",
+      "Bash(git -C /Users/solomonbell/vehicle-script --no-pager diff --no-color src/CalendarSync.js)",
+      "Bash(git -C /Users/solomonbell/vehicle-script --no-pager diff --no-color src/SandboxTests.js)"
     ]
   }
 }
