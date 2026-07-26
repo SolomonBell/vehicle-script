@@ -75,13 +75,25 @@ const CONFIG = {
   // ---- Twilio (SMS) --------------------------------------------
   TWILIO_SID:   PROPS.TWILIO_SID,
   TWILIO_TOKEN: PROPS.TWILIO_TOKEN,
-  TWILIO_NUM:   PROPS.TWILIO_NUM,
 
   // ---- SendGrid (email) ----------------------------------------
   SENDGRID_KEY:   PROPS.SENDGRID_KEY,
   FROM_EMAIL:     PROPS.FROM_EMAIL,
   FROM_NAME:      PROPS.FROM_NAME,
   REPLY_TO_EMAIL: PROPS.REPLY_TO_EMAIL,
+
+  // ---- Location-specific senders (email and SMS) ---------------
+  // Each active location has its own sending email address and Twilio phone number.
+  // All customer-facing and manager-facing messages for a booking use the sender
+  // for that booking's location (column S). FROM_EMAIL is used only by alertAdmin().
+  EMAIL_BAINBRIDGE:   PROPS.EMAIL_BAINBRIDGE,
+  PHONE_BAINBRIDGE:   PROPS.PHONE_BAINBRIDGE,
+  EMAIL_POULSBO:      PROPS.EMAIL_POULSBO,
+  PHONE_POULSBO:      PROPS.PHONE_POULSBO,
+  EMAIL_PORT_ORCHARD: PROPS.EMAIL_PORT_ORCHARD,
+  PHONE_PORT_ORCHARD: PROPS.PHONE_PORT_ORCHARD,
+  EMAIL_FAIRGROUNDS:  PROPS.EMAIL_FAIRGROUNDS,
+  PHONE_FAIRGROUNDS:  PROPS.PHONE_FAIRGROUNDS,
 
   // ---- DocuSeal (e-signature) ---------------------------------
   DOCUSEAL_KEY:                  PROPS.DOCUSEAL_API_KEY,

@@ -998,21 +998,6 @@ function testTwilioConfiguration() {
     passed++;
   }
 
-  // ---- TWILIO_NUM: SMS-capable Twilio number in E.164 format ----
-  const twilioNum = CONFIG.TWILIO_NUM;
-  if (!twilioNum || twilioNum.trim() === '') {
-    Logger.log('FAIL: TWILIO_NUM is not set in Script Properties ' +
-               '(must be an SMS-capable Twilio number in E.164 format).');
-    failed++;
-  } else if (!looksLikeE164(twilioNum)) {
-    Logger.log('FAIL: TWILIO_NUM does not look like an E.164 phone number ' +
-               '(must start with + followed by 7–15 digits; got "' + twilioNum + '").');
-    failed++;
-  } else {
-    Logger.log('OK: TWILIO_NUM is set and looks like an E.164 number.');
-    passed++;
-  }
-
   // ---- MANAGER_PHONE: E.164 format required; missing country code caused errors in v7 ----
   const managerPhone = CONFIG.MANAGER_PHONE;
   if (!managerPhone || managerPhone.trim() === '') {
@@ -1039,6 +1024,99 @@ function testTwilioConfiguration() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// TEST 18: Location-specific sender configuration
+// Verifies that all EMAIL_<LOCATION> and PHONE_<LOCATION> Script Properties
+// are set and correctly formatted for the four active locations, and that
+// getLocationConfig() resolves every active location without throwing.
+// Does not send any email or SMS. Does not make any API calls.
+// ---------------------------------------------------------------------------
+function testLocationSenderConfig() {
+  let passed = 0;
+  let failed = 0;
+
+  function looksLikeEmail(val) {
+    return typeof val === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val.trim());
+  }
+  function looksLikeE164(val) {
+    return typeof val === 'string' && /^\+\d{7,15}$/.test(val.trim());
+  }
+
+  const LOCATIONS = [
+    { name: 'Bainbridge',   emailKey: 'EMAIL_BAINBRIDGE',   phoneKey: 'PHONE_BAINBRIDGE'   },
+    { name: 'Poulsbo',      emailKey: 'EMAIL_POULSBO',       phoneKey: 'PHONE_POULSBO'      },
+    { name: 'Port Orchard', emailKey: 'EMAIL_PORT_ORCHARD',  phoneKey: 'PHONE_PORT_ORCHARD' },
+    { name: 'Fairgrounds',  emailKey: 'EMAIL_FAIRGROUNDS',   phoneKey: 'PHONE_FAIRGROUNDS'  },
+  ];
+
+  // ---- Check each property is set and in the correct format ----
+  LOCATIONS.forEach(function(loc) {
+    const emailVal = CONFIG[loc.emailKey];
+    const phoneVal = CONFIG[loc.phoneKey];
+
+    if (!emailVal || emailVal.trim() === '') {
+      Logger.log('FAIL [' + loc.name + ']: ' + loc.emailKey + ' is not set in Script Properties.');
+      failed++;
+    } else if (!looksLikeEmail(emailVal)) {
+      Logger.log('FAIL [' + loc.name + ']: ' + loc.emailKey + ' does not look like an email address (got "' + emailVal + '").');
+      failed++;
+    } else {
+      Logger.log('OK [' + loc.name + ']: ' + loc.emailKey + ' is set and looks like an email address.');
+      passed++;
+    }
+
+    if (!phoneVal || phoneVal.trim() === '') {
+      Logger.log('FAIL [' + loc.name + ']: ' + loc.phoneKey +
+                 ' is not set in Script Properties (must be an SMS-capable Twilio number in E.164 format).');
+      failed++;
+    } else if (!looksLikeE164(phoneVal)) {
+      Logger.log('FAIL [' + loc.name + ']: ' + loc.phoneKey +
+                 ' does not look like an E.164 phone number (got "' + phoneVal + '"). ' +
+                 'Must start with + followed by 7–15 digits (e.g. +12065551234).');
+      failed++;
+    } else {
+      Logger.log('OK [' + loc.name + ']: ' + loc.phoneKey + ' is set and looks like an E.164 number.');
+      passed++;
+    }
+  });
+
+  // ---- Verify getLocationConfig resolves each active location without throwing ----
+  LOCATIONS.forEach(function(loc) {
+    try {
+      const cfg = getLocationConfig(loc.name);
+      if (!cfg.email || !cfg.phone) {
+        Logger.log('FAIL [' + loc.name + ']: getLocationConfig returned config with blank email or phone.');
+        failed++;
+      } else {
+        Logger.log('OK [' + loc.name + ']: getLocationConfig resolved correctly.');
+        passed++;
+      }
+    } catch(e) {
+      Logger.log('FAIL [' + loc.name + ']: getLocationConfig threw unexpectedly: ' + e.message);
+      failed++;
+    }
+  });
+
+  // ---- Verify unknown location throws rather than silently falling back ----
+  let unknownThrew = false;
+  try {
+    getLocationConfig('Unknown Location');
+  } catch(e) {
+    unknownThrew = true;
+  }
+  if (unknownThrew) {
+    Logger.log('OK (unknown location): getLocationConfig correctly threw for an unrecognised location.');
+    passed++;
+  } else {
+    Logger.log('FAIL (unknown location): getLocationConfig should throw for an unrecognised location but did not.');
+    failed++;
+  }
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' location sender configuration checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+}
+
 // ============================================================
 // TEST RUNNERS
 // ============================================================
@@ -1049,7 +1127,7 @@ function testTwilioConfiguration() {
 // failure. Does not include sync, intake-form, or response-parsing tests.
 // ---------------------------------------------------------------------------
 function runAllSandboxConfigurationTests() {
-  Logger.log('===== Running Sandbox Configuration Tests =====');
+  Logger.log('===== Running Sandbox Configuration Tests (10 tests) =====');
 
   const tests = [
     validateConfig,
@@ -1061,6 +1139,7 @@ function runAllSandboxConfigurationTests() {
     testDocuSealPropertyNames,
     testSendGridConfiguration,
     testTwilioConfiguration,
+    testLocationSenderConfig,
   ];
 
   try {
@@ -1094,7 +1173,7 @@ function testSendSingleSms() {
     formatDateTime(new Date());
 
   try {
-    sendSms(to, message);
+    sendSms(to, message, CONFIG.PHONE_BAINBRIDGE);
     Logger.log('Sandbox SMS test completed successfully.');
   } catch(e) {
     Logger.log('Sandbox SMS test FAILED: ' + e);

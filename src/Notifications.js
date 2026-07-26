@@ -1,15 +1,16 @@
 // ============================================================
 // SMS via Twilio
 // ============================================================
-// All texts are sent FROM CONFIG.TWILIO_NUM, so every customer message and
-// manager alert already shows up in that number's threads in the App — no
-// separate "copy the manager" send is needed (Twilio rejects To == From).
-function sendSms(toPhone, message) {
+// fromPhone is the Twilio sender number (E.164). Callers pass the location-specific
+// PHONE_<LOCATION> value. Falls back to CONFIG.TWILIO_NUM only for alertAdmin paths
+// and standalone test functions that have no booking location context.
+function sendSms(toPhone, message, fromPhone) {
+  const from = fromPhone || CONFIG.TWILIO_NUM;
   const url = 'https://api.twilio.com/2010-04-01/Accounts/' + CONFIG.TWILIO_SID + '/Messages.json';
   const options = {
     method:  'post',
     headers: { Authorization: 'Basic ' + Utilities.base64Encode(CONFIG.TWILIO_SID + ':' + CONFIG.TWILIO_TOKEN) },
-    payload: { To: toPhone, From: CONFIG.TWILIO_NUM, Body: message },
+    payload: { To: toPhone, From: from, Body: message },
     muteHttpExceptions: true
   };
   const resp = UrlFetchApp.fetch(url, options);
@@ -22,7 +23,12 @@ function sendSms(toPhone, message) {
 // ============================================================
 // EMAIL via SendGrid (HTML)
 // ============================================================
-function sendEmailHtml(toEmail, subject, htmlBody) {
+// fromEmail and replyToEmail are the location-specific EMAIL_<LOCATION> value.
+// Both default to the global CONFIG values when not provided — used only by
+// alertAdmin() which has no booking location context.
+function sendEmailHtml(toEmail, subject, htmlBody, fromEmail, replyToEmail) {
+  const from    = fromEmail    || CONFIG.FROM_EMAIL;
+  const replyTo = replyToEmail || CONFIG.REPLY_TO_EMAIL;
   const url = 'https://api.sendgrid.com/v3/mail/send';
 
   // Build the recipient block. The manager is BCC'd on every customer-facing
@@ -38,8 +44,8 @@ function sendEmailHtml(toEmail, subject, htmlBody) {
 
   const payload = {
     personalizations: [personalization],
-    from:     { email: CONFIG.FROM_EMAIL, name: CONFIG.FROM_NAME },
-    reply_to: { email: CONFIG.REPLY_TO_EMAIL, name: CONFIG.FROM_NAME },
+    from:     { email: from, name: CONFIG.FROM_NAME },
+    reply_to: { email: replyTo, name: CONFIG.FROM_NAME },
     subject:  subject,
     content:  [{ type: 'text/html', value: htmlBody }]
   };

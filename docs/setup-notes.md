@@ -78,13 +78,12 @@ Calendars with an unset property are silently skipped at sync time. You can add 
 
 | Property key   | What it is                                                                        |
 |----------------|-----------------------------------------------------------------------------------|
-| `TWILIO_SID`   | Twilio Account SID — begins with `AC`, followed by 32 alphanumeric characters     |
-| `TWILIO_TOKEN` | Twilio Auth Token — used for Basic Auth alongside the SID                         |
-| `TWILIO_NUM`   | Twilio phone number used as the sender for all outbound SMS — must be SMS-capable |
+| `TWILIO_SID`   | Twilio Account SID — begins with `AC`, followed by 32 alphanumeric characters |
+| `TWILIO_TOKEN` | Twilio Auth Token — used for Basic Auth alongside the SID                     |
 
 `MANAGER_PHONE` (listed under Identity and routing above) is also consumed by the SMS system — it receives new-booking and 24-hour pre-rental notifications.
 
-**E.164 format**: both `TWILIO_NUM` and `MANAGER_PHONE` must begin with `+` followed by the country code and number with no spaces or dashes (e.g. `+12065550100` for a US number). A missing country code produces Twilio "Invalid To Phone Number" errors at send time.
+**E.164 format**: `MANAGER_PHONE` and all `PHONE_<LOCATION>` values must begin with `+` followed by the country code and number with no spaces or dashes (e.g. `+12065550100` for a US number). A missing country code produces Twilio "Invalid To Phone Number" errors at send time.
 
 **Trial account**: on a Twilio trial account, all outbound SMS are prefixed with "Sent from your Twilio trial account — " and can only be delivered to phone numbers that have been individually verified in the Twilio console. Verify `MANAGER_PHONE` and any test customer phone numbers before running end-to-end tests.
 
@@ -134,6 +133,25 @@ Role names in DocuSeal templates must match exactly what the script sends:
 | `INSPECT_ENTRY_TYPE`  | Form entry ID for the inspection type dropdown          |
 | `INSPECT_VAL_PRE`     | Form value for the pre-trip option (exact choice text)  |
 | `INSPECT_VAL_POST`    | Form value for the post-trip option (exact choice text) |
+
+### Location-specific senders
+
+Each active location has its own sending email address and Twilio phone number. Every customer-facing email and SMS for a booking is sent from the address and number associated with that booking's location (column S). The global `FROM_EMAIL` and `TWILIO_NUM` values are used only for admin alert emails and standalone test functions.
+
+| Property key           | What it is                                                             |
+|------------------------|------------------------------------------------------------------------|
+| `EMAIL_BAINBRIDGE`     | From-address for all Bainbridge booking emails                         |
+| `PHONE_BAINBRIDGE`     | Twilio sender number for all Bainbridge booking SMS (E.164)            |
+| `EMAIL_POULSBO`        | From-address for all Poulsbo booking emails                            |
+| `PHONE_POULSBO`        | Twilio sender number for all Poulsbo booking SMS (E.164)               |
+| `EMAIL_PORT_ORCHARD`   | From-address for all Port Orchard booking emails                       |
+| `PHONE_PORT_ORCHARD`   | Twilio sender number for all Port Orchard booking SMS (E.164)          |
+| `EMAIL_FAIRGROUNDS`    | From-address for all Fairgrounds booking emails                        |
+| `PHONE_FAIRGROUNDS`    | Twilio sender number for all Fairgrounds booking SMS (E.164)           |
+
+All `EMAIL_<LOCATION>` values must be verified senders in SendGrid (single sender or authenticated domain). All `PHONE_<LOCATION>` values must be SMS-capable Twilio numbers in E.164 format (`+` followed by 7–15 digits, e.g. `+12065551234`).
+
+The helper function `getLocationConfig(location)` in `Helpers.js` is the single lookup for these properties. It throws — never silently falls back — if the location string does not match one of the four active locations.
 
 ### Webhooks
 

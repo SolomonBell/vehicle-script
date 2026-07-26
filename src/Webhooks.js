@@ -135,6 +135,7 @@ function markDepositPaid(customerEmail, amountPaid, eventId) {
   const leaseSent   = data[i][9];
   const vehicleType = data[i][17] || '';  // R: Vehicle Type
   const location    = data[i][18] || '';  // S: Location
+  const locCfg      = getLocationConfig(location);
 
   if (leaseSent !== 'Yes' && email !== 'No Email') {
     try {
@@ -158,10 +159,10 @@ function markDepositPaid(customerEmail, amountPaid, eventId) {
         '<p>Thank you,<br>' + CONFIG.COMPANY_NAME + '</p>';
 
       if (phone !== 'No Phone') {
-        try { sendSms(phone, customerSms); }
+        try { sendSms(phone, customerSms, locCfg.phone); }
         catch(e) { Logger.log('markDepositPaid: SMS failed for ' + email + ' — ' + e); }
       }
-      sendEmailHtml(email, 'Deposit confirmed — ' + vehicleType + ' rental on ' + dateStr, customerEmailHtml);
+      sendEmailHtml(email, 'Deposit confirmed — ' + vehicleType + ' rental on ' + dateStr, customerEmailHtml, locCfg.email, locCfg.email);
 
       // Send lease via DocuSeal
       const docuSealResp = sendLeaseViaDocuSeal(name, email, secondEmail, startTime, endTime, vehicleType, location);

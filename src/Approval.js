@@ -34,6 +34,14 @@ function checkRentalEligibility() {
     const vehicleType = data[i][17] || '';  // R: Vehicle Type
     const location    = data[i][18] || '';  // S: Location
 
+    let locCfg;
+    try {
+      locCfg = getLocationConfig(location);
+    } catch(e) {
+      Logger.log('checkRentalEligibility: ' + e.message + ' (row ' + (i + 1) + ') — skipping');
+      continue;
+    }
+
     const hoursSince = lastNotified
       ? (Date.now() - new Date(lastNotified).getTime()) / (1000 * 60 * 60)
       : Infinity;
@@ -65,7 +73,7 @@ function checkRentalEligibility() {
 
       try {
         sendEmailHtml(CONFIG.MANAGER_EMAIL,
-          'Action needed — approve rental for ' + name, html);
+          'Action needed — approve rental for ' + name, html, locCfg.email, locCfg.email);
         // Only update P and Q on successful send so failed sends will retry
         sheet.getRange(i + 1, 16).setValue(new Date());
         sheet.getRange(i + 1, 17).setValue(1);
@@ -90,7 +98,7 @@ function checkRentalEligibility() {
 
       try {
         sendEmailHtml(CONFIG.MANAGER_EMAIL,
-          'Reminder #' + reminderCount + ' — approve rental for ' + name, html);
+          'Reminder #' + reminderCount + ' — approve rental for ' + name, html, locCfg.email, locCfg.email);
         sheet.getRange(i + 1, 16).setValue(new Date());
         sheet.getRange(i + 1, 17).setValue(reminderCount + 1);
         SpreadsheetApp.flush();
@@ -117,7 +125,7 @@ function checkRentalEligibility() {
       try {
         sendEmailHtml(CONFIG.ADMIN_EMAIL,
           'ESCALATION: ' + CONFIG.MAX_APPROVAL_REMINDERS +
-            ' approval reminders unanswered — ' + name, html);
+            ' approval reminders unanswered — ' + name, html, locCfg.email, locCfg.email);
         // Bump Q past MAX so the top-of-loop check skips this row forever.
         // Do NOT update P — there's nothing more to time off of.
         sheet.getRange(i + 1, 17).setValue(CONFIG.MAX_APPROVAL_REMINDERS + 1);

@@ -47,6 +47,7 @@ function syncCalendarBookings() {
         const stripeUrl = getStripePaymentUrl(calCfg.vehicleType) +
                           '?client_reference_id=' + clientReferenceId;
         const intakeUrl = buildIntakeUrl(name, email || '', phone || '', startTime);
+        const locCfg    = getLocationConfig(calCfg.location);
 
         sheet.appendRow([
           eventId,                          // A
@@ -91,8 +92,8 @@ function syncCalendarBookings() {
           '<p>Reply to this email or call us if you have any questions.</p>' +
           '<p>Thank you,<br>' + CONFIG.COMPANY_NAME + '</p>';
 
-        if (phone && phone !== 'No Phone') sendSms(phone, welcomeSms);
-        if (email && email !== 'No Email') sendEmailHtml(email, 'Your ' + calCfg.vehicleType + ' reservation — ' + dateStr, welcomeEmailHtml);
+        if (phone && phone !== 'No Phone') sendSms(phone, welcomeSms, locCfg.phone);
+        if (email && email !== 'No Email') sendEmailHtml(email, 'Your ' + calCfg.vehicleType + ' reservation — ' + dateStr, welcomeEmailHtml, locCfg.email, locCfg.email);
 
         // Manager notification
         if (CONFIG.MANAGER_EMAIL) {
@@ -108,14 +109,15 @@ function syncCalendarBookings() {
               '<strong>Phone:</strong> ' + (phone || 'No Phone') + '<br>' +
               '<strong>Deposit due:</strong> $' + getDepositAmount(calCfg.vehicleType) +
               '</p>';
-            sendEmailHtml(CONFIG.MANAGER_EMAIL, 'New booking — ' + name + ' — ' + calCfg.vehicleType, mgrHtml);
+            sendEmailHtml(CONFIG.MANAGER_EMAIL, 'New booking — ' + name + ' — ' + calCfg.vehicleType, mgrHtml, locCfg.email, locCfg.email);
           } catch(e) { Logger.log('Manager email failed for new booking ' + name + ': ' + e); }
         }
         if (CONFIG.MANAGER_PHONE) {
           try {
             sendSms(CONFIG.MANAGER_PHONE,
               'New booking: ' + name + ' on ' + dateStr +
-              ' (' + calCfg.location + ' / ' + calCfg.vehicleType + '). Check the Bookings sheet.');
+              ' (' + calCfg.location + ' / ' + calCfg.vehicleType + '). Check the Bookings sheet.',
+              locCfg.phone);
           } catch(e) { Logger.log('Manager SMS failed for new booking ' + name + ': ' + e); }
         }
 

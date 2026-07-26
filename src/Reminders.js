@@ -37,6 +37,8 @@ function processReminders() {
       const location        = row[18] || '';  // S: Location
 
       try {
+        const locCfg = getLocationConfig(location);
+
         // 24-hour reminder
         if (hoursUntilStart <= 26 && hoursUntilStart >= 0 && sent24hr !== 'Yes'
             && (approved === 'Approved - Free' || approved === 'Approved - Paid')) {
@@ -89,11 +91,11 @@ function processReminders() {
 
           // Each send in its own try/catch — one failure won't block the others
           if (phone !== 'No Phone') {
-            try { sendSms(phone, sms); }
+            try { sendSms(phone, sms, locCfg.phone); }
             catch(e) { Logger.log('24hr SMS failed for ' + name + ': ' + e); }
           }
           if (email !== 'No Email') {
-            try { sendEmailHtml(email, emailSubject, emailHtml); }
+            try { sendEmailHtml(email, emailSubject, emailHtml, locCfg.email, locCfg.email); }
             catch(e) { Logger.log('24hr email failed for ' + name + ': ' + e); }
           }
 
@@ -110,11 +112,11 @@ function processReminders() {
             '</p>';
 
           if (CONFIG.MANAGER_EMAIL) {
-            try { sendEmailHtml(CONFIG.MANAGER_EMAIL, "Tomorrow's rental — " + name + ' — ' + vehicleType, managerHtml); }
+            try { sendEmailHtml(CONFIG.MANAGER_EMAIL, "Tomorrow's rental — " + name + ' — ' + vehicleType, managerHtml, locCfg.email, locCfg.email); }
             catch(e) { Logger.log('Manager email failed: ' + e); }
           }
           if (CONFIG.MANAGER_PHONE) {
-            try { sendSms(CONFIG.MANAGER_PHONE, "Tomorrow's rental: " + name + ' — ' + vehicleType + ' at ' + location + ' on ' + dateStr + '. Deposit: ' + (depositPaid === 'Yes' ? 'Yes' : 'No')); }
+            try { sendSms(CONFIG.MANAGER_PHONE, "Tomorrow's rental: " + name + ' — ' + vehicleType + ' at ' + location + ' on ' + dateStr + '. Deposit: ' + (depositPaid === 'Yes' ? 'Yes' : 'No'), locCfg.phone); }
             catch(e) { Logger.log('Manager SMS failed: ' + e); }
           }
         }
@@ -143,11 +145,11 @@ function processReminders() {
             '<p>Thank you,<br>' + CONFIG.COMPANY_NAME + '</p>';
 
           if (phone !== 'No Phone') {
-            try { sendSms(phone, sms); }
+            try { sendSms(phone, sms, locCfg.phone); }
             catch(e) { Logger.log('Post-rental SMS failed for ' + name + ': ' + e); }
           }
           if (email !== 'No Email') {
-            try { sendEmailHtml(email, 'Post-trip inspection — ' + vehicleType + ' rental', emailHtml); }
+            try { sendEmailHtml(email, 'Post-trip inspection — ' + vehicleType + ' rental', emailHtml, locCfg.email, locCfg.email); }
             catch(e) { Logger.log('Post-rental email failed for ' + name + ': ' + e); }
           }
 
@@ -163,7 +165,7 @@ function processReminders() {
                 '<strong>Post-trip form:</strong> <a href="' + postUrl + '">View inspection form</a>' +
                 '</p>' +
                 '<p>If the form is not submitted within 24 hours, please follow up directly.</p>';
-              sendEmailHtml(CONFIG.MANAGER_EMAIL, 'Post-rental inspection — ' + name + ' — ' + vehicleType, mgrPostHtml);
+              sendEmailHtml(CONFIG.MANAGER_EMAIL, 'Post-rental inspection — ' + name + ' — ' + vehicleType, mgrPostHtml, locCfg.email, locCfg.email);
             } catch(e) { Logger.log('Post-rental manager email failed for ' + name + ': ' + e); }
           }
         }

@@ -403,7 +403,8 @@ src/                          ← working copy — paste each file into Apps Scr
   Webhooks.js                 ← doPost(), doGet(), markDepositPaid(), markLeaseSigned()
   Forms.js                    ← buildIntakeUrl(), buildInspectUrl()
   Helpers.js                  ← getSheet(), extraction helpers, formatters,
-                                 getDepositAmount(), getStripePaymentUrl()
+                                 getDepositAmount(), getStripePaymentUrl(),
+                                 getLocationConfig()
   Setup.js                    ← setupTriggers(), setupSheetSchema()
   SandboxTests.js             ← manual test functions — never wire to triggers
 
@@ -521,14 +522,18 @@ window.
 
 ### Notifications.js
 
-**Functions:** `sendSms(toPhone, message)`, `sendEmailHtml(toEmail, subject, htmlBody)`,
+**Functions:** `sendSms(toPhone, message, fromPhone)`, `sendEmailHtml(toEmail, subject, htmlBody, fromEmail, replyToEmail)`,
 `alertAdmin(subject, body)`
 
-`sendEmailHtml` builds a SendGrid v3 `/mail/send` payload. It automatically BCC's
+`sendEmailHtml` builds a SendGrid v3 `/mail/send` payload. The optional `fromEmail` and
+`replyToEmail` parameters set the sending address for this message; both default to the global
+`CONFIG.FROM_EMAIL` / `CONFIG.REPLY_TO_EMAIL` values when not provided. It automatically BCC's
 `CONFIG.MANAGER_EMAIL` on every customer-facing email, but suppresses the BCC when `toEmail` is
 the manager or admin (to avoid duplicate copies on emails already addressed to them).
 
 `sendSms` posts to the Twilio Messages REST API using Basic Auth with TWILIO_SID:TWILIO_TOKEN.
+The optional `fromPhone` parameter sets the Twilio sender number; all production call sites pass
+`locCfg.phone`.
 
 `alertAdmin` logs the message at `[ALERT]` level and emails `CONFIG.ADMIN_EMAIL` via
 `sendEmailHtml`. If `sendEmailHtml` itself fails, the failure is logged but not re-thrown (alerts
@@ -797,7 +802,7 @@ Form's dropdown field.
 
 ## 8. Script Properties Reference
 
-All 43 Script Properties must be set in **Apps Script → Project Settings → Script Properties**.
+All 50 Script Properties must be set in **Apps Script → Project Settings → Script Properties**.
 No value ever belongs in source code.
 
 ### Identity and routing
@@ -864,14 +869,10 @@ for any financial calculation.
 |---|---|---|---|
 | `TWILIO_SID` | Twilio Account SID — begins with `AC`, followed by 32 alphanumeric characters (34 chars total) | **Yes** | Yes |
 | `TWILIO_TOKEN` | Twilio Auth Token — used for Basic Auth alongside the SID | **Yes** | Yes |
-| `TWILIO_NUM` | Sending number in E.164 format — must be SMS-capable | No | Yes |
 
-All outbound SMS messages send from `TWILIO_NUM`. The site manager can see every customer
-conversation in the Twilio App under that number's thread without needing a separate copy
-(Twilio also rejects `To == From`).
-
-Both `TWILIO_NUM` and `MANAGER_PHONE` must be in E.164 format: `+` followed by 7–15 digits
-(e.g., `+12065551234`). A missing country code produces Twilio "Invalid To Phone Number" errors.
+`MANAGER_PHONE` must be in E.164 format: `+` followed by 7–15 digits (e.g., `+12065551234`).
+A missing country code produces Twilio "Invalid To Phone Number" errors. The outbound sender
+number for each booking is set by `PHONE_<LOCATION>` — see [Location-specific senders](#location-specific-senders).
 
 On a Twilio trial account, all outbound SMS are prefixed with "Sent from your Twilio trial
 account — " and can only be delivered to individually verified phone numbers.
@@ -886,6 +887,29 @@ account — " and can only be delivered to individually verified phone numbers.
 
 `FROM_EMAIL` must be either a verified single sender or belong to an authenticated domain in your
 SendGrid account. An unverified sender produces HTTP 403 errors logged as admin alerts.
+
+`FROM_EMAIL` is used only by `alertAdmin()`. All booking emails and SMS messages use the
+location-specific sender values below.
+
+### Location-specific senders
+
+Each active location sends emails and SMS messages from its own address and number. The booking's
+location (column S) is looked up by `getLocationConfig()` in `Helpers.js`, which returns
+`{ email, phone }` for that location. `getLocationConfig` throws — never silently falls back to
+a different location — if it receives a location string that is not one of the four active values.
+
+| Property | What it is | Format |
+|---|---|---|
+| `EMAIL_BAINBRIDGE` | From-address for all Bainbridge booking emails | Verified SendGrid sender |
+| `PHONE_BAINBRIDGE` | Twilio sender number for all Bainbridge booking SMS | E.164 |
+| `EMAIL_POULSBO` | From-address for all Poulsbo booking emails | Verified SendGrid sender |
+| `PHONE_POULSBO` | Twilio sender number for all Poulsbo booking SMS | E.164 |
+| `EMAIL_PORT_ORCHARD` | From-address for all Port Orchard booking emails | Verified SendGrid sender |
+| `PHONE_PORT_ORCHARD` | Twilio sender number for all Port Orchard booking SMS | E.164 |
+| `EMAIL_FAIRGROUNDS` | From-address for all Fairgrounds booking emails | Verified SendGrid sender |
+| `PHONE_FAIRGROUNDS` | Twilio sender number for all Fairgrounds booking SMS | E.164 |
+
+All eight properties are required. Missing or malformed values are caught by `testLocationSenderConfig()`.
 
 ### DocuSeal (e-signature)
 
@@ -1124,8 +1148,9 @@ workflow at a sandbox Apps Script deployment for testing.
 
 All HTML emails are sent via the SendGrid v3 `/mail/send` endpoint by `sendEmailHtml()`.
 
-**Sender:** `CONFIG.FROM_EMAIL` with display name `CONFIG.FROM_NAME`
-**Reply-to:** `CONFIG.REPLY_TO_EMAIL`
+**Sender:** The location-specific `EMAIL_<LOCATION>` value for all booking-related emails.
+`CONFIG.FROM_EMAIL` is used only by `alertAdmin()`. Display name is always `CONFIG.FROM_NAME`.
+**Reply-to:** Same as the sender — replies to any booking email go to the location's address.
 
 **BCC logic:**
 - Every email addressed to a customer is automatically BCC'd to `CONFIG.MANAGER_EMAIL`.
@@ -1136,10 +1161,13 @@ All HTML emails are sent via the SendGrid v3 `/mail/send` endpoint by `sendEmail
 ### SMS (Twilio)
 
 All SMS messages are sent via the Twilio Messages REST API by `sendSms()`. Auth uses Basic Auth
-encoding of `TWILIO_SID:TWILIO_TOKEN`. All messages send from `CONFIG.TWILIO_NUM`.
+encoding of `TWILIO_SID:TWILIO_TOKEN`.
 
-Because all outbound messages come from the same number, the site manager can see every customer
-conversation in the Twilio App under that number's thread without any additional routing.
+**Sender:** The location-specific `PHONE_<LOCATION>` value. All production SMS and the
+`testSendSingleSms()` smoke test send from a location-specific number.
+
+Because all messages for a given location share the same Twilio number, the site manager can see
+every Bainbridge conversation in one thread, every Poulsbo conversation in another, and so on.
 
 In `markDepositPaid`, the customer SMS is wrapped in its own `try/catch`. A Twilio failure does
 not block the confirmation email or the DocuSeal lease send.
@@ -1328,7 +1356,6 @@ STRIPE_PAYMENT_URL_CARGO_VAN      = any URL (e.g. https://example.com)
 DEPOSIT_AMOUNT_CARGO_VAN          = 50
 TWILIO_SID                        = your Twilio SID
 TWILIO_TOKEN                      = your Twilio token
-TWILIO_NUM                        = +1XXXXXXXXXX
 SENDGRID_KEY                      = SG.your-key
 FROM_EMAIL                        = test@yourdomain.com
 REPLY_TO_EMAIL                    = test@yourdomain.com
@@ -1404,7 +1431,7 @@ triggers.
 ### Quick start
 
 ```
-1. runAllSandboxConfigurationTests()           — run first; validates entire config (9 tests)
+1. runAllSandboxConfigurationTests()           — run first; validates entire config (10 tests)
 2. testCalendarConfigs()                       — confirm calendar connectivity
 3. testSyncCalendarBookingsNoNotifications()   — add rows without sending messages
 4. Then test the full webhook flow with curl (see Sandbox section)
@@ -1417,7 +1444,8 @@ triggers.
 | `validateConfig()` | All required numeric Script Properties are set and contain valid finite numbers. Reports every problem before throwing. |
 | `testDocuSealPropertyNames()` | `DOCUSEAL_API_KEY` is set (value not logged); `DOCUSEAL_TEMPLATE_ONE_DRIVER` and `DOCUSEAL_TEMPLATE_TWO_DRIVERS` are set and numeric. |
 | `testSendGridConfiguration()` | `SENDGRID_KEY` is set (value not logged); `FROM_NAME`, `COMPANY_NAME`, `SHEET_NAME` are non-blank; `FROM_EMAIL`, `REPLY_TO_EMAIL`, `MANAGER_EMAIL`, `ADMIN_EMAIL` are set and look like email addresses. No API call. |
-| `testTwilioConfiguration()` | `TWILIO_SID` matches `AC` + 32 alphanumeric chars; `TWILIO_TOKEN` is set (value not logged); `TWILIO_NUM` and `MANAGER_PHONE` are in E.164 format. No API call. |
+| `testTwilioConfiguration()` | `TWILIO_SID` matches `AC` + 32 alphanumeric chars; `TWILIO_TOKEN` is set (value not logged); `MANAGER_PHONE` is in E.164 format. No API call. |
+| `testLocationSenderConfig()` | All eight `EMAIL_<LOCATION>` and `PHONE_<LOCATION>` properties are set and correctly formatted; `getLocationConfig()` resolves every active location without throwing; throws on an unknown location. No API call. |
 
 ### Connectivity tests
 
@@ -1472,7 +1500,7 @@ triggers.
 
 | Function | What it does |
 |---|---|
-| `runAllSandboxConfigurationTests()` | Runs the following 9 tests in sequence: `validateConfig`, `testSheetConnection`, `testCalendarConfigs`, `testVehicleTypeAndLocationMapping`, `testStripePaymentUrls`, `testDepositAmounts`, `testDocuSealPropertyNames`, `testSendGridConfiguration`, `testTwilioConfiguration`. Logs a clear header before starting and a completion banner when all pass. If any test throws, logs the error and re-throws so the execution is marked failed. |
+| `runAllSandboxConfigurationTests()` | Runs the following 10 tests in sequence: `validateConfig`, `testSheetConnection`, `testCalendarConfigs`, `testVehicleTypeAndLocationMapping`, `testStripePaymentUrls`, `testDepositAmounts`, `testDocuSealPropertyNames`, `testSendGridConfiguration`, `testTwilioConfiguration`, `testLocationSenderConfig`. Logs a clear header before starting and a completion banner when all pass. If any test throws, logs the error and re-throws so the execution is marked failed. |
 
 ### Standalone manual tests (not in runner)
 
@@ -1564,7 +1592,7 @@ projects.
         (Config, CalendarSync, Leases, Approval, Reminders, Notifications,
          DocuSeal, Webhooks, Forms, Helpers, Setup, SandboxTests)
 [ ] 3. Paste the contents of each src/*.js file into its matching editor file
-[ ] 4. Set all 43 Script Properties in Project Settings → Script Properties
+[ ] 4. Set all 50 Script Properties in Project Settings → Script Properties
 [ ] 5. Run validateConfig() from the editor — confirm no errors
 [ ] 6. Run testSheetConnection() — confirm Bookings tab is accessible
 [ ] 7. Run testCalendarConfigs() — confirm each active calendar is reachable
@@ -1632,14 +1660,22 @@ source code changes.
    },
    ```
 
-5. **Set the Script Property** in Apps Script → Project Settings → Script Properties:
-   - Key: `CALENDAR_ID_NEWTOWN_CARGO_VAN`
-   - Value: the Calendar ID from step 3
+5. **Set the Script Properties** in Apps Script → Project Settings → Script Properties:
+   - `CALENDAR_ID_NEWTOWN_CARGO_VAN` → the Calendar ID from step 3
+   - `EMAIL_NEWTOWN` → the sending email address for this location (must be a verified SendGrid sender)
+   - `PHONE_NEWTOWN` → the Twilio phone number for this location in E.164 format
 
-6. **Re-run `setupSheetSchema()`** (or `setupTriggers()`) to add `Newtown` to the Location
+6. **Add the location to `getLocationConfig`** in `src/Helpers.js`. In the `MAP` object, add:
+   ```javascript
+   'Newtown': { email: CONFIG.EMAIL_NEWTOWN, phone: CONFIG.PHONE_NEWTOWN },
+   ```
+   Also add `EMAIL_NEWTOWN` and `PHONE_NEWTOWN` to `CONFIG` in `src/Config.js`.
+
+7. **Re-run `setupSheetSchema()`** (or `setupTriggers()`) to add `Newtown` to the Location
    dropdown in column S.
 
-7. **Run `testCalendarConfigs()`** to confirm the new calendar is accessible.
+8. **Run `testCalendarConfigs()` and `testLocationSenderConfig()`** to confirm the new calendar
+   is accessible and the sender properties are correctly set.
 
 The next `syncCalendarBookings` run will detect events from the new calendar automatically.
 

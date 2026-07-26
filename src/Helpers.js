@@ -101,3 +101,23 @@ function getStripePaymentUrl(vehicleType) {
   if (vehicleType) Logger.log('WARNING: getStripePaymentUrl — unknown vehicleType "' + vehicleType + '"');
   return CONFIG.STRIPE_PAYMENT_URL;
 }
+
+// Returns { email, phone } for the given booking location — the from-address and
+// from-number to use for all emails and SMS related to that booking.
+// Throws if the location is not one of the four active locations so the caller's
+// catch block can alert the admin. Never falls back to a different location.
+function getLocationConfig(location) {
+  const MAP = {
+    'Bainbridge':   { email: CONFIG.EMAIL_BAINBRIDGE,   phone: CONFIG.PHONE_BAINBRIDGE   },
+    'Poulsbo':      { email: CONFIG.EMAIL_POULSBO,       phone: CONFIG.PHONE_POULSBO      },
+    'Port Orchard': { email: CONFIG.EMAIL_PORT_ORCHARD,  phone: CONFIG.PHONE_PORT_ORCHARD },
+    'Fairgrounds':  { email: CONFIG.EMAIL_FAIRGROUNDS,   phone: CONFIG.PHONE_FAIRGROUNDS  },
+  };
+  const cfg = MAP[location];
+  if (!cfg) {
+    Logger.log('ERROR: getLocationConfig — unknown location "' + (location || '') + '". ' +
+               'Valid locations: ' + Object.keys(MAP).join(', ') + '.');
+    throw new Error('Unknown location "' + (location || '') + '". Check column S and CALENDAR_CONFIGS.');
+  }
+  return cfg;
+}
