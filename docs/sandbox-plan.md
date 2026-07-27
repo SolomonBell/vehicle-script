@@ -1,6 +1,13 @@
 # Sandbox Plan — Modular v8 Parity Testing
 
-**Purpose:** Verify that the 11-file modular v8 code behaves identically to the
+> **⚠ Historical document.** This plan was written during the v7-to-v8 parity testing phase,
+> before the multi-site refactor. It references removed Script Properties (`STRIPE_PAYMENT_URL`,
+> `TWILIO_NUM`, `BITLY_TOKEN`, single `CALENDAR_ID`) and the single-location code structure.
+> For current sandbox setup, see **README.md §14 (Sandbox Environment)** and
+> **docs/setup-notes.md**. The Pipedream duplication checklist and curl test cases in
+> sections 5–6 remain valid.
+
+**Original purpose:** Verify that the 11-file modular v8 code behaves identically to the
 single-file production script before beginning the multi-site refactor. Testing
 runs entirely in an isolated environment. No production resource is edited,
 reconfigured, or pointed at a sandbox URL at any point during this process.
@@ -67,21 +74,26 @@ These values must be fresh for the sandbox. Do not copy from production.
 Set all of the following in the **sandbox Apps Script project** under
 Project Settings → Script Properties. Do not touch production Script Properties.
 
-| Property key | Value to use in sandbox |
-|---|---|
-| `CALENDAR_ID` | ID of the new test Google Calendar |
-| `STRIPE_PAYMENT_URL` | Stripe test mode payment link |
-| `STRIPE_SECRET_KEY` | Stripe test mode secret key (`sk_test_...`) |
-| `STRIPE_WEBHOOK_SECRET` | Stripe test mode webhook signing secret (`whsec_...`) |
-| `TWILIO_SID` | Same as production |
-| `TWILIO_TOKEN` | Same as production |
-| `TWILIO_NUM` | Hardcoded in `Config.js` — no Script Property needed |
-| `SENDGRID_KEY` | Same as production |
-| `DOCUSEAL_KEY` | Same as production |
-| `INTAKE_FORM_BASE` | Production form URL, or URL of a test copy |
-| `INSPECT_FORM_BASE` | Production form URL, or URL of a test copy |
-| `BITLY_TOKEN` | Same as production |
-| `WEBHOOK_SHARED_SECRET` | **Newly generated** — different from production |
+> **⚠ Stale property table** — reflects the single-location v8 era. For current required
+> Script Properties, see **docs/setup-notes.md §Script Properties** and
+> **README.md §14 (Sandbox Environment §Minimum Script Properties)**.
+
+| Property key | Value to use in sandbox | Status |
+|---|---|---|
+| `CALENDAR_ID_BAINBRIDGE_CARGO_VAN` | ID of the test Google Calendar | Current |
+| `STRIPE_SECRET_KEY` | Stripe test mode secret key (`sk_test_...`) | Current |
+| `STRIPE_PRICE_ID_CARGO_VAN` | Stripe test mode Price ID | Current |
+| `STRIPE_PRICE_ID_MOVING_TRUCK` | Stripe test mode Price ID | Current |
+| `TWILIO_SID` | Same as production | Current |
+| `TWILIO_TOKEN` | Same as production | Current |
+| `SENDGRID_KEY` | Same as production | Current |
+| `DOCUSEAL_API_KEY` | Same as production | Current |
+| `INTAKE_FORM_BASE` | Production form URL, or URL of a test copy | Current |
+| `INSPECT_FORM_BASE` | Production form URL, or URL of a test copy | Current |
+| `WEBHOOK_SHARED_SECRET` | **Newly generated** — different from production | Current |
+| `STRIPE_PAYMENT_URL` | ~~Stripe test mode payment link~~ | **Removed** — replaced by Checkout Sessions |
+| `TWILIO_NUM` | ~~Hardcoded in Config.js~~ | **Removed** — replaced by per-location `PHONE_<LOCATION>` |
+| `BITLY_TOKEN` | ~~URL shortener~~ | **Removed** — never in current codebase |
 
 Before running any test: open Apps Script → Executions or Logger and run a
 no-op function to confirm the project loads without errors. If `PROPS` or

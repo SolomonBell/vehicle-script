@@ -15,7 +15,7 @@ The Apps Script source is split across multiple files in `src/`. Each file holds
 | `Approval.js` | `checkRentalEligibility` |
 | `Reminders.js` | `processReminders` |
 | `Notifications.js` | `sendSms`, `sendEmailHtml`, `alertAdmin` |
-| `Helpers.js` | `getSheet`, `getExistingEventIds`, extraction helpers, `toDate`, date formatters, `getDepositAmount`, `getStripePaymentUrl` |
+| `Helpers.js` | `getSheet`, `getExistingEventIds`, extraction helpers, `toDate`, date formatters, `getDepositAmount`, `getStripePriceId`, `createStripeCheckoutSession`, `getLocationConfig` |
 | `Setup.js` | `setupTriggers`, `setupSheetSchema` |
 | `SandboxTests.js` | Manual test functions — never wire to triggers |
 
@@ -60,11 +60,11 @@ Calendars with an unset property are silently skipped at sync time. You can add 
 
 ### Stripe
 
-| Property key                       | What it is                                                               |
-|------------------------------------|--------------------------------------------------------------------------|
-| `STRIPE_PAYMENT_URL_CARGO_VAN`     | Public Stripe payment link for the Cargo Van deposit                     |
-| `STRIPE_PAYMENT_URL_MOVING_TRUCK`  | Public Stripe payment link for the Moving Truck deposit                  |
-| `STRIPE_PAYMENT_URL`               | Fallback payment link (used only for rows with a blank Vehicle Type col) |
+| Property key                    | What it is                                                                                   |
+|---------------------------------|----------------------------------------------------------------------------------------------|
+| `STRIPE_SECRET_KEY`             | Stripe secret API key — used server-side to create Checkout Sessions. Never log this value.  |
+| `STRIPE_PRICE_ID_CARGO_VAN`     | Stripe Price ID for the Cargo Van deposit product (must start with `price_`)                 |
+| `STRIPE_PRICE_ID_MOVING_TRUCK`  | Stripe Price ID for the Moving Truck deposit product (must start with `price_`)              |
 
 ### Deposit amounts (customer-facing)
 
@@ -136,7 +136,7 @@ Role names in DocuSeal templates must match exactly what the script sends:
 
 ### Location-specific senders
 
-Each active location has its own sending email address and Twilio phone number. Every customer-facing email and SMS for a booking is sent from the address and number associated with that booking's location (column S). The global `FROM_EMAIL` and `TWILIO_NUM` values are used only for admin alert emails and standalone test functions.
+Each active location has its own sending email address and Twilio phone number. Every customer-facing email and SMS for a booking is sent from the address and number associated with that booking's location (column S). The global `FROM_EMAIL` is used only by `alertAdmin()`. All booking SMS messages are sent from the location-specific `PHONE_<LOCATION>` number returned by `getLocationConfig()`.
 
 | Property key           | What it is                                                             |
 |------------------------|------------------------------------------------------------------------|

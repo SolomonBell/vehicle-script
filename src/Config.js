@@ -9,10 +9,6 @@
 //     (Centralized in sendEmailHtml — covers future messages.)
 //   - Primary sending address (FROM_EMAIL) was updated.
 //   - Customer reply-to was updated so replies reach the site manager.
-//   - SMS: no copy logic added. All texts are already sent FROM
-//     TWILIO_NUM, so every customer text and manager alert already
-//     appears in the App's thread for that number. (A copy is
-//     impossible anyway — Twilio rejects To == From.)
 //   - NOTE: the DocuSeal lease email is sent by DocuSeal, not
 //     through sendEmailHtml, so it is not BCC'd here. The
 //     manager already signs every lease as a DocuSeal submitter.

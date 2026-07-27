@@ -1,11 +1,21 @@
 // ============================================================
-// SANDBOX / DEBUG TEST FUNCTIONS
-// These functions are for manual testing only.
-// Do NOT wire these to triggers. Remove before going to production.
+// SANDBOX TEST FUNCTIONS
+// Run manually from the Apps Script editor. Never wire to triggers.
+//
+// CATEGORIES:
+//   [CONFIG]   Safe configuration checks — no external calls, no sheet writes.
+//              Safe to run at any time, including in runAllSandboxConfigurationTests().
+//   [CALENDAR] Google Calendar read-only — reads calendar via CalendarApp.
+//              No sheet writes. Included in runAllSandboxConfigurationTests().
+//   [SHEET]    Sheet read-only — reads sheet data, no external calls, no writes.
+//   [DRY-RUN]  Sheet read, no external messages, no Stripe sessions.
+//   [MUTATION] Writes to the sheet (appends test rows). Clean up manually after.
+//   [LIVE]     Makes real external API calls (Stripe, Twilio, SendGrid, DocuSeal).
+//              Run only when intentionally testing a live integration.
 // ============================================================
 
 // ---------------------------------------------------------------------------
-// TEST 1: Sheet connection
+// TEST 1: Sheet connection [CALENDAR]
 // Verifies SHEET_ID is set and the Bookings tab is accessible.
 // ---------------------------------------------------------------------------
 function testSheetConnection() {
@@ -16,10 +26,9 @@ function testSheetConnection() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 2: Calendar configs
+// TEST 2: Calendar configs [CALENDAR]
 // Verifies every CALENDAR_CONFIGS entry has its Script Property set and that
-// CalendarApp can connect to the calendar. Replaces the old single-calendar
-// testCalendarConnection().
+// CalendarApp can connect to the calendar.
 // ---------------------------------------------------------------------------
 function testCalendarConfigs() {
   Logger.log('Checking ' + CALENDAR_CONFIGS.length + ' calendar configuration(s)...');
@@ -46,9 +55,10 @@ function testCalendarConfigs() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 3: List all accessible calendars
+// TEST 3: List all accessible calendars [CALENDAR]
 // Debug helper — confirms which calendars are visible to the script account.
 // Useful when a calendar has been shared but CALENDAR_ID isn't confirmed yet.
+// Not included in the runner (output is informational, not pass/fail).
 // ---------------------------------------------------------------------------
 function listAccessibleCalendars() {
   const calendars = CalendarApp.getAllCalendars();
@@ -59,9 +69,9 @@ function listAccessibleCalendars() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 4: Intake form URL builder
+// TEST 4: Intake form URL builder [SHEET]
 // Finds the first row named "Test Customer" in the sheet and logs the
-// pre-filled intake URL. Requires a test row in the sheet.
+// pre-filled intake URL. Requires a test row in the sheet. No writes.
 // ---------------------------------------------------------------------------
 function testBuildIntakeUrl() {
   const sheet = getSheet();
@@ -95,9 +105,9 @@ function testBuildIntakeUrl() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 5: Vehicle type and location mapping
+// TEST 5: Vehicle type and location mapping [CONFIG]
 // Verifies that CALENDAR_CONFIGS contains the correct metadata for every
-// supported location. Does not call any external API.
+// supported location. No external calls.
 // ---------------------------------------------------------------------------
 function testVehicleTypeAndLocationMapping() {
   const EXPECTED = [
@@ -147,7 +157,7 @@ function testVehicleTypeAndLocationMapping() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 6: Missing and invalid calendar ID handling
+// TEST 6: Missing and invalid calendar ID handling [CALENDAR]
 // Verifies that a missing Script Property (null calendarId) and an invalid
 // calendar ID are both handled gracefully — logged, not thrown.
 // ---------------------------------------------------------------------------
@@ -171,11 +181,12 @@ function testMissingCalendarConfig() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 7: Calendar sync dry run — no notifications sent
+// TEST 7: Calendar sync dry run [MUTATION]
 // Reads every calendar in CALENDAR_CONFIGS and appends new events to the
-// sheet without sending any emails, SMS messages, or Stripe links.
+// sheet WITHOUT sending any emails, SMS, or creating Stripe sessions.
 // Vehicle Type (col R) and Location (col S) are written from the calendar
-// config, matching the production syncCalendarBookings() behavior exactly.
+// config, matching production syncCalendarBookings() behavior exactly.
+// CAUTION: Appends rows to the live sheet — clean up test rows manually.
 // ---------------------------------------------------------------------------
 function testSyncCalendarBookingsNoNotifications() {
   const sheet       = getSheet();
@@ -257,51 +268,68 @@ function testSyncCalendarBookingsNoNotifications() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 8: Stripe payment URL resolution
-// Verifies that each vehicle type in CALENDAR_CONFIGS resolves to a non-empty
-// payment URL, and documents the fallback behavior for unknown/blank types.
-// Payment links are public URLs — no secret keys are logged or exposed.
+// TEST 8: Stripe Checkout Session configuration [CONFIG]
+// Verifies STRIPE_SECRET_KEY is set (never logged), STRIPE_PRICE_ID_* properties
+// are set and start with "price_", and every vehicle type in CALENDAR_CONFIGS
+// resolves to a Price ID via getStripePriceId(). No API call is made.
 // ---------------------------------------------------------------------------
-function testStripePaymentUrls() {
+function testStripeConfiguration() {
   let passed = 0;
   let failed = 0;
 
-  // Verify each vehicle type present in CALENDAR_CONFIGS gets a URL
+  // STRIPE_SECRET_KEY — confirm it is set but never log the value
+  const secretKey = PROPS.STRIPE_SECRET_KEY;
+  if (!secretKey || secretKey.trim() === '') {
+    Logger.log('FAIL: STRIPE_SECRET_KEY is not set in Script Properties.');
+    failed++;
+  } else {
+    Logger.log('OK: STRIPE_SECRET_KEY is set (value not logged).');
+    passed++;
+  }
+
+  // STRIPE_PRICE_ID_* — must be set and start with "price_"
+  ['STRIPE_PRICE_ID_CARGO_VAN', 'STRIPE_PRICE_ID_MOVING_TRUCK'].forEach(function(key) {
+    const val = PROPS[key];
+    if (!val || val.trim() === '') {
+      Logger.log('FAIL: ' + key + ' is not set in Script Properties.');
+      failed++;
+    } else if (!val.trim().startsWith('price_')) {
+      Logger.log('FAIL: ' + key + ' does not start with "price_" (got "' + val.trim() + '").');
+      failed++;
+    } else {
+      Logger.log('OK: ' + key + ' = ' + val.trim());
+      passed++;
+    }
+  });
+
+  // Verify each CALENDAR_CONFIGS vehicle type resolves via getStripePriceId()
   const seenTypes = {};
   CALENDAR_CONFIGS.forEach(function(calCfg) {
     if (seenTypes[calCfg.vehicleType]) return; // only test each type once
     seenTypes[calCfg.vehicleType] = true;
 
-    const url = getStripePaymentUrl(calCfg.vehicleType);
-    if (url) {
-      Logger.log('OK [' + calCfg.vehicleType + ']: ' + url.substring(0, 40) + '...');
+    const priceId = getStripePriceId(calCfg.vehicleType);
+    if (priceId) {
+      Logger.log('OK [' + calCfg.vehicleType + ']: getStripePriceId → ' + priceId);
       passed++;
     } else {
-      Logger.log('FAIL [' + calCfg.vehicleType + ']: getStripePaymentUrl returned empty/null — check Script Property');
+      Logger.log('FAIL [' + calCfg.vehicleType + ']: getStripePriceId returned null — ' +
+                 'check STRIPE_PRICE_ID_* Script Properties.');
       failed++;
     }
   });
 
-  // Verify unknown vehicle type falls back (does not throw, does not return null silently)
-  const unknownUrl = getStripePaymentUrl('Unknown Vehicle');
-  Logger.log('Unknown type → fallback URL ' +
-    (unknownUrl ? 'set (' + unknownUrl.substring(0, 40) + '...)' : 'NOT set (STRIPE_PAYMENT_URL is blank)'));
-
-  // Verify blank vehicle type (old rows before multi-site migration)
-  const blankUrl = getStripePaymentUrl('');
-  Logger.log('Blank type   → fallback URL ' +
-    (blankUrl ? 'set (' + blankUrl.substring(0, 40) + '...)' : 'NOT set (STRIPE_PAYMENT_URL is blank)'));
-
   Logger.log(failed === 0
-    ? 'All ' + passed + ' Stripe URL checks passed.'
+    ? 'All ' + passed + ' Stripe configuration checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
 }
 
 // ---------------------------------------------------------------------------
-// TEST 8b: Log Stripe URL for an existing booking row
+// TEST 8b: Log Stripe Price ID and clientReferenceId for an existing booking row [SHEET]
 // Reads the first row with both an eventId (col A) and a vehicle type (col R),
-// builds the full Stripe URL using the same production logic as
-// syncCalendarBookings, and logs it. No messages sent, no sheet writes.
+// logs what Price ID would be used and the encoded clientReferenceId.
+// No API call is made, no messages sent, no sheet writes.
+// To test a live Checkout Session, use testCreateStripeCheckoutSession() instead.
 // ---------------------------------------------------------------------------
 function testLogStripeUrlForExistingBooking() {
   const sheet = getSheet();
@@ -324,12 +352,13 @@ function testLogStripeUrlForExistingBooking() {
   const eventId           = row[0];
   const vehicleType       = row[17]; // R: Vehicle Type (0-indexed 17)
   const clientReferenceId = Utilities.base64EncodeWebSafe(eventId).replace(/=+$/, '');
-  const stripeUrl         = getStripePaymentUrl(vehicleType) +
-                            '?client_reference_id=' + clientReferenceId;
+  const priceId           = getStripePriceId(vehicleType);
 
   Logger.log('Event ID (original):  ' + eventId);
   Logger.log('client_reference_id:  ' + clientReferenceId);
-  Logger.log('Stripe URL:           ' + stripeUrl);
+  Logger.log('Vehicle type:         ' + vehicleType);
+  Logger.log('Stripe Price ID:      ' + (priceId || '(none — check STRIPE_PRICE_ID_* properties)'));
+  Logger.log('--- No API call made. Use testCreateStripeCheckoutSession() for a live session. ---');
 
   // Round-trip decode check — proves the encoded value restores to the exact original event ID
   const padded  = clientReferenceId + '==='.slice(0, (4 - clientReferenceId.length % 4) % 4);
@@ -338,7 +367,7 @@ function testLogStripeUrlForExistingBooking() {
 }
 
 // ---------------------------------------------------------------------------
-// MANUAL STANDALONE TEST: Create a live Stripe Checkout Session
+// MANUAL STANDALONE TEST: Create a live Stripe Checkout Session [LIVE]
 // MAKES A LIVE STRIPE API CALL and creates a real live Checkout Session.
 // Run only when intentionally testing the live Stripe integration.
 // Reads the first booking row that has an Event ID and a Vehicle Type,
@@ -377,7 +406,7 @@ function testCreateStripeCheckoutSession() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 9: Deposit amount resolution
+// TEST 9: Deposit amount resolution [CONFIG]
 // Verifies each vehicle type returns the correct deposit amount and that
 // unknown/blank vehicle types fall back gracefully.
 // ---------------------------------------------------------------------------
@@ -429,7 +458,7 @@ function testDepositAmounts() {
 // ============================================================
 
 // ---------------------------------------------------------------------------
-// TEST 11: DocuSeal Script Property names
+// TEST 11: DocuSeal Script Property names [CONFIG]
 // Confirms DOCUSEAL_API_KEY is set, and that DOCUSEAL_TEMPLATE_ONE_DRIVER and
 // DOCUSEAL_TEMPLATE_TWO_DRIVERS are set and numeric.
 // Does not log secret values. Does not make a live API call.
@@ -468,7 +497,7 @@ function testDocuSealPropertyNames() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 12: extractDocuSealSubmissionId response parsing
+// TEST 12: extractDocuSealSubmissionId response parsing [CONFIG]
 // Uses mocked response objects to verify extraction logic without a live call.
 // Cases 1-4 are retained from before. Cases 5-9 cover the actual live response
 // shape (array of submitter objects) confirmed in sandbox testing.
@@ -582,7 +611,7 @@ function testExtractDocuSealSubmissionId() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 13: Deposit webhook row-lookup logic (no side effects)
+// TEST 13: Deposit webhook row-lookup logic (no side effects) [SHEET]
 // Simulates the eventId-first, email-fallback matching logic in markDepositPaid
 // without writing to the sheet, sending SMS/email, or calling DocuSeal/Stripe.
 // Requires at least one unpaid booking row (column G ≠ 'Yes') with both an
@@ -686,7 +715,7 @@ function testMarkDepositPaidRowLookup() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 14: Lease-signed webhook row-lookup logic (no side effects)
+// TEST 14: Lease-signed webhook row-lookup logic (no side effects) [SHEET]
 // Simulates the submissionId-first, email-fallback matching logic in
 // markLeaseSigned without writing to the sheet or calling any external API.
 // Requires at least one unsigned booking row (column N ≠ 'Yes') with an email
@@ -807,7 +836,7 @@ function testMarkLeaseSignedRowLookup() {
 // ============================================================
 
 // ---------------------------------------------------------------------------
-// TEST 10: Configuration validation
+// TEST 10: Configuration validation [CONFIG]
 // Verifies all required numeric Script Properties are set and contain valid
 // finite numbers. Run this first when setting up a new environment or after
 // changing Script Properties. Reports every problem before throwing.
@@ -843,10 +872,10 @@ function validateConfig() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 15: Email template string verification (no sheet reads, no API calls)
+// TEST 15: Email template string verification [CONFIG]
 // Constructs sample message strings using the same interpolation patterns as
 // the production functions and checks for known-bad strings introduced by
-// earlier hardcoded wording.
+// earlier hardcoded wording. No sheet reads, no API calls.
 // ---------------------------------------------------------------------------
 function testEmailTemplateStrings() {
   let passed = 0;
@@ -924,11 +953,11 @@ function testEmailTemplateStrings() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 16: SendGrid configuration check (no email sent, no API call)
+// TEST 16: SendGrid configuration check [CONFIG]
 // Verifies that all Script Properties consumed by sendEmailHtml() and
 // alertAdmin() are set and non-blank, and that address fields look like
-// email addresses. Does not verify SendGrid sender status — that requires
-// a live API call and is outside the scope of this offline check.
+// email addresses. No email sent, no API call. Does not verify SendGrid
+// sender status — that requires a live API call.
 // ---------------------------------------------------------------------------
 function testSendGridConfiguration() {
   let passed = 0;
@@ -1000,9 +1029,9 @@ function testSendGridConfiguration() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 17: Twilio configuration check (no SMS sent, no API call)
+// TEST 17: Twilio configuration check [CONFIG]
 // Verifies that all Script Properties consumed by sendSms() and the manager
-// SMS paths are set and correctly formatted. Does not call Twilio.
+// SMS paths are set and correctly formatted. No SMS sent, no API call.
 // ---------------------------------------------------------------------------
 function testTwilioConfiguration() {
   let passed = 0;
@@ -1064,7 +1093,7 @@ function testTwilioConfiguration() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 18: Location-specific sender configuration
+// TEST 18: Location-specific sender configuration [CONFIG]
 // Verifies that all EMAIL_<LOCATION> and PHONE_<LOCATION> Script Properties
 // are set and correctly formatted for the four active locations, and that
 // getLocationConfig() resolves every active location without throwing.
@@ -1161,7 +1190,7 @@ function testLocationSenderConfig() {
 // ============================================================
 
 // ---------------------------------------------------------------------------
-// RUNNER: runAllSandboxConfigurationTests
+// RUNNER: runAllSandboxConfigurationTests [CONFIG + CALENDAR]
 // Runs configuration-only tests in sequence. Stops and re-throws on first
 // failure. Does not include sync, intake-form, or response-parsing tests.
 // ---------------------------------------------------------------------------
@@ -1173,7 +1202,7 @@ function runAllSandboxConfigurationTests() {
     testSheetConnection,
     testCalendarConfigs,
     testVehicleTypeAndLocationMapping,
-    testStripePaymentUrls,
+    testStripeConfiguration,
     testDepositAmounts,
     testDocuSealPropertyNames,
     testSendGridConfiguration,
@@ -1196,7 +1225,7 @@ function runAllSandboxConfigurationTests() {
 }
 
 // ---------------------------------------------------------------------------
-// MANUAL STANDALONE TEST: One-time Twilio SMS send
+// MANUAL STANDALONE TEST: One-time Twilio SMS send [LIVE]
 // Run this manually from the Apps Script editor to verify Twilio delivery.
 // Do NOT add to runAllSandboxConfigurationTests() — this sends a real SMS.
 // ---------------------------------------------------------------------------

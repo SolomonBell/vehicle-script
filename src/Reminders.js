@@ -59,10 +59,9 @@ function processReminders() {
             emailHtml +=
               '<p>Your <strong>' + vehicleType + '</strong> pickup at our <strong>' + location +
               '</strong> location is scheduled for <strong>' + dateStr + '</strong>.</p>' +
-              '<p><strong>We have not received your deposit.</strong> ' +
-              'Please pay the $' + getDepositAmount(vehicleType) + ' deposit to confirm your booking:</p>' +
-              '<p><a href="' + getStripePaymentUrl(vehicleType) + '">Pay deposit</a></p>' +
-              '<p>Reply to this email or call us if you have any questions.</p>' +
+              '<p><strong>We have not received your $' + getDepositAmount(vehicleType) + ' deposit.</strong> ' +
+              'Please check your original welcome email for the deposit payment link.</p>' +
+              '<p>Reply to this email or call us if you need assistance.</p>' +
               '<p>Thank you,<br>' + CONFIG.COMPANY_NAME + '</p>';
           } else {
             emailSubject = 'Pickup reminder — ' + vehicleType + ' rental on ' + dateStr;
@@ -84,8 +83,8 @@ function processReminders() {
 
           const sms = depositPaid !== 'Yes'
             ? CONFIG.COMPANY_NAME + ': Your ' + vehicleType + ' pickup at ' + location +
-              ' is scheduled for ' + dateStr + ', but your deposit is still due. Pay now: ' +
-              getStripePaymentUrl(vehicleType)
+              ' is scheduled for ' + dateStr + ', but your $' + getDepositAmount(vehicleType) +
+              ' deposit is still due. Please check your original welcome email for the payment link.'
             : CONFIG.COMPANY_NAME + ': Your ' + vehicleType + ' pickup at ' + location +
               ' is scheduled for ' + dateStr + '. Complete the pre-trip inspection before departure: ' + preUrl;
 

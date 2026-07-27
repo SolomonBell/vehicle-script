@@ -1,16 +1,16 @@
 // ============================================================
 // SMS via Twilio
 // ============================================================
-// fromPhone is the Twilio sender number (E.164). Callers pass the location-specific
-// PHONE_<LOCATION> value. Falls back to CONFIG.TWILIO_NUM only for alertAdmin paths
-// and standalone test functions that have no booking location context.
+// fromPhone is the Twilio sender number (E.164). All callers must pass the
+// location-specific PHONE_<LOCATION> value from getLocationConfig(). There is
+// no fallback — a missing fromPhone will produce a Twilio "From is required" error
+// so the omission surfaces immediately rather than silently using the wrong number.
 function sendSms(toPhone, message, fromPhone) {
-  const from = fromPhone || CONFIG.TWILIO_NUM;
   const url = 'https://api.twilio.com/2010-04-01/Accounts/' + CONFIG.TWILIO_SID + '/Messages.json';
   const options = {
     method:  'post',
     headers: { Authorization: 'Basic ' + Utilities.base64Encode(CONFIG.TWILIO_SID + ':' + CONFIG.TWILIO_TOKEN) },
-    payload: { To: toPhone, From: from, Body: message },
+    payload: { To: toPhone, From: fromPhone, Body: message },
     muteHttpExceptions: true
   };
   const resp = UrlFetchApp.fetch(url, options);

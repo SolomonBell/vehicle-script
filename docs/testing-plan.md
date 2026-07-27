@@ -100,8 +100,8 @@
 
 **Edge case — deposit not paid:**
 - [ ] Set G = blank, re-run
-- [ ] Email subject should be "Action needed — your pickup is tomorrow"
-- [ ] SMS should include deposit payment link
+- [ ] Email subject should be "Action needed — deposit due for tomorrow's [vehicle type] pickup"
+- [ ] SMS should direct customer to check their original welcome email for the payment link
 
 ---
 

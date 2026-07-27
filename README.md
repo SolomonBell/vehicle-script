@@ -51,8 +51,9 @@ post-rental inspection follow-up.
 
 ### What the system does automatically
 
-- Detects new Google Calendar bookings every 5 minutes and sends the customer a welcome message
-  with their deposit payment link and pre-filled rental intake form URL
+- Detects new Google Calendar bookings every 5 minutes, creates a unique Stripe Checkout Session
+  (authorization hold), and sends the customer a welcome message with the session URL and a
+  pre-filled rental intake form URL
 - Notifies the site manager of every new booking and initiates the manager approval loop
 - Sends a DocuSeal e-signature lease to the customer (and second driver, if any) after the deposit
   clears; writes the DocuSeal submission ID to the sheet
@@ -74,7 +75,7 @@ post-rental inspection follow-up.
 | E-mail | SendGrid REST API |
 | SMS | Twilio REST API |
 | E-signature | DocuSeal REST API |
-| Payments | Stripe Payment Links |
+| Payments | Stripe Checkout Sessions (manual authorization holds) |
 | Webhook bridge | Pipedream |
 | Forms | Google Forms (pre-filled URLs) |
 
@@ -104,7 +105,8 @@ Customer books vehicle via Google Booking
   Row appended to Bookings sheet (columns A–T initialized)
             │
             ├──▶  Welcome SMS + email sent to customer
-            │       • Deposit payment link (Stripe, per vehicle type)
+            │       • Stripe Checkout Session URL (unique per booking;
+            │         places an authorization hold on the card)
             │       • Pre-filled intake form URL
             │
             ├──▶  Manager notified (email + SMS)
@@ -133,7 +135,9 @@ Customer books vehicle via Google Booking
                     • Insurance document
                          │
                          ▼
-                  Customer pays deposit via Stripe Payment Link
+                  Customer pays deposit via Stripe Checkout Session
+                    • Authorization hold placed (capture_method: manual)
+                    • Manual capture or release in Stripe Dashboard
                          │
                          ▼
                   Stripe → Pipedream → doPost (markDepositPaid)
@@ -196,16 +200,23 @@ Customer books vehicle via Google Booking
 - Column O (`Rental Approved`) is enforced by a data-validation dropdown. The script never writes
   to this column under any circumstance. Only the site manager sets it.
 
-- Stripe embeds the Google Calendar event ID (base64 URL-safe encoded) as the
-  `client_reference_id` on each payment link. When a deposit clears, Pipedream passes this
-  encoded ID to `doPost` as `eventId`. `markDepositPaid` decodes it and matches the payment to
-  the correct booking row by event ID first, falling back to email matching for older rows.
+- For each new booking, `syncCalendarBookings` calls `createStripeCheckoutSession()` to create a
+  unique Stripe Checkout Session with `capture_method: manual`. This places an authorization hold
+  on the customer's card rather than capturing immediately. The Google Calendar event ID (base64
+  URL-safe encoded) is passed as `client_reference_id`. When Stripe fires the
+  `checkout.session.completed` event, Pipedream passes the encoded event ID to `doPost` as
+  `eventId`. `markDepositPaid` decodes it and matches the payment to the correct booking row by
+  event ID first, falling back to email matching for older rows.
+
+- Authorization holds expire after 7 days (up to 31 days for eligible merchants). Holds must be
+  captured or released manually in the Stripe Dashboard before expiry. Automated capture and
+  release is a planned future enhancement.
 
 - The 24-hour reminder fires when `hoursUntilStart` is between 0 and 26, covering the full
   30-minute trigger interval without gaps. It only fires for approved bookings.
 
 - If the deposit has not cleared when the 24-hour reminder fires, the reminder becomes an urgency
-  notice with the Stripe payment link instead of the inspection form link.
+  notice directing the customer to check their original welcome email for the payment link.
 
 - The post-rental prompt fires `POST_RENTAL_HOURS` after the event end time. If the Calendar
   event has no end time, the script defaults to start time + 4 hours.
@@ -227,7 +238,7 @@ flowchart TD
     G -->|Denied| STOP([Booking closed])
     G -->|Approved - Free or Approved - Paid| H[Approval gate cleared]
 
-    H --> I([Customer pays deposit via Stripe])
+    H --> I([Customer pays via Stripe Checkout Session\nAuthorization hold placed — manual capture])
     I --> J[Stripe → Pipedream validates + forwards\nPOST to doPost with shared secret + eventId]
     J --> K[markDepositPaid\nCol G = Yes · Col H = amount]
     K --> L[Deposit confirmation SMS and email]
@@ -330,7 +341,7 @@ graph TB
 
     subgraph SERVICES["External Services"]
         direction LR
-        STRIPE["Stripe\nPayment Links"]
+        STRIPE["Stripe\nCheckout Sessions\n(manual holds)"]
         DOCUSEAL["DocuSeal\nE-Signatures"]
         SENDGRID["SendGrid\nEmail"]
         TWILIO["Twilio\nSMS"]
@@ -345,8 +356,8 @@ graph TB
     TRIGGERS --> DOCUSEAL
     TRIGGERS -.->|pre-filled URLs embedded in messages| FORMS
 
-    CUST -->|pays deposit| STRIPE
-    STRIPE -->|payment event| PD
+    CUST -->|pays via Checkout Session| STRIPE
+    STRIPE -->|checkout.session.completed| PD
     DOCUSEAL -->|signing completed event| PD
     PD -->|normalised POST + shared secret| DOPOST
 
@@ -374,17 +385,18 @@ const CALENDAR_CONFIGS = [
 `syncCalendarBookings` iterates every entry in one pass. Entries whose Script Property is not set
 (`calendarId` is `undefined`) are silently skipped with a log entry. Each booking row records its
 location and vehicle type in columns R and S, which drive per-vehicle deposit amounts and Stripe
-payment URLs in all downstream messages.
+Price IDs in all downstream messages.
 
 `setupSheetSchema()` derives the column R and S dropdown validation lists directly from
 `CALENDAR_CONFIGS`, so adding a new entry automatically extends both dropdowns on the next
 `setupSheetSchema()` run.
 
-**Vehicle-type resolution:** deposit amounts and Stripe URLs are looked up by vehicle type string
-in `getDepositAmount()` and `getStripePaymentUrl()` in `Helpers.js`. These functions contain
-explicit object-map lookup tables. An unknown vehicle type falls back to the generic
-`DEPOSIT_AMOUNT` and `STRIPE_PAYMENT_URL` Script Properties with a warning log entry. Adding a
-new vehicle type requires updating both lookup tables. See
+**Vehicle-type resolution:** deposit amounts are looked up by vehicle type string in
+`getDepositAmount()` in `Helpers.js`. Stripe Price IDs are looked up in `getStripePriceId()`.
+Both use explicit object-map lookup tables. An unknown vehicle type in `getDepositAmount()` falls
+back to the generic `DEPOSIT_AMOUNT` Script Property with a warning log entry; `getStripePriceId()`
+returns `null` and logs a warning (callers throw if the Price ID is missing). Adding a new vehicle
+type requires updating both lookup tables plus adding `CONFIG` entries and Script Properties. See
 [Adding a New Vehicle Type](#19-adding-a-new-vehicle-type).
 
 ---
@@ -403,8 +415,8 @@ src/                          ← working copy — paste each file into Apps Scr
   Webhooks.js                 ← doPost(), doGet(), markDepositPaid(), markLeaseSigned()
   Forms.js                    ← buildIntakeUrl(), buildInspectUrl()
   Helpers.js                  ← getSheet(), extraction helpers, formatters,
-                                 getDepositAmount(), getStripePaymentUrl(),
-                                 getLocationConfig()
+                                 getDepositAmount(), getStripePriceId(),
+                                 createStripeCheckoutSession(), getLocationConfig()
   Setup.js                    ← setupTriggers(), setupSheetSchema()
   SandboxTests.js             ← manual test functions — never wire to triggers
 
@@ -462,14 +474,19 @@ type. `CALENDAR_CONFIGS` is an array of location/vehicle/calendar entries built 
 **Trigger:** Every 5 minutes
 
 Polls every calendar in `CALENDAR_CONFIGS`. For each event whose ID is not already in the sheet:
-extracts customer data from the event description HTML, appends a 19-column row (A–S; column T is
-left blank), sends the welcome SMS and email, notifies the manager, and marks column I
+extracts customer data from the event description HTML, calls `createStripeCheckoutSession()` to
+create a unique Stripe Checkout Session, appends a 19-column row (A–S; column T is left blank),
+sends the welcome SMS and email with the session URL, notifies the manager, and marks column I
 (Intake Sent) = `Yes`.
 
-The Stripe payment link embedded in the welcome message appends the Google Calendar event ID
-(base64 URL-safe encoded via `Utilities.base64EncodeWebSafe`) as `?client_reference_id=...`.
-Stripe includes this value in its webhook events, which Pipedream passes to `doPost` as `eventId`.
-This allows `markDepositPaid` to match payments to rows by event ID rather than by email alone.
+The Checkout Session is created with `capture_method: manual` (authorization hold) and with the
+Google Calendar event ID (base64 URL-safe encoded via `Utilities.base64EncodeWebSafe`) as the
+`client_reference_id`. Stripe includes this value in its `checkout.session.completed` webhook
+event, which Pipedream passes to `doPost` as `eventId`. This allows `markDepositPaid` to match
+payments to rows by event ID rather than by email alone.
+
+If `createStripeCheckoutSession()` throws (Stripe API error), the per-event try/catch in
+`syncCalendarBookings` calls `alertAdmin` — no row is appended and no messages are sent.
 
 **Deduplication:** Uses event IDs, not the Intake Sent flag. `getExistingEventIds()` loads all
 event IDs from column A before the loop. An event already in the sheet is skipped before any
@@ -622,7 +639,8 @@ the field type; these values match the configured field types.
 **Functions:** `getSheet()`, `getExistingEventIds(sheet)`, `extractBookedByName(text)`,
 `extractPrimaryEmail(text)`, `extractSecondDriverEmail(text)`, `extractPhone(text)`, `toDate()`,
 `formatDate()`, `formatDateForForm()`, `formatDateTime()`, `getDepositAmount(vehicleType)`,
-`getStripePaymentUrl(vehicleType)`
+`getStripePriceId(vehicleType)`, `createStripeCheckoutSession(vehicleType, clientReferenceId, customerEmail)`,
+`getLocationConfig(location)`
 
 `getSheet()` reads `SHEET_ID` directly via
 `PropertiesService.getScriptProperties().getProperty('SHEET_ID')` — it does NOT go through the
@@ -636,9 +654,18 @@ The extraction functions parse structured HTML in Google Calendar event descript
 - `extractSecondDriverEmail` — finds the email after a `<b>Second Driver…</b>` label
 - `extractPhone` — normalises any US phone format to `+1XXXXXXXXXX`
 
-`getDepositAmount` and `getStripePaymentUrl` use explicit object-map lookup tables keyed on the
-vehicle type string. Unknown vehicle types fall back to the generic Script Properties with a
-warning log.
+`getDepositAmount` uses an explicit object-map lookup table keyed on vehicle type string. Unknown
+vehicle types fall back to the generic `DEPOSIT_AMOUNT` Script Property with a warning log.
+
+`getStripePriceId` uses a similar lookup table returning the Stripe Price ID for the vehicle type.
+Unknown vehicle types return `null` with a warning log — callers that receive `null` throw an
+error rather than proceeding.
+
+`createStripeCheckoutSession` makes a live Stripe API call to create a Checkout Session with
+`mode: 'payment'`, `capture_method: 'manual'` (authorization hold), the vehicle's Price ID, and
+the supplied `clientReferenceId`. The `success_url` is `https://reliablestorage.com`. Returns the
+hosted Checkout Session URL. Throws on Stripe API errors (HTTP 4xx/5xx). Never logs the Stripe
+secret key.
 
 ---
 
@@ -844,13 +871,17 @@ each calendar with at least read access.
 
 | Property | Description | Example | Secret | Required |
 |---|---|---|---|---|
-| `STRIPE_PAYMENT_URL_CARGO_VAN` | Public Stripe payment link for cargo van deposit | `https://buy.stripe.com/...` | No | Yes (for Cargo Van) |
-| `STRIPE_PAYMENT_URL_MOVING_TRUCK` | Public Stripe payment link for moving truck deposit | `https://buy.stripe.com/...` | No | Yes (for Moving Truck) |
-| `STRIPE_PAYMENT_URL` | Fallback payment link for rows with blank Vehicle Type column | `https://buy.stripe.com/...` | No | Recommended |
+| `STRIPE_SECRET_KEY` | Stripe secret API key — used server-side to create Checkout Sessions | `sk_live_...` or `sk_test_...` | **Yes** | Yes |
+| `STRIPE_PRICE_ID_CARGO_VAN` | Stripe Price ID for the Cargo Van deposit product | `price_...` | No | Yes (for Cargo Van) |
+| `STRIPE_PRICE_ID_MOVING_TRUCK` | Stripe Price ID for the Moving Truck deposit product | `price_...` | No | Yes (for Moving Truck) |
 
-The payment links embedded in welcome messages automatically include
-`?client_reference_id=<base64-encoded-event-id>`. This allows `markDepositPaid` to identify
-which booking row a payment belongs to by event ID rather than email alone.
+Each booking gets its own dynamically created Checkout Session. `STRIPE_SECRET_KEY` must never
+be logged or embedded in client-facing content. The Price IDs refer to Stripe Products with
+a fixed price matching the deposit amount. In sandbox, use test-mode keys (`sk_test_...`) and
+test-mode Price IDs.
+
+> **Google Apps Script property limit:** this project is at the 50-property limit.
+> Adding a new vehicle type requires a new `STRIPE_PRICE_ID_*` property and one slot is consumed.
 
 ### Deposit amounts
 
@@ -1096,49 +1127,84 @@ the ID could not be captured. In this case `markLeaseSigned` falls back to email
 
 ## 10. Stripe Integration
 
-### Payment links
+### Checkout Sessions with manual authorization holds
 
-Customers pay deposits via public Stripe Payment Links — fixed-price links that Stripe hosts.
-No Stripe API key is needed for the customer-facing flow; the links are just URLs. The script
-stores one per vehicle type and one fallback:
+When a new booking is detected, `syncCalendarBookings` calls `createStripeCheckoutSession()` in
+`Helpers.js` to create a unique hosted Checkout Session. The session has:
 
-- `STRIPE_PAYMENT_URL_CARGO_VAN` — sent to all Bainbridge Cargo Van customers
-- `STRIPE_PAYMENT_URL_MOVING_TRUCK` — sent to all Moving Truck customers
-- `STRIPE_PAYMENT_URL` — fallback for rows where column R is blank (pre-migration rows)
+- `mode: 'payment'` — one-time payment
+- `line_items[0][price]` — the Stripe Price ID for the vehicle type (from `getStripePriceId()`)
+- `line_items[0][quantity]: 1`
+- `payment_intent_data[capture_method]: manual` — places an **authorization hold** rather than
+  capturing immediately. The PaymentIntent enters `requires_capture` state after the customer pays.
+- `client_reference_id` — the Google Calendar event ID, base64 URL-safe encoded (trailing `=`
+  stripped), used to match the webhook payment event back to the correct booking row.
+- `success_url: https://reliablestorage.com` — where Stripe redirects after the customer submits
+  payment. No cancel URL is configured.
+- `customer_email` — pre-populates the Stripe Checkout email field if the customer email is known
+  (omitted for `No Email` rows).
 
-Each link is appended with `?client_reference_id=<encoded-event-id>` where the encoded event ID
-is `Utilities.base64EncodeWebSafe(eventId)` with trailing `=` padding stripped. Stripe passes
-this value back in its webhook payload, enabling exact row matching on payment.
+The function returns the hosted Checkout Session URL, which is embedded in the welcome SMS and
+email sent to the customer.
+
+### Authorization holds and manual capture
+
+Because `capture_method: manual` is used, **the deposit is not charged until a staff member
+manually captures the hold in the Stripe Dashboard** (or via the Stripe API). The workflow is:
+
+1. Customer opens the Checkout Session URL and completes payment → authorization hold placed.
+2. Stripe fires `checkout.session.completed` → Pipedream → `markDepositPaid` → G = Yes.
+3. After reviewing the booking and completing the rental, staff captures the hold in the Stripe
+   Dashboard to charge the card, or releases it if the rental was cancelled.
+
+**Authorization hold expiry:** Standard Stripe authorization holds expire after **7 days**
+(up to 31 days for eligible card merchants). Holds that are neither captured nor released before
+expiry are automatically voided by Stripe. Monitoring hold expiry is a planned future enhancement.
 
 ### Webhook flow
 
-After a customer pays, Stripe sends a webhook event to the Pipedream "Stripe Connection to Google
-App" workflow:
+After the customer completes the Checkout Session, Stripe sends `checkout.session.completed` to
+the Pipedream "Stripe Connection to Google App" workflow:
 
-1. **Pipedream** validates the Stripe signature using the Stripe webhook secret.
-2. Pipedream extracts `customerEmail`, `amountPaid`, and the `client_reference_id` (the encoded
-   event ID) from the Stripe event.
-3. Pipedream injects the `WEBHOOK_SHARED_SECRET` as `secret` and the encoded event ID as
-   `eventId`.
+1. **Pipedream** validates the Stripe webhook signature using the Stripe webhook secret.
+2. Pipedream extracts `customerEmail`, `amountPaid`, and `client_reference_id` (the encoded
+   event ID) from the Stripe event payload.
+3. Pipedream injects `WEBHOOK_SHARED_SECRET` as `secret` and the encoded event ID as `eventId`.
 4. Pipedream POSTs to the Apps Script web app URL:
    ```json
    { "secret": "...", "customerEmail": "...", "amountPaid": "...", "eventId": "..." }
    ```
-5. `doPost` validates the secret, base64-decodes `eventId` (padding is applied as needed), and
+5. `doPost` validates the secret, base64-decodes `eventId` (padding re-applied as needed), and
    calls `markDepositPaid(customerEmail, amountPaid, decodedEventId)`.
 6. `markDepositPaid` matches the row by event ID (column A, primary), falls back to email (column
    C), writes G = Yes and H = amount, sends confirmation messages, and dispatches the DocuSeal
    lease.
 
-If no matching row is found for the customer email, an admin alert is sent and the payment is
-logged for manual follow-up.
+If no matching row is found, an admin alert is sent and the payment is logged for manual follow-up.
+
+### Pipedream (Phase 1 — unchanged)
+
+Pipedream is unchanged from the previous Payment Link implementation. The same workflow handles
+both `checkout.session.completed` events from Checkout Sessions and legacy payment events. No
+Pipedream changes are needed until Phase 2 (automated capture/release).
+
+### Stripe API call in CalendarSync
+
+`createStripeCheckoutSession` makes a synchronous HTTPS call to the Stripe API inside the
+per-event try/catch in `syncCalendarBookings`. If the API call fails (network error, invalid Price
+ID, Stripe outage):
+- The catch block calls `alertAdmin`.
+- No row is appended to the sheet.
+- No welcome message is sent.
+- The event will be retried on the next 5-minute trigger run (because no event ID was ever written
+  to column A).
 
 ### Sandbox vs. production
 
-Stripe has separate test mode and live mode. Use Stripe's test mode payment links for the sandbox
-environment. Test mode events can be triggered via the Stripe CLI (`stripe trigger
-payment_intent.succeeded`) or via Stripe's test Webhooks dashboard. Point the Pipedream Stripe
-workflow at a sandbox Apps Script deployment for testing.
+Stripe has separate test mode and live mode. Use test-mode credentials (`sk_test_...`) and
+test-mode Price IDs for the sandbox environment. Test Checkout Sessions can be completed using
+Stripe's test card numbers (e.g., `4242 4242 4242 4242`). Point the Pipedream Stripe workflow at
+a sandbox Apps Script deployment for testing.
 
 ---
 
@@ -1176,10 +1242,10 @@ not block the confirmation email or the DocuSeal lease send.
 
 | Trigger | Channel | Content |
 |---|---|---|
-| New booking detected | Email + SMS | Welcome message; deposit payment link; pre-filled intake form URL |
+| New booking detected | Email + SMS | Welcome message; Stripe Checkout Session URL; pre-filled intake form URL |
 | Deposit confirmed | Email + SMS | Deposit confirmation; rental agreement coming by email |
 | 24hr before pickup (deposit paid) | Email + SMS | Pickup reminder; pre-trip inspection form link |
-| 24hr before pickup (deposit NOT paid) | Email + SMS | Urgency notice; deposit payment link |
+| 24hr before pickup (deposit NOT paid) | Email + SMS | Urgency notice; direct customer to original welcome email for payment link |
 | After rental ends | Email + SMS | Thank-you; post-trip inspection form link |
 
 ### Manager notifications
@@ -1313,7 +1379,7 @@ isolated copy of every resource so changes can be tested safely before productio
 | Google Sheet | Separate spreadsheet | Set `SHEET_ID` to the sandbox sheet |
 | Google Calendar | Separate test calendar(s) | Share with the script account; set `CALENDAR_ID_*` |
 | Apps Script | Separate project | Separate Script Properties for each environment |
-| Stripe | Stripe test mode | Use test payment links; CLI or dashboard for triggering events |
+| Stripe | Stripe test mode | Use test-mode secret key and Price IDs; complete test sessions with Stripe's test card numbers; CLI or dashboard to trigger webhook events |
 | DocuSeal | DocuSeal test account or test templates | Use test template IDs |
 | Pipedream | Separate workflows (or the same workflows pointed at sandbox deployment URL) | |
 | Google Forms | Reuse production forms or use separate test forms | |
@@ -1352,8 +1418,11 @@ MANAGER_EMAIL                     = your-email@example.com
 MANAGER_PHONE                     = +1XXXXXXXXXX  (or leave blank)
 FROM_NAME                         = Reliable Storage (Test)
 CALENDAR_ID_BAINBRIDGE_CARGO_VAN  = ID of your test calendar
-STRIPE_PAYMENT_URL_CARGO_VAN      = any URL (e.g. https://example.com)
+STRIPE_SECRET_KEY                 = sk_test_... (Stripe test-mode secret key)
+STRIPE_PRICE_ID_CARGO_VAN         = price_... (Stripe test-mode Price ID)
+STRIPE_PRICE_ID_MOVING_TRUCK      = price_... (Stripe test-mode Price ID)
 DEPOSIT_AMOUNT_CARGO_VAN          = 50
+DEPOSIT_AMOUNT_MOVING_TRUCK       = 100
 TWILIO_SID                        = your Twilio SID
 TWILIO_TOKEN                      = your Twilio token
 SENDGRID_KEY                      = SG.your-key
@@ -1460,7 +1529,7 @@ triggers.
 | Function | What it verifies |
 |---|---|
 | `testVehicleTypeAndLocationMapping()` | Every entry in `CALENDAR_CONFIGS` has the correct `propKey`, `location`, and `vehicleType` values. Useful after adding a new location. |
-| `testStripePaymentUrls()` | Every vehicle type in `CALENDAR_CONFIGS` resolves to a non-empty Stripe URL via `getStripePaymentUrl()`. Also tests the unknown-type and blank-type fallbacks. |
+| `testStripeConfiguration()` | `STRIPE_SECRET_KEY` is set (value not logged); `STRIPE_PRICE_ID_CARGO_VAN` and `STRIPE_PRICE_ID_MOVING_TRUCK` are set and start with `price_`; every vehicle type in `CALENDAR_CONFIGS` resolves via `getStripePriceId()`. No API call. |
 | `testDepositAmounts()` | Every vehicle type in `CALENDAR_CONFIGS` resolves to a deposit amount via `getDepositAmount()`. Also tests the unknown-type and blank-type fallbacks. |
 
 ### Response parsing tests
@@ -1493,14 +1562,15 @@ triggers.
 
 | Function | What it verifies |
 |---|---|
-| `testSyncCalendarBookingsNoNotifications()` | Full calendar sync — appends rows to the sheet for new events — without sending any email, SMS, or Stripe links. Mirrors `syncCalendarBookings` exactly (including columns R and S). Safe to run repeatedly; test rows must be cleaned up manually afterward. |
-| `testLogStripeUrlForExistingBooking()` | Reads the first row with an event ID (col A) and vehicle type (col R) and logs the full Stripe payment URL with encoded `client_reference_id`. Also performs a round-trip decode to verify the encoding. No sends, no sheet writes. |
+| `testSyncCalendarBookingsNoNotifications()` | Full calendar sync — appends rows to the sheet for new events — without sending any email, SMS, or creating Stripe sessions. Mirrors `syncCalendarBookings` exactly (including columns R and S). Safe to run repeatedly; test rows must be cleaned up manually afterward. |
+| `testLogStripeUrlForExistingBooking()` | Reads the first booking row with an event ID (col A) and vehicle type (col R). Logs the encoded `client_reference_id`, the vehicle type, and the Stripe Price ID that would be used. Includes a round-trip base64 decode check. No API call, no messages, no sheet writes. |
+| `testCreateStripeCheckoutSession()` | **MAKES A LIVE STRIPE API CALL** — creates a real Checkout Session. Reads the first booking row with an event ID (col A) and vehicle type (col R), generates `clientReferenceId` using the same encoding as `CalendarSync.js`, calls `createStripeCheckoutSession()`, and logs the returned session URL. Run only when intentionally testing the live Stripe integration. Never logged: secret key, full API response. Not in the runner. |
 
 ### Test runners
 
 | Function | What it does |
 |---|---|
-| `runAllSandboxConfigurationTests()` | Runs the following 10 tests in sequence: `validateConfig`, `testSheetConnection`, `testCalendarConfigs`, `testVehicleTypeAndLocationMapping`, `testStripePaymentUrls`, `testDepositAmounts`, `testDocuSealPropertyNames`, `testSendGridConfiguration`, `testTwilioConfiguration`, `testLocationSenderConfig`. Logs a clear header before starting and a completion banner when all pass. If any test throws, logs the error and re-throws so the execution is marked failed. |
+| `runAllSandboxConfigurationTests()` | Runs 10 tests in sequence: `validateConfig`, `testSheetConnection`, `testCalendarConfigs`, `testVehicleTypeAndLocationMapping`, `testStripeConfiguration`, `testDepositAmounts`, `testDocuSealPropertyNames`, `testSendGridConfiguration`, `testTwilioConfiguration`, `testLocationSenderConfig`. Logs a clear header before starting and a completion banner when all pass. |
 
 ### Standalone manual tests (not in runner)
 
@@ -1702,11 +1772,11 @@ Script Properties.
      ...
    }
 
-   function getStripePaymentUrl(vehicleType) {
-     const urls = {
-       'Cargo Van':    CONFIG.STRIPE_PAYMENT_URL_CARGO_VAN,
-       'Moving Truck': CONFIG.STRIPE_PAYMENT_URL_MOVING_TRUCK,
-       'Box Truck':    CONFIG.STRIPE_PAYMENT_URL_BOX_TRUCK, // ← add
+   function getStripePriceId(vehicleType) {
+     const ids = {
+       'Cargo Van':    CONFIG.STRIPE_PRICE_ID_CARGO_VAN,
+       'Moving Truck': CONFIG.STRIPE_PRICE_ID_MOVING_TRUCK,
+       'Box Truck':    CONFIG.STRIPE_PRICE_ID_BOX_TRUCK,  // ← add
      };
      ...
    }
@@ -1718,13 +1788,16 @@ Script Properties.
    DEPOSIT_AMOUNT_BOX_TRUCK:     PROPS.DEPOSIT_AMOUNT_BOX_TRUCK,
 
    // ---- Stripe ----
-   STRIPE_PAYMENT_URL_BOX_TRUCK: PROPS.STRIPE_PAYMENT_URL_BOX_TRUCK,
+   STRIPE_PRICE_ID_BOX_TRUCK:    PROPS.STRIPE_PRICE_ID_BOX_TRUCK,
    ```
 
 4. **Set the new Script Properties** in the Apps Script console:
    - `DEPOSIT_AMOUNT_BOX_TRUCK` — e.g. `75`
-   - `STRIPE_PAYMENT_URL_BOX_TRUCK` — the Stripe payment link URL
+   - `STRIPE_PRICE_ID_BOX_TRUCK` — the Stripe Price ID for the Box Truck deposit product
    - `CALENDAR_ID_<LOCATION>_BOX_TRUCK` — one per location using this vehicle type
+   - Note: this project is at the 50-property limit. Each new vehicle type consumes 2 slots
+     (`DEPOSIT_AMOUNT_*` and `STRIPE_PRICE_ID_*`) plus one per calendar. Verify you have
+     capacity before adding.
 
 5. **Re-run `setupSheetSchema()`** to add `Box Truck` to the Vehicle Type dropdown in column R.
 
@@ -1811,18 +1884,30 @@ Duplicates can happen in two scenarios:
    `hoursUntilStart` was exactly 0 or exactly 26, verify the actual timestamp difference.
 4. Check the Executions log for `processReminders` runs during the expected window.
 
+### Stripe Checkout Session not created (syncCalendarBookings alert)
+
+1. Check the Executions log for `syncCalendarBookings` — look for `Stripe API error` followed by
+   an HTTP status code (e.g., `400`, `401`, `404`).
+2. A `401` error means `STRIPE_SECRET_KEY` is invalid or missing. Verify it is set correctly in
+   Script Properties. It should start with `sk_live_` (production) or `sk_test_` (sandbox).
+3. A `404` error on the Price lookup means `STRIPE_PRICE_ID_CARGO_VAN` or
+   `STRIPE_PRICE_ID_MOVING_TRUCK` does not exist in the Stripe account associated with your key.
+   Verify the Price IDs in the Stripe Dashboard match the Script Properties exactly.
+4. If the Stripe call fails, no row is appended to the sheet and no welcome message is sent.
+   The booking event will be retried on the next 5-minute trigger run.
+5. Run `testCreateStripeCheckoutSession()` (standalone, not in the runner) to manually verify
+   that Stripe API calls succeed for an existing booking row.
+
 ### Stripe deposit paid but wrong row updated (or row not found)
 
 1. Check the Executions log for `markDepositPaid` — look for lines indicating whether the eventId
    primary lookup or email fallback was used.
 2. If `no eventId match` appears and the email fallback also fails, verify that Pipedream is
-   extracting `client_reference_id` from the Stripe event and passing it as `eventId` in the POST
-   body.
-3. Run `testLogStripeUrlForExistingBooking()` to confirm the encoded `client_reference_id` in the
-   payment link round-trips correctly back to the original event ID.
-4. If the `eventId` decoding log line shows `could not decode client_reference_id`, the value may
-   not be valid base64 — check that no URL-encoding happened to the `+` and `/` characters in
-   the Stripe payload before Pipedream passes it to Apps Script.
+   extracting `client_reference_id` from the Stripe `checkout.session.completed` event and
+   passing it as `eventId` in the POST body.
+3. If the `eventId` decoding log line shows `could not decode client_reference_id`, the value may
+   not be valid base64 — check that no URL-encoding of `+` and `/` characters happened in the
+   Stripe payload before Pipedream passes it to Apps Script.
 
 ---
 
@@ -1854,8 +1939,18 @@ data.
 **Lease email not BCC'd to manager:** DocuSeal sends lease emails directly — they do not pass
 through `sendEmailHtml`. The manager receives a DocuSeal co-signer request instead of a BCC copy.
 
+### Stripe Checkout Session migration (complete)
+
+The migration from static Stripe Payment Links to dynamic Stripe Checkout Sessions with manual
+authorization holds is complete. All source files (`src/Config.js`, `src/Helpers.js`,
+`src/CalendarSync.js`, `src/Reminders.js`, `src/SandboxTests.js`) and `docs/setup-notes.md`
+have been updated. Authorization hold capture/release remains manual via the Stripe Dashboard
+and is tracked under Future improvements below.
+
 ### Future improvements
 
+- **Phase 2 Stripe:** Automate authorization hold capture on approved bookings; automate release on denied bookings or cancellations
+- Add hold-expiry monitoring — alert admin when a `requires_capture` PaymentIntent is approaching the 7-day expiry
 - Add `LockService` to `syncCalendarBookings` to fully close the concurrent-add race window
 - Add automated column header verification (compare row 1 against expected headers at startup)
 - Add retry logic for failed welcome messages (e.g., check I flag independently of event ID, and
