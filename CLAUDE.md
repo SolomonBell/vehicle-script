@@ -1,8 +1,8 @@
-# CLAUDE.md — Reliable Storage Truck Rental Automation
+# CLAUDE.md — Reliable Storage Vehicle Rental Automation
 
 ## What this repo is
 
-Google Apps Script automation for Reliable Storage truck rentals.
+Google Apps Script automation for Reliable Storage vehicle rentals.
 Supports multiple locations and vehicle types via `CALENDAR_CONFIGS`.
 The script lives in Google Apps Script (not Node.js) — it cannot be run locally.
 
@@ -22,9 +22,12 @@ src/                   ← working copy — paste each file into Apps Script
   Helpers.js           ← getSheet(), extraction helpers, formatters
   Setup.js             ← setupTriggers(), setupSheetSchema()
   SandboxTests.js      ← manual test functions (never trigger these)
-archive/v7-original.js ← unmodified v7 source, never edit
 docs/setup-notes.md   ← Script Properties, trigger setup, sheet columns
 docs/testing-plan.md  ← step-by-step flow test checklist
+docs/architecture-proposal.md    ← historical — multi-site proposal; superseded by the
+                                    CALENDAR_CONFIGS-based design actually implemented
+docs/production-diff-summary.md  ← historical — v7 → v8 diff analysis, questions resolved
+docs/sandbox-plan.md             ← historical — see README.md §14 for current sandbox setup
 ```
 
 ## Rules for editing src/
@@ -51,15 +54,17 @@ docs/testing-plan.md  ← step-by-step flow test checklist
 ## Branch strategy
 
 - `main` — active multi-site implementation
-- `refactor/multi-site` — not needed; multi-site work landed on main
+- `feature/multisite-architecture` — historical planning branch (early architecture proposal
+  and Pipedream design notes); fully superseded by the multi-site work that landed on `main`,
+  which took a different, simpler design than what this branch proposed
 
 ## Key integrations
 
 | Service   | Purpose                        | Config key(s)                                                             |
 |-----------|--------------------------------|---------------------------------------------------------------------------|
-| Stripe    | Deposit payment + webhook      | STRIPE_PAYMENT_URL_CARGO_VAN, STRIPE_PAYMENT_URL_MOVING_TRUCK, STRIPE_PAYMENT_URL (fallback) |
+| Stripe    | Deposit payment + webhook      | STRIPE_SECRET_KEY, STRIPE_PRICE_ID_CARGO_VAN, STRIPE_PRICE_ID_MOVING_TRUCK (dynamic Checkout Sessions, capture_method=manual) |
 | DocuSeal  | E-signature lease              | DOCUSEAL_KEY, DOCUSEAL_TEMPLATE_SINGLE, DOCUSEAL_TEMPLATE_TWO_DRIVERS     |
 | SendGrid  | HTML email                     | SENDGRID_KEY, FROM_EMAIL, REPLY_TO_EMAIL                                  |
-| Twilio    | SMS                            | TWILIO_SID, TWILIO_TOKEN, TWILIO_NUM                                      |
+| Twilio    | SMS                            | TWILIO_SID, TWILIO_TOKEN (sender number is per-location — PHONE_BAINBRIDGE, PHONE_POULSBO, etc., not a single CONFIG.TWILIO_NUM) |
 | G Calendar| Booking source (multi-site)    | CALENDAR_ID_BAINBRIDGE_CARGO_VAN, CALENDAR_ID_POULSBO_MOVING_TRUCK, etc. |
 | G Forms   | Intake + inspection pre-fill   | INTAKE_FORM_BASE, INSPECT_FORM_BASE (+ entry ID properties)               |

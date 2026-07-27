@@ -46,7 +46,7 @@ These resources are safe to reuse in the sandbox without modification.
 |---|---|
 | **Bookings sheet schema** | The "Make a copy" step above preserves the A–Q headers, column widths, and column O data-validation dropdown. Verify the dropdown still restricts to `Approved - Free`, `Approved - Paid`, `Denied` after copying. |
 | **Apps Script source code** | Copy from `src/*.js` in this repository — the sandbox gets the same 11 files. |
-| **DocuSeal template IDs** | `1234567` (single driver) and `7654321` (two drivers) are the same templates. The sandbox will send real DocuSeal submissions to test email addresses. |
+| **DocuSeal template IDs** | `DOCUSEAL_TEMPLATE_ONE_DRIVER` (e.g. `1234567`) and `DOCUSEAL_TEMPLATE_TWO_DRIVERS` (e.g. `7654321`) are the same templates. The sandbox will send real DocuSeal submissions to test email addresses. |
 | **Google Form URLs** | `INTAKE_FORM_BASE` and `INSPECT_FORM_BASE` can point to the production forms during sandbox testing. Submissions from the sandbox go into the same form responses, which is acceptable. If this is undesirable, create test copies of both forms and update the Script Properties accordingly. |
 | **Twilio credentials** | `TWILIO_SID` and `TWILIO_TOKEN` can be the same. The sandbox will send real SMS messages — restrict test phone numbers to your own verified number. Do not use real customer phone numbers in sandbox bookings. |
 | **SendGrid credentials** | `SENDGRID_KEY` can be the same. The sandbox will send real emails — restrict test email addresses to your own verified address. |
@@ -293,7 +293,7 @@ driver email in the expected format.
 
 **Expected:**
 - [ ] Column M populated with the second driver email (not `No Second Email`)
-- [ ] When deposit is paid (Test 3), DocuSeal uses the two-driver template (ID `7654321`)
+- [ ] When deposit is paid (Test 3), DocuSeal uses the two-driver template (`DOCUSEAL_TEMPLATE_TWO_DRIVERS`)
 - [ ] Both Driver #1 and Driver #2 receive DocuSeal signing requests
 
 ### Test 8 — Unmatched webhook email

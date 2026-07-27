@@ -1,4 +1,4 @@
-# Setup Notes — Reliable Storage Truck Rental Automation
+# Setup Notes — Reliable Storage Vehicle Rental Automation
 
 ## Source code structure
 
@@ -86,6 +86,8 @@ Calendars with an unset property are silently skipped at sync time. You can add 
 **E.164 format**: `MANAGER_PHONE` and all `PHONE_<LOCATION>` values must begin with `+` followed by the country code and number with no spaces or dashes (e.g. `+12065550100` for a US number). A missing country code produces Twilio "Invalid To Phone Number" errors at send time.
 
 **Trial account**: on a Twilio trial account, all outbound SMS are prefixed with "Sent from your Twilio trial account — " and can only be delivered to phone numbers that have been individually verified in the Twilio console. Verify `MANAGER_PHONE` and any test customer phone numbers before running end-to-end tests.
+
+**Sandbox-only**: `SANDBOX_TEST_PHONE` (optional) is a Script Property read only by the manual `testSendSingleSms()` function in `SandboxTests.js` — set it to your own verified phone number before running that test. It is not used anywhere in production code paths and is not part of `CONFIG`.
 
 ### SendGrid (email)
 
@@ -294,8 +296,11 @@ Expected: matching row's Lease Signed column (N) set to Yes.
 
 ## Approval reminder behavior (v7+)
 
+The reminder interval and cap are Script Properties, not fixed values — see
+`HOURS_BETWEEN_APPROVAL_REMINDERS` and `MAX_APPROVAL_REMINDERS` above. The state machine:
+
 - Q = 0: no notification sent yet → sends initial email → sets P = now, Q = 1
-- Q = 1 or 2, hours since P ≥ 12: sends reminder → increments Q
-- Q = 3, hours since P ≥ 12: escalates to ADMIN_EMAIL → sets Q = 4 (permanent skip)
-- Q > 3: row is silently skipped forever
+- 1 ≤ Q < MAX_APPROVAL_REMINDERS, hours since P ≥ HOURS_BETWEEN_APPROVAL_REMINDERS: sends reminder → increments Q
+- Q = MAX_APPROVAL_REMINDERS, hours since P ≥ HOURS_BETWEEN_APPROVAL_REMINDERS: escalates to ADMIN_EMAIL → sets Q = MAX_APPROVAL_REMINDERS + 1 (permanent skip)
+- Q > MAX_APPROVAL_REMINDERS: row is silently skipped forever
 - Manager sets column O to resolve; script skips all resolved rows

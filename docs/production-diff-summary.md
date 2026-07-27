@@ -1,6 +1,20 @@
 # Production Diff Summary
 ## archive/v7-original.js → archive/current-production-from-andrew.js (v8)
 
+> **⚠ Historical document.** This is a point-in-time diff analysis between the two archived v7/v8
+> scripts, written before the multi-site refactor. Several items it describes as open or
+> unimplemented have since been resolved in the current `src/*.js` code: `WEBHOOK_SHARED_SECRET`
+> validation is now implemented at the top of `doPost` (`Webhooks.js`), and `verifyStripeSignature`
+> / `computeHmacSha256` (the "dead code" discussed in section 3 and Q2) no longer exist in the
+> codebase at all. The open questions to Andrew in section 6 are retained for historical record —
+> do not treat them as still-open. For the current architecture, see **README.md** and
+> **docs/setup-notes.md**.
+>
+> **The `archive/` directory this document diffs (`archive/v7-original.js` and
+> `archive/current-production-from-andrew.js`) has been deleted from this repository.** Neither
+> file exists anymore; this analysis is retained only as a historical record of the v7 → v8
+> transition.
+
 ---
 
 ## 1. High-Level Overview

@@ -1,4 +1,19 @@
-## Multi-Site Architecture Proposal — Reliable Storage Truck Rental Automation (Revised)
+## Multi-Site Architecture Proposal — Reliable Storage Vehicle Rental Automation (Revised)
+
+> **⚠ Historical document.** This is the original multi-site design proposal. The implementation
+> that actually landed on `main` took a different, simpler path than what's described below: a
+> single `CALENDAR_CONFIGS` array (not separate `GLOBAL`/`SITES` objects), one shared `Bookings`
+> sheet with Location/Vehicle Type columns (not per-site sheet tabs), and one global set of
+> triggers (not per-site wrapper functions like `syncCalendarBookings_Bainbridge`). `Forms.js`'s
+> `buildIntakeUrl`/`buildInspectUrl` also do not take a `site` parameter or use a Site dropdown
+> entry ID, unlike what section 2 proposes. Retained for historical context on the design
+> alternatives considered. For the current architecture, see **README.md** and
+> **docs/setup-notes.md**.
+>
+> **The `archive/` directory referenced throughout this document (`archive/v7-original.js`,
+> `archive/current-production-from-andrew.js`) has been deleted from this repository.** Any
+> instruction below that references pulling from or saving to `archive/` is no longer actionable
+> and is retained only as a historical record of the process used at the time.
 
 **Working branch:** `main`
 **Baseline:** Pull Andrew's latest script from the shared Google Drive folder and update `src/Code.js` before beginning any implementation. `archive/v7-original.js` is the old v7 baseline only. Save the Andrew-uploaded version as `archive/current-production-from-andrew.js` before refactoring. Do not implement from stale code.

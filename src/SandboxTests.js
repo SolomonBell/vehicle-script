@@ -1228,11 +1228,18 @@ function runAllSandboxConfigurationTests() {
 // MANUAL STANDALONE TEST: One-time Twilio SMS send [LIVE]
 // Run this manually from the Apps Script editor to verify Twilio delivery.
 // Do NOT add to runAllSandboxConfigurationTests() — this sends a real SMS.
+// Requires SANDBOX_TEST_PHONE in Script Properties, set to your own verified
+// test phone number (E.164 format). Never hardcode a real destination here.
 // ---------------------------------------------------------------------------
 function testSendSingleSms() {
   Logger.log('Starting sandbox SMS test...');
 
-  const to      = '+12065550199';
+  const to = PROPS.SANDBOX_TEST_PHONE;
+  if (!to) {
+    throw new Error('testSendSingleSms: SANDBOX_TEST_PHONE is not set in Script Properties. ' +
+      'Set it to your own verified test phone number (E.164 format) before running this test.');
+  }
+
   const message =
     'Reliable Storage Sandbox Test\n\n' +
     'This is a manual Twilio SMS test from the sandbox environment.\n\n' +

@@ -1,5 +1,10 @@
 # Testing Plan — Bainbridge Single-Location Flow
 
+> Bainbridge is used throughout as the example location. The booking flow is identical for
+> all four active locations (Bainbridge, Poulsbo, Port Orchard, Fairgrounds) and both vehicle
+> types (Cargo Van, Moving Truck) — location and vehicle type are resolved from
+> `CALENDAR_CONFIGS` (`Config.js`), not hardcoded per site.
+
 ## Prerequisites
 
 - [ ] All Script Properties set (see setup-notes.md)
@@ -25,7 +30,7 @@
 - [ ] Column I (Intake Sent) = `Yes`
 - [ ] Customer receives welcome email with deposit link and pre-filled intake form URL
 - [ ] Customer receives welcome SMS (if phone present)
-- [ ] Manager receives "New truck booking" email
+- [ ] Manager receives a "New booking — [name] — [vehicle type]" email
 - [ ] Manager receives "New booking" SMS
 
 **Check in sheet:** Columns A–I, R–S populated; O, P, Q, T all blank.
@@ -38,7 +43,7 @@
 1. Confirm row from Test 1 has I = `Yes` and O = blank
 
 **After next trigger run (~5 min):**
-- [ ] Manager receives "Action needed: Approve truck rental" email
+- [ ] Manager receives an "Action needed — approve rental for [name]" email
 - [ ] Column P = timestamp of send
 - [ ] Column Q = 1
 
@@ -93,7 +98,7 @@
 
 **Expected results:**
 - [ ] Column K (24hr Sent) = `Yes`
-- [ ] Customer receives "Your truck pickup is tomorrow!" email with pre-trip inspection link
+- [ ] Customer receives a "Pickup reminder — [vehicle type] rental on [date]" email with pre-trip inspection link
 - [ ] Customer receives "Pickup is tomorrow!" SMS
 - [ ] Manager receives "Tomorrow's rental" email with deposit/lease status
 - [ ] Manager receives "Tomorrow's rental" SMS
@@ -116,7 +121,7 @@
 - [ ] Column L (Post-Rental Sent) = `Yes`
 - [ ] Customer receives post-trip inspection email with pre-filled form link
 - [ ] Customer receives post-trip SMS
-- [ ] Manager receives "Post-rental inspection needed" email
+- [ ] Manager receives a "Post-rental inspection — [name] — [vehicle type]" email
 
 ---
 
@@ -128,7 +133,7 @@
 
 **Expected results:**
 - [ ] Column M (Second Driver Email) populated correctly
-- [ ] When lease is sent (Test 3), DocuSeal uses the two-driver template (ID 7654321)
+- [ ] When lease is sent (Test 3), DocuSeal uses the two-driver template (`DOCUSEAL_TEMPLATE_TWO_DRIVERS`, e.g. ID `1234567`)
 - [ ] Both Driver #1 and Driver #2 receive DocuSeal signing requests
 
 ---

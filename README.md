@@ -1,6 +1,6 @@
-# Reliable Storage — Truck Rental Automation
+# Reliable Storage — Vehicle Rental Automation
 
-> **Production system.** Automates the complete truck rental workflow for Reliable Storage across
+> **Production system.** Automates the complete vehicle rental workflow for Reliable Storage across
 > four locations and two vehicle types — from calendar booking through post-rental inspection
 > follow-up — with no manual staff intervention required for the routine lifecycle.
 
@@ -35,9 +35,9 @@
 
 ## 1. Project Overview
 
-Reliable Storage is a Pacific Northwest storage and moving truck rental company with locations
+Reliable Storage is a Pacific Northwest storage and moving vehicle rental company with locations
 across the Kitsap Peninsula. This repository contains the Google Apps Script automation that
-handles every step of the truck rental process from the moment a customer books through the
+handles every step of the vehicle rental process from the moment a customer books through the
 post-rental inspection follow-up.
 
 ### Active sites
@@ -419,9 +419,6 @@ src/                          ← working copy — paste each file into Apps Scr
                                  createStripeCheckoutSession(), getLocationConfig()
   Setup.js                    ← setupTriggers(), setupSheetSchema()
   SandboxTests.js             ← manual test functions — never wire to triggers
-
-archive/
-  v7-original.js              ← unmodified v7 source — never edit
 
 docs/
   setup-notes.md              ← Script Properties reference, sheet schema,
