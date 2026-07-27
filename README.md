@@ -433,6 +433,10 @@ docs/
 
 CLAUDE.md                     ← context for AI-assisted development
 README.md                     ← this file
+
+.claude/
+  settings.json                ← shared repository-level Claude Code permissions (committed)
+  settings.local.json           ← personal, machine-specific overrides — gitignored, never committed
 ```
 
 **All 12 `src/*.js` files share one global scope** when deployed to Google Apps Script. There is

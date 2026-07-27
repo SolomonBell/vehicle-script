@@ -1,16 +1,14 @@
 {
   "permissions": {
     "allow": [
-      "Bash(grep -rn \"CONFIG\\\\.DEPOSIT_AMOUNT\\\\|PROPS\\\\.DEPOSIT_AMOUNT\\\\|\\\\$.*deposit\\\\|deposit.*\\\\$\" src/ --include=\"*.js\" -i)",
-      "Bash(clasp push *)",
       "Bash(git add *)",
-      "Bash(git commit -m ' *)",
+      "Bash(git commit -m *)",
       "Bash(git push *)",
-      "Bash(git -C /Users/solomonbell/vehicle-script diff src/Config.js)",
-      "Bash(git -C /Users/solomonbell/vehicle-script diff src/Helpers.js --no-color)",
-      "Bash(git -C /Users/solomonbell/vehicle-script --no-pager diff --no-color src/Helpers.js)",
-      "Bash(git -C /Users/solomonbell/vehicle-script --no-pager diff --no-color src/CalendarSync.js)",
-      "Bash(git -C /Users/solomonbell/vehicle-script --no-pager diff --no-color src/SandboxTests.js)"
+      "Bash(clasp push *)",
+      "Edit",
+      "Write",
+      "Skill(update-config)",
+      "Skill(update-config:*)"
     ]
   }
 }
