@@ -267,13 +267,13 @@ system of record.
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                  TRIGGER PATH                        │
-│  (time-based, runs continuously)                     │
-│                                                      │
-│  Google Calendar                                     │
+│                  TRIGGER PATH                       │
+│  (time-based, runs continuously)                    │
+│                                                     │
+│  Google Calendar                                    │
 │       │ polled every 5 min                          │
 │       ▼                                             │
-│  Apps Script Triggers                                │
+│  Apps Script Triggers                               │
 │  ├─ syncCalendarBookings    (5 min)                 │
 │  ├─ checkRentalEligibility  (5 min)                 │
 │  ├─ sendLeaseToNewBookings  (15 min)                │
@@ -289,19 +289,19 @@ system of record.
 └─────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────┐
-│                  WEBHOOK PATH                        │
-│  (event-driven, fires on payment / signing)          │
-│                                                      │
+│                  WEBHOOK PATH                       │
+│  (event-driven, fires on payment / signing)         │
+│                                                     │
 │  Stripe ──────┐                                     │
 │               │ webhook events                      │
 │  DocuSeal ────┤                                     │
 │               ▼                                     │
-│  Pipedream (validates signatures,                    │
-│             normalises payloads,                     │
-│             injects shared secret + eventId)         │
+│  Pipedream (validates signatures,                   │
+│             normalises payloads,                    │
+│             injects shared secret + eventId)        │
 │               │                                     │
 │               ▼                                     │
-│  Apps Script Web App (doPost)                        │
+│  Apps Script Web App (doPost)                       │
 │               │                                     │
 │               ▼                                     │
 │  Google Sheets ◄──────────────── reads / writes     │
