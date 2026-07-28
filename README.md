@@ -116,12 +116,12 @@ Customer books vehicle via Google Booking
                         ▼
             checkRentalEligibility begins approval loop
                         │
-                  ┌─────┴───────────────────────────────────┐
+                  ┌─────┴────────────────────────────────────┐
                   │ Manager reviews and sets Col O to one of │
                   │  • Approved - Free                       │
                   │  • Approved - Paid                       │
                   │  • Denied                                │
-                  └─────┬───────────────────────────────────┘
+                  └─────┬────────────────────────────────────┘
                         │
             ┌───────────┴───────────┐
             │                       │
