@@ -138,7 +138,7 @@ function createStripeCheckoutSession(vehicleType, clientReferenceId, customerEma
 }
 
 // Returns true only when the deposit has cleared AND the intake form has
-// actually been completed (column V — set by onIntakeFormSubmit(), not by
+// actually been completed (column V — set by processIntakeFormSubmission_(), not by
 // Intake Sent/column I, which only means the intake link was emailed) AND
 // the lease has not already been sent. Deliberately order-independent: it
 // does not matter whether the deposit or the intake form completes first,

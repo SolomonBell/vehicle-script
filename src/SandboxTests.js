@@ -514,7 +514,7 @@ function testApprovalNotificationEligibility() {
 // ---------------------------------------------------------------------------
 // TEST 20: DocuSeal send eligibility (isDocuSealEligible) [CONFIG]
 // Verifies the pure decision helper that gates every DocuSeal send point
-// (markDepositPaid, onIntakeFormSubmit, sendLeaseToNewBookings): blocked when
+// (markDepositPaid, processIntakeFormSubmission_, sendLeaseToNewBookings): blocked when
 // only one of deposit/intake is complete, allowed exactly once when both are
 // complete, and never eligible again once the lease has already been sent.
 // No sheet reads, no external calls, no writes, no DocuSeal request is made.
@@ -1078,7 +1078,7 @@ function testIntakeFormSubmitRowMatching() {
 // TEST 22: Spreadsheet form-submit event extraction (extractIntakeSubmissionFields) [CONFIG]
 // Pure test against synthetic spreadsheet form-submit event objects -- no
 // sheet reads, no real trigger, no external calls. Covers the event-shape
-// extraction onIntakeFormSubmit() depends on: e.namedValues keyed by the
+// extraction processIntakeFormSubmission_() depends on: e.namedValues keyed by the
 // (currently placeholder, must-be-verified) question title constants, and
 // e.range used only to confirm the submission came from the intake
 // response sheet.
@@ -1176,10 +1176,407 @@ function testExtractIntakeSubmissionFields() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 23: Trigger registration functions are defined and safe to reference [CONFIG]
+// TEST 23: Inspection form-submit row matching (findInspectionMatchRow) [CONFIG]
+// Pure test against synthetic data -- no sheet reads, no live form event.
+// Verifies the same ambiguity-safe email+date matching used for intake also
+// applies correctly to inspection submissions, that the pre-trip (W) and
+// post-trip (X) completion columns are tracked fully independently of each
+// other via the inspectionType argument, and that matching never considers
+// customer name.
+// ---------------------------------------------------------------------------
+function testInspectionFormSubmitRowMatching() {
+  let passed = 0;
+  let failed = 0;
+
+  // Column layout matches the real sheet (0-indexed): ... C=2 Email ...
+  // E=4 Start Time ... W=22 Pre-Inspection Form Completed ... X=23
+  // Post-Inspection Form Completed. Only the columns findInspectionMatchRow()
+  // actually reads are populated; name is deliberately never stored, since
+  // the function under test does not accept or use it.
+  function fakeRow(email, startTime, preCompleted, postCompleted) {
+    const row = new Array(24);
+    row[2]  = email;
+    row[4]  = startTime;
+    row[22] = preCompleted;
+    row[23] = postCompleted;
+    return row;
+  }
+
+  function check(label, data, email, dateStr, inspectionType, expectedStatus, expectedRow) {
+    const actual = findInspectionMatchRow(data, email, dateStr, inspectionType);
+    if (actual.status === expectedStatus && actual.row === expectedRow) {
+      Logger.log('OK (' + label + '): status=' + actual.status +
+                 ', row=' + actual.row +
+                 (actual.precision ? ', precision=' + actual.precision : ''));
+      passed++;
+    } else {
+      Logger.log('FAIL (' + label + '): expected status=' + expectedStatus + ', row=' + expectedRow +
+                 ' but got status=' + actual.status + ', row=' + actual.row);
+      failed++;
+    }
+  }
+
+  // ---- Pre submission uniquely matches a booking -> W would be updated ----
+  (function preMatches() {
+    const data = [
+      [],
+      fakeRow('solo@example.com', new Date('2026-08-01T10:00:00'), '', ''),
+    ];
+    check('pre submission, single booking -- matched', data, 'solo@example.com', null, 'pre', 'matched', 1);
+  })();
+
+  // ---- Post submission uniquely matches a booking -> X would be updated ----
+  (function postMatches() {
+    const data = [
+      [],
+      fakeRow('solo@example.com', new Date('2026-08-01T10:00:00'), '', ''),
+    ];
+    check('post submission, single booking -- matched', data, 'solo@example.com', null, 'post', 'matched', 1);
+  })();
+
+  // ---- W and X are tracked independently: a row already complete in the ----
+  // OTHER column is still eligible for this one -- proves a pre submission
+  // never alters X's eligibility and a post submission never alters W's.
+  (function columnsAreIndependent() {
+    const dataPreEligible = [
+      [],
+      fakeRow('done-post@example.com', new Date('2026-08-01T10:00:00'), '', 'Yes'), // X already Yes, W blank
+    ];
+    check('post already done does not block a pre match (pre unaffected by X)',
+          dataPreEligible, 'done-post@example.com', null, 'pre', 'matched', 1);
+
+    const dataPostEligible = [
+      [],
+      fakeRow('done-pre@example.com', new Date('2026-08-01T10:00:00'), 'Yes', ''), // W already Yes, X blank
+    ];
+    check('pre already done does not block a post match (post unaffected by W)',
+          dataPostEligible, 'done-pre@example.com', null, 'post', 'matched', 1);
+  })();
+
+  // ---- Already-completed submission is idempotent: not an error, no row ----
+  // selected, and distinguishable from a genuine non-match.
+  (function alreadyDoneIsIdempotent() {
+    const data = [
+      [],
+      fakeRow('finished@example.com', new Date('2026-08-01T10:00:00'), 'Yes', ''),
+    ];
+    check('pre already Yes -- already_done, not an error', data, 'finished@example.com', null, 'pre', 'already_done', -1);
+  })();
+
+  // ---- No matching booking -- no update ----
+  (function noMatch() {
+    const data = [
+      [],
+      fakeRow('someone@example.com', new Date('2026-08-01T10:00:00'), '', ''),
+    ];
+    check('unknown email -- not_found', data, 'nonexistent-inspect@example.com', null, 'pre', 'not_found', -1);
+  })();
+
+  // ---- Multiple matching bookings, no date to disambiguate -- no update ----
+  (function multipleMatches() {
+    const data = [
+      [],
+      fakeRow('repeat@example.com', new Date('2026-08-01T10:00:00'), '', ''),
+      fakeRow('repeat@example.com', new Date('2026-08-10T10:00:00'), '', ''),
+    ];
+    check('repeat customer, no date -- ambiguous', data, 'repeat@example.com', null, 'pre', 'ambiguous', -1);
+  })();
+
+  // ---- Same email, different rental dates -- date selects the correct booking ----
+  (function sameEmailDifferentDates() {
+    const data = [
+      [],
+      fakeRow('repeat@example.com', new Date('2026-08-01T10:00:00'), '', ''), // booking A
+      fakeRow('repeat@example.com', new Date('2026-08-10T10:00:00'), '', ''), // booking B
+    ];
+    check('repeat customer, date selects booking A', data, 'repeat@example.com', '2026-08-01', 'post', 'matched', 1);
+    check('repeat customer, date selects booking B', data, 'repeat@example.com', '2026-08-10', 'post', 'matched', 2);
+  })();
+
+  // ---- Customer name alone is never sufficient: the matcher does not ----
+  // accept or read a name field at all. Same name, different email -- only
+  // the requested email's own booking matches.
+  (function nameAloneInsufficient() {
+    const data = [
+      [],
+      fakeRow('jane.a@example.com', new Date('2026-08-01T10:00:00'), '', ''), // "Jane Doe" booking A
+      fakeRow('jane.b@example.com', new Date('2026-08-01T10:00:00'), '', ''), // "Jane Doe" booking B, same date, different email
+    ];
+    check('same name different email -- matches only that email\'s booking (A)',
+          data, 'jane.a@example.com', null, 'pre', 'matched', 1);
+    check('same name different email -- matches only that email\'s booking (B)',
+          data, 'jane.b@example.com', null, 'pre', 'matched', 2);
+  })();
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' inspection form row-matching checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+}
+
+// ---------------------------------------------------------------------------
+// TEST 24: Spreadsheet form-submit event extraction (extractInspectionSubmissionFields) [CONFIG]
+// Pure test against synthetic spreadsheet form-submit event objects -- no
+// sheet reads, no real trigger, no external calls. Covers email/date
+// extraction (mirrors testExtractIntakeSubmissionFields) plus the pre/post
+// inspection-type classification unique to this form, including case- and
+// whitespace-normalization of the submitted answer and the case where the
+// type answer cannot be classified at all.
+//
+// Deliberately does NOT use CONFIG.INSPECT_VAL_PRE / CONFIG.INSPECT_VAL_POST
+// anywhere below -- response classification is independent of those (they
+// are the longer display strings used only to pre-fill the form's dropdown
+// via buildInspectUrl()). The response sheet is expected to record exactly
+// "pre" or "post", so these tests use those literal strings, including
+// varied case and surrounding whitespace.
+// ---------------------------------------------------------------------------
+function testExtractInspectionSubmissionFields() {
+  let passed = 0;
+  let failed = 0;
+
+  function fakeRange(sheetName) {
+    return { getSheet: function() { return { getName: function() { return sheetName; } }; } };
+  }
+
+  function fakeEvent(sheetName, namedValues) {
+    return { range: fakeRange(sheetName), namedValues: namedValues };
+  }
+
+  function check(label, event, expectEmail, expectDateOrNull, expectType) {
+    const actual = extractInspectionSubmissionFields(event);
+    if (expectEmail === null) {
+      if (actual === null) {
+        Logger.log('OK (' + label + '): correctly returned null');
+        passed++;
+      } else {
+        Logger.log('FAIL (' + label + '): expected null, got ' + JSON.stringify(actual));
+        failed++;
+      }
+      return;
+    }
+    if (actual && actual.email === expectEmail &&
+        (expectDateOrNull === undefined || actual.date === expectDateOrNull) &&
+        (expectType === undefined || actual.type === expectType)) {
+      Logger.log('OK (' + label + '): email=' + actual.email + ', date=' + actual.date + ', type=' + actual.type);
+      passed++;
+    } else {
+      Logger.log('FAIL (' + label + '): expected email=' + expectEmail +
+                 (expectDateOrNull !== undefined ? ', date=' + expectDateOrNull : '') +
+                 (expectType !== undefined ? ', type=' + expectType : '') +
+                 ', got ' + JSON.stringify(actual));
+      failed++;
+    }
+  }
+
+  // ---- Exact lowercase "pre" is classified as type 'pre' ----
+  (function preTypeExtracted() {
+    const namedValues = {};
+    namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE] = ['Customer@Example.com']; // mixed case, on purpose
+    namedValues[INSPECT_RESPONSE_DATE_QUESTION_TITLE]  = ['2026-08-01'];
+    namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE]  = ['pre'];
+    const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
+    check('"pre" classified as pre, email lowercased', event, 'customer@example.com', '2026-08-01', 'pre');
+  })();
+
+  // ---- Exact lowercase "post" is classified as type 'post' ----
+  (function postTypeExtracted() {
+    const namedValues = {};
+    namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE] = ['customer@example.com'];
+    namedValues[INSPECT_RESPONSE_DATE_QUESTION_TITLE]  = ['2026-08-01'];
+    namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE]  = ['post'];
+    const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
+    check('"post" classified as post', event, 'customer@example.com', '2026-08-01', 'post');
+  })();
+
+  // ---- Inspection type is trimmed and case-normalized ----
+  (function typeIsTrimmedAndCaseNormalized() {
+    const cases = [
+      ['PRE', 'pre'],
+      ['Pre', 'pre'],
+      ['  pre  ', 'pre'],
+      ['  PRE  ', 'pre'],
+      ['POST', 'post'],
+      ['Post', 'post'],
+      ['  post  ', 'post'],
+      ['  POST  ', 'post'],
+    ];
+    cases.forEach(function(pair) {
+      const rawValue = pair[0];
+      const expected = pair[1];
+      const namedValues = {};
+      namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE] = ['customer@example.com'];
+      namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE]  = [rawValue];
+      const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
+      check('type answer ' + JSON.stringify(rawValue) + ' normalizes to ' + expected,
+            event, 'customer@example.com', undefined, expected);
+    });
+  })();
+
+  // ---- Unrecognized type answer -- type is null; caller must refuse to update ----
+  (function unknownTypeRejected() {
+    const namedValues = {};
+    namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE] = ['customer@example.com'];
+    namedValues[INSPECT_RESPONSE_DATE_QUESTION_TITLE]  = ['2026-08-01'];
+    namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE]  = ['Some Unrelated Answer'];
+    const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
+    check('unrecognized type answer -- type is null, not a guess', event, 'customer@example.com', '2026-08-01', null);
+  })();
+
+  // ---- Unrecognized type answer preserves the raw text for admin-alert context ----
+  (function unknownTypeKeepsRawTypeForAlert() {
+    const namedValues = {};
+    namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE] = ['customer@example.com'];
+    namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE]  = ['Not Pre Or Post'];
+    const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
+    const actual = extractInspectionSubmissionFields(event);
+    if (actual && actual.type === null && actual.rawType === 'Not Pre Or Post') {
+      Logger.log('OK (rawType preserved for admin alert): rawType=' + actual.rawType);
+      passed++;
+    } else {
+      Logger.log('FAIL (rawType preserved for admin alert): got ' + JSON.stringify(actual));
+      failed++;
+    }
+  })();
+
+  // ---- Extraction succeeds with no date answer present ----
+  (function extractionNoDate() {
+    const namedValues = {};
+    namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE] = ['customer@example.com'];
+    namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE]  = ['pre'];
+    const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
+    check('extraction succeeds with no date answer', event, 'customer@example.com', null, 'pre');
+  })();
+
+  // ---- Unrelated response-sheet submission is ignored (e.g. the intake form) ----
+  (function unrelatedSheetIgnored() {
+    const namedValues = {};
+    namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE] = ['customer@example.com'];
+    namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE]  = ['pre'];
+    const event = fakeEvent(INTAKE_RESPONSE_SHEET_NAME, namedValues); // wrong sheet on purpose
+    check('unrelated response sheet is ignored', event, null);
+  })();
+
+  // ---- Missing email is rejected ----
+  (function missingEmailRejected() {
+    const namedValues = {};
+    namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE] = ['pre']; // no email key at all
+    const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
+    check('missing email answer is rejected', event, null);
+  })();
+
+  // ---- Blank email is rejected ----
+  (function blankEmailRejected() {
+    const namedValues = {};
+    namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE] = [''];
+    const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
+    check('blank email answer is rejected', event, null);
+  })();
+
+  // ---- Malformed event object (missing range/namedValues) is rejected ----
+  (function malformedEventRejected() {
+    check('event with no range is rejected', { namedValues: {} }, null);
+    check('event with no namedValues is rejected', { range: fakeRange(INSPECT_RESPONSE_SHEET_NAME) }, null);
+    check('null event is rejected', null, null);
+  })();
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' inspection submission extraction checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+}
+
+// ---------------------------------------------------------------------------
+// TEST 25: Form-submit dispatcher routing (onFormSubmit) [CONFIG]
+// Verifies onFormSubmit() -- the single installed spreadsheet-bound
+// form-submit trigger -- routes each event to the correct processing
+// function by response-tab name, and ignores anything else. Because the
+// real processIntakeFormSubmission_() / processInspectionFormSubmission_()
+// call getSheet() and can send DocuSeal requests, this test temporarily
+// replaces them with counting stubs before calling onFormSubmit(), then
+// restores the originals in a finally block -- no sheet is read or
+// written, and no email/SMS/DocuSeal/Stripe/webhook call is made at any
+// point.
+// ---------------------------------------------------------------------------
+function testFormSubmitDispatcher() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) {
+      Logger.log('OK: ' + label);
+      passed++;
+    } else {
+      Logger.log('FAIL: ' + label);
+      failed++;
+    }
+  }
+
+  function fakeRange(sheetName) {
+    return { getSheet: function() { return { getName: function() { return sheetName; } }; } };
+  }
+
+  function fakeEvent(sheetName) {
+    return { range: fakeRange(sheetName), namedValues: {} };
+  }
+
+  const realProcessIntake     = processIntakeFormSubmission_;
+  const realProcessInspection = processInspectionFormSubmission_;
+  let intakeCalls     = 0;
+  let inspectionCalls = 0;
+
+  processIntakeFormSubmission_     = function() { intakeCalls++; };
+  processInspectionFormSubmission_ = function() { inspectionCalls++; };
+
+  try {
+    // ---- Dispatcher routes Rental Intake Form to intake logic only ----
+    intakeCalls = 0; inspectionCalls = 0;
+    onFormSubmit(fakeEvent(INTAKE_RESPONSE_SHEET_NAME));
+    check('intake submission calls intake processing exactly once', intakeCalls === 1);
+    check('intake submission does not run inspection processing', inspectionCalls === 0);
+
+    // ---- Dispatcher routes Rental Vehicle Condition Inspection Form to inspection logic only ----
+    intakeCalls = 0; inspectionCalls = 0;
+    onFormSubmit(fakeEvent(INSPECT_RESPONSE_SHEET_NAME));
+    check('inspection submission calls inspection processing exactly once', inspectionCalls === 1);
+    check('inspection submission does not run intake processing', intakeCalls === 0);
+
+    // ---- Dispatcher ignores an unrelated tab ----
+    intakeCalls = 0; inspectionCalls = 0;
+    onFormSubmit(fakeEvent('Some Unrelated Sheet'));
+    check('unrelated tab calls neither intake nor inspection processing',
+          intakeCalls === 0 && inspectionCalls === 0);
+
+    // ---- Malformed events are ignored safely, never throw ----
+    let threw = false;
+    try {
+      onFormSubmit(null);
+      onFormSubmit({});
+      onFormSubmit({ range: null });
+    } catch (e) {
+      threw = true;
+    }
+    check('malformed events do not throw and call neither processing function',
+          !threw && intakeCalls === 0 && inspectionCalls === 0);
+  } finally {
+    // Always restore the real functions, even if an assertion above failed,
+    // so no other test or live trigger is left pointed at the stubs.
+    processIntakeFormSubmission_     = realProcessIntake;
+    processInspectionFormSubmission_ = realProcessInspection;
+  }
+
+  check('processIntakeFormSubmission_ restored to the original function',
+        processIntakeFormSubmission_ === realProcessIntake);
+  check('processInspectionFormSubmission_ restored to the original function',
+        processInspectionFormSubmission_ === realProcessInspection);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' form-submit dispatcher checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+}
+
+// ---------------------------------------------------------------------------
+// TEST 27: Trigger registration functions are defined and safe to reference [CONFIG]
 // This is a narrow, deliberately static check -- it does NOT invoke
 // ScriptApp, does NOT create a real trigger, and does NOT run setupTriggers()
-// or installIntakeFormSubmitTrigger_(). Full idempotency (that re-running
+// or installFormSubmitTrigger_(). Full idempotency (that re-running
 // setupTriggers() never creates duplicate triggers) can only be verified by
 // actually running it in a live Apps Script project, which is out of scope
 // for a safe automated test. This only confirms the functions this design
@@ -1202,10 +1599,29 @@ function testTriggerRegistrationIsWellFormed() {
   }
 
   check('setupTriggers is defined', typeof setupTriggers === 'function');
-  check('installIntakeFormSubmitTrigger_ is defined', typeof installIntakeFormSubmitTrigger_ === 'function');
-  check('onIntakeFormSubmit is defined', typeof onIntakeFormSubmit === 'function');
+  check('installFormSubmitTrigger_ is defined', typeof installFormSubmitTrigger_ === 'function');
+  check('onFormSubmit is defined', typeof onFormSubmit === 'function');
+
+  check('processIntakeFormSubmission_ is defined', typeof processIntakeFormSubmission_ === 'function');
   check('INTAKE_RESPONSE_SHEET_NAME is a non-empty string',
         typeof INTAKE_RESPONSE_SHEET_NAME === 'string' && INTAKE_RESPONSE_SHEET_NAME.length > 0);
+  check('INTAKE_RESPONSE_SHEET_NAME is the exact verified tab name',
+        INTAKE_RESPONSE_SHEET_NAME === 'Rental Intake Form');
+
+  check('processInspectionFormSubmission_ is defined', typeof processInspectionFormSubmission_ === 'function');
+  check('INSPECT_RESPONSE_SHEET_NAME is a non-empty string',
+        typeof INSPECT_RESPONSE_SHEET_NAME === 'string' && INSPECT_RESPONSE_SHEET_NAME.length > 0);
+  check('INSPECT_RESPONSE_SHEET_NAME is the exact verified tab name',
+        INSPECT_RESPONSE_SHEET_NAME === 'Rental Vehicle Condition Inspection Form');
+  check('INSPECT_RESPONSE_EMAIL_QUESTION_TITLE is the exact verified header',
+        INSPECT_RESPONSE_EMAIL_QUESTION_TITLE === 'Email Address');
+  check('INSPECT_RESPONSE_DATE_QUESTION_TITLE is the exact verified header',
+        INSPECT_RESPONSE_DATE_QUESTION_TITLE === 'Rental Date');
+  check('INSPECT_RESPONSE_TYPE_QUESTION_TITLE is the exact verified header',
+        INSPECT_RESPONSE_TYPE_QUESTION_TITLE === 'Inspection Type');
+
+  check('INSPECTION_RESPONSE_SHEET_ID Script Property is not required (removed)',
+        typeof INSPECTION_RESPONSE_SHEET_ID === 'undefined');
 
   Logger.log(failed === 0
     ? 'All ' + passed + ' trigger registration well-formedness checks passed. ' +
@@ -1598,11 +2014,14 @@ function testLocationSenderConfig() {
 // Runs configuration-only tests in sequence. Stops and re-throws on first
 // failure. Does not include sync or response-parsing tests that require a
 // live sheet row (see testMarkDepositPaidRowLookup, testMarkLeaseSignedRowLookup).
-// testIntakeFormSubmitRowMatching is included because it is a pure test
-// against synthetic data, with no sheet or form dependency.
+// testIntakeFormSubmitRowMatching, testInspectionFormSubmitRowMatching, the
+// two extraction tests, and testFormSubmitDispatcher are included because
+// they are pure tests against synthetic data (testFormSubmitDispatcher
+// temporarily stubs the two processing functions and always restores them,
+// even on failure), with no sheet or form dependency.
 // ---------------------------------------------------------------------------
 function runAllSandboxConfigurationTests() {
-  Logger.log('===== Running Sandbox Configuration Tests (15 tests) =====');
+  Logger.log('===== Running Sandbox Configuration Tests (18 tests) =====');
 
   const tests = [
     validateConfig,
@@ -1619,6 +2038,9 @@ function runAllSandboxConfigurationTests() {
     testDocuSealEligibility,
     testIntakeFormSubmitRowMatching,
     testExtractIntakeSubmissionFields,
+    testInspectionFormSubmitRowMatching,
+    testExtractInspectionSubmissionFields,
+    testFormSubmitDispatcher,
     testTriggerRegistrationIsWellFormed,
   ];
 

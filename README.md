@@ -740,6 +740,10 @@ at row 2.
 | R | Vehicle Type | `syncCalendarBookings` | From `CALENDAR_CONFIGS[n].vehicleType`; drives deposit and Stripe URL lookup |
 | S | Location | `syncCalendarBookings` | From `CALENDAR_CONFIGS[n].location`; informational |
 | T | DocuSeal Submission ID | `markDepositPaid`, `sendLeaseToNewBookings` | Submission ID returned by DocuSeal API; written only if `extractDocuSealSubmissionId` returns a non-null value |
+| U | Customer Approval Notified | `checkRentalEligibility` (via `notifyCustomerOfApproval`) | Set to `Yes` after the customer's one-time "your rental is approved" email/SMS is sent |
+| V | Intake Form Completed | `processIntakeFormSubmission_` (via `onFormSubmit`) | Set to `Yes` when the intake Google Form is submitted — distinct from Intake Sent (column I), which only means the link was emailed |
+| W | Pre-Inspection Form Completed | `processInspectionFormSubmission_` (via `onFormSubmit`) | Set to `Yes` when a pre-trip inspection submission is matched to this row |
+| X | Post-Inspection Form Completed | `processInspectionFormSubmission_` (via `onFormSubmit`) | Set to `Yes` when a post-trip inspection submission is matched to this row |
 
 ### Flag semantics
 
@@ -748,8 +752,8 @@ at row 2.
   `Approved - Paid`, `Denied`). Any other value (including blank) leaves the row in the pending
   state.
 
-- **Columns G, I, J, K, L, N** are all binary flags — the script only checks whether the value
-  is exactly `Yes`. Any other value (including blank) is treated as "not done."
+- **Columns G, I, J, K, L, N, U, V, W, X** are all binary flags — the script only checks whether
+  the value is exactly `Yes`. Any other value (including blank) is treated as "not done."
 
 - **Column Q** is numeric. The script reads it with `Number(data[i][16]) || 0`, so a blank or
   non-numeric value is treated as 0 (no notifications sent).
@@ -788,19 +792,25 @@ location does not automatically create a filtered tab; that must be done manuall
 
 Two Google Forms support the rental workflow. The script generates pre-filled URLs for both forms
 and does not manage form structure. It also does not read the *content* of any form response —
-with one narrow exception: `onIntakeFormSubmit()` (`src/Forms.js`) reacts to intake form
-submissions to detect that the intake form was actually *completed*, as opposed to merely sent.
-It reads only the submitted `Email Address` and `Rental Date` answers (the exact question titles
-on the live form, to match the submission to the correct booking row) and writes a single
-`Yes`/blank completion flag — it does not store or forward the rest of the response.
+with two narrow exceptions: `processIntakeFormSubmission_()` and `processInspectionFormSubmission_()`
+(`src/Forms.js`) react to submissions to detect that the intake and inspection forms were actually
+*completed*, as opposed to merely sent. Each reads only the submitted email, rental date, and (for
+inspection) the inspection-type answers — the exact question titles on the live form, to match the
+submission to the correct booking row — and writes a single `Yes`/blank completion flag. Neither
+stores or forwards the rest of the response.
 
-The intake Google Form must remain linked to the same spreadsheet as the Bookings sheet, with its
-active response tab named `Rental Intake Form`. `setupTriggers()` installs five triggers total —
-the four time-based engines plus a spreadsheet-bound `onIntakeFormSubmit` form-submit trigger,
-created programmatically (no manual Triggers UI setup, no new Script Property). **`setupTriggers()`
-must be re-run after every `clasp push`** to (re)install all five. See "Trigger setup" in
-`docs/setup-notes.md` for the full details, including what happens when a submission can't be
-safely matched to exactly one booking (it's ignored, not guessed).
+**Both forms write into tabs of the same spreadsheet as Bookings** (identified by the `SHEET_ID`
+Script Property) — there is no separate spreadsheet for either, and no Script Property identifying
+one. Their response tabs are named exactly `Rental Intake Form` and `Rental Vehicle Condition
+Inspection Form`. Because a spreadsheet-bound form-submit trigger fires for *every* form linked to
+a spreadsheet, `setupTriggers()` installs exactly **one** such trigger — `onFormSubmit` — alongside
+the four time-based engines (five triggers total). `onFormSubmit(e)` in `src/Forms.js` is a
+dispatcher: it reads `e.range.getSheet().getName()` and routes the event to
+`processIntakeFormSubmission_()`, to `processInspectionFormSubmission_()`, or ignores it if the
+submission came from neither response tab. **`setupTriggers()` must be re-run after every
+`clasp push`** to (re)install all five triggers. See "Trigger setup" in `docs/setup-notes.md` for
+the full details, including what happens when a submission can't be safely matched to exactly one
+booking (it's ignored, not guessed, and the admin is alerted).
 
 ### Rental Intake Form
 
@@ -855,6 +865,30 @@ Form's dropdown field.
 
 **Config keys:** `INSPECT_FORM_BASE`, `INSPECT_ENTRY_NAME`, `INSPECT_ENTRY_EMAIL`,
 `INSPECT_ENTRY_DATE`, `INSPECT_ENTRY_TYPE`, `INSPECT_VAL_PRE`, `INSPECT_VAL_POST`
+
+**Completion tracking:** `processInspectionFormSubmission_()` (`src/Forms.js`), called from the
+`onFormSubmit` dispatcher, reacts to submissions of this form the same way
+`processIntakeFormSubmission_()` does for intake — matching on the submitted email plus, when
+available, the rental date, via the same ambiguity-safe `findBookingMatchRow_()` logic (see
+"Booking matching" below). Because one form serves both the pre-trip and post-trip inspection, it
+also reads back the `Inspection Type` answer and normalizes it with
+`String(value).trim().toLowerCase()` to decide which completion column to write — this
+classification is independent of `CONFIG.INSPECT_VAL_PRE` / `INSPECT_VAL_POST` (those are only the
+longer display strings used to pre-fill the form's dropdown):
+- A submission normalizing to `pre` sets column **W** (Pre-Inspection Form Completed) to `Yes`.
+- A submission normalizing to `post` sets column **X** (Post-Inspection Form Completed) to `Yes`.
+
+Each column is tracked independently — a pre-trip submission never touches X and a post-trip
+submission never touches W. A submission whose type answer normalizes to neither `pre` nor `post`,
+or that cannot be matched to exactly one eligible booking, updates nothing and alerts
+`ADMIN_EMAIL` with context; a resubmission of an already-completed inspection is a silent no-op
+(not an error, not an alert). This task does not add gating on pre/post-inspection completion —
+the pre-inspection link still goes out unconditionally in the 24-hour reminder and the post-trip
+link in the post-rental message, exactly as before; only completion is now recorded.
+
+**Response tab:** like the intake form, this form's responses are a tab (`Rental Vehicle Condition
+Inspection Form`) in the same spreadsheet as Bookings, identified by the existing `SHEET_ID`
+Script Property — no separate spreadsheet, and no additional Script Property, is required.
 
 ---
 
@@ -1013,7 +1047,11 @@ Entry IDs are numeric strings found by inspecting the form's pre-fill URL or via
 | `INSPECT_VAL_POST` | Exact text of the post-trip option |
 
 `INSPECT_VAL_PRE` and `INSPECT_VAL_POST` must exactly match the option text in the Google Form
-dropdown field — case-sensitive, whitespace-sensitive.
+dropdown field — case-sensitive, whitespace-sensitive. These are used only to pre-fill the form's
+dropdown (`buildInspectUrl()`); inspection-completion classification (which normalizes the
+submitted answer to `pre`/`post`) does not depend on them — see "Vehicle Inspection Form" above.
+No Script Property identifies a separate inspection response spreadsheet: its responses are a tab
+in the same spreadsheet as Bookings, identified by the existing `SHEET_ID`.
 
 ### Operational parameters
 
@@ -1631,7 +1669,7 @@ triggers.
 
 | Function | What it does |
 |---|---|
-| `runAllSandboxConfigurationTests()` | Runs 15 tests in sequence: `validateConfig`, `testSheetConnection`, `testCalendarConfigs`, `testVehicleTypeAndLocationMapping`, `testStripeConfiguration`, `testDepositAmounts`, `testDocuSealPropertyNames`, `testSendGridConfiguration`, `testTwilioConfiguration`, `testLocationSenderConfig`, `testApprovalNotificationEligibility`, `testDocuSealEligibility`, `testIntakeFormSubmitRowMatching`, `testExtractIntakeSubmissionFields`, `testTriggerRegistrationIsWellFormed`. Logs a clear header before starting and a completion banner when all pass. |
+| `runAllSandboxConfigurationTests()` | Runs 18 tests in sequence: `validateConfig`, `testSheetConnection`, `testCalendarConfigs`, `testVehicleTypeAndLocationMapping`, `testStripeConfiguration`, `testDepositAmounts`, `testDocuSealPropertyNames`, `testSendGridConfiguration`, `testTwilioConfiguration`, `testLocationSenderConfig`, `testApprovalNotificationEligibility`, `testDocuSealEligibility`, `testIntakeFormSubmitRowMatching`, `testExtractIntakeSubmissionFields`, `testInspectionFormSubmitRowMatching`, `testExtractInspectionSubmissionFields`, `testFormSubmitDispatcher`, `testTriggerRegistrationIsWellFormed`. Logs a clear header before starting and a completion banner when all pass. |
 
 ### Standalone manual tests (not in runner)
 

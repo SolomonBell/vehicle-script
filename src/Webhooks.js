@@ -176,7 +176,7 @@ function markDepositPaid(customerEmail, amountPaid, eventId) {
 
       // Send the lease via DocuSeal only once the intake form has also been
       // completed (column V) -- not merely sent (column I). If intake is not
-      // yet complete, onIntakeFormSubmit() sends the lease when it arrives.
+      // yet complete, processIntakeFormSubmission_() sends the lease when it arrives.
       if (isDocuSealEligible('Yes', intakeCompleted, leaseSent)) {
         const docuSealResp = sendLeaseViaDocuSeal(name, email, secondEmail, startTime, endTime, vehicleType, location);
         const submissionId = extractDocuSealSubmissionId(docuSealResp);
