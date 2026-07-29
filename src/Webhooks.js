@@ -139,40 +139,56 @@ function markDepositPaid(customerEmail, amountPaid, eventId) {
 
   if (leaseSent !== 'Yes' && email !== 'No Email') {
     try {
-      const firstName = name.split(' ')[0];
+      const firstName       = name.split(' ')[0];
+      const intakeCompleted = data[i][21] || ''; // V: Intake Form Completed
 
       // SMS confirmation
-      const customerSms =
-        CONFIG.COMPANY_NAME + ': Your $' + amountPaid + ' deposit is confirmed — ' +
-        vehicleType + ' at ' + location + ' on ' + dateStr + '. ' +
-        'Check your email for the rental agreement to sign.';
+      const customerSms = intakeCompleted === 'Yes'
+        ? CONFIG.COMPANY_NAME + ': Your $' + amountPaid + ' deposit is confirmed for your ' +
+          vehicleType + ' at ' + location + ' on ' + dateStr + '. ' +
+          'Check your email for the rental agreement to sign.'
+        : CONFIG.COMPANY_NAME + ': Your $' + amountPaid + ' deposit is confirmed for your ' +
+          vehicleType + ' at ' + location + ' on ' + dateStr + '. ' +
+          'Please also complete your intake form if you have not already.';
 
       // HTML email confirmation
+      const leaseStatusLine = intakeCompleted === 'Yes'
+        ? "You'll receive a rental agreement by email shortly. Please sign it before your pickup."
+        : 'Once your intake form is complete, we will send your rental agreement by email for you to sign.';
+
       const customerEmailHtml =
         '<p>Hi ' + name + ',</p>' +
-        '<p>We received your <strong>$' + amountPaid + ' deposit</strong> for your <strong>' +
-        vehicleType + '</strong> rental at our <strong>' + location +
-        '</strong> location, scheduled for <strong>' + dateStr + '</strong>.</p>' +
-        '<p>You\'ll receive a rental agreement by email shortly — please sign it before your pickup.</p>' +
+        '<p>We received your $' + amountPaid + ' deposit for your ' +
+        vehicleType + ' rental at our ' + location +
+        ' location, scheduled for ' + dateStr + '.</p>' +
+        '<p>' + leaseStatusLine + '</p>' +
+        (intakeCompleted === 'Yes' ? '' :
+          '<p>If you have not already, please complete your intake form using the link from your welcome email.</p>') +
         '<p>We\'ll send a reminder the day before your pickup.</p>' +
         '<p>Reply to this email or call us if you have any questions.</p>' +
         '<p>Thank you,<br>' + CONFIG.COMPANY_NAME + '</p>';
 
       if (phone !== 'No Phone') {
         try { sendSms(phone, customerSms, locCfg.phone); }
-        catch(e) { Logger.log('markDepositPaid: SMS failed for ' + email + ' — ' + e); }
+        catch(e) { Logger.log('markDepositPaid: SMS failed for ' + email + ': ' + e); }
       }
-      sendEmailHtml(email, 'Deposit confirmed — ' + vehicleType + ' rental on ' + dateStr, customerEmailHtml, locCfg.email, locCfg.email);
+      sendEmailHtml(email, 'Deposit confirmed: ' + vehicleType + ' rental on ' + dateStr, customerEmailHtml, locCfg.email, locCfg.email);
 
-      // Send lease via DocuSeal
-      const docuSealResp = sendLeaseViaDocuSeal(name, email, secondEmail, startTime, endTime, vehicleType, location);
-      const submissionId = extractDocuSealSubmissionId(docuSealResp);
+      // Send the lease via DocuSeal only once the intake form has also been
+      // completed (column V) -- not merely sent (column I). If intake is not
+      // yet complete, onIntakeFormSubmit() sends the lease when it arrives.
+      if (isDocuSealEligible('Yes', intakeCompleted, leaseSent)) {
+        const docuSealResp = sendLeaseViaDocuSeal(name, email, secondEmail, startTime, endTime, vehicleType, location);
+        const submissionId = extractDocuSealSubmissionId(docuSealResp);
 
-      sheet.getRange(i + 1, 10).setValue('Yes'); // J: Lease Sent
-      if (submissionId != null) {
-        sheet.getRange(i + 1, 20).setValue(submissionId); // T: DocuSeal Submission ID
+        sheet.getRange(i + 1, 10).setValue('Yes'); // J: Lease Sent
+        if (submissionId != null) {
+          sheet.getRange(i + 1, 20).setValue(submissionId); // T: DocuSeal Submission ID
+        }
+        Logger.log('Deposit confirmed and lease sent for: ' + email);
+      } else {
+        Logger.log('Deposit confirmed for ' + email + '; lease withheld until intake form is completed (column V).');
       }
-      Logger.log('Deposit confirmed and lease sent for: ' + email);
 
     } catch(e) {
       alertAdmin('markDepositPaid error for ' + email, e.toString());

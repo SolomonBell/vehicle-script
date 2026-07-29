@@ -71,7 +71,7 @@ post-rental inspection follow-up.
 |---|---|
 | Automation runtime | Google Apps Script (V8) |
 | Booking source | Google Calendar (Appointment Schedules) |
-| System of record | Google Sheets (Bookings tab, columns A–T) |
+| System of record | Google Sheets (Bookings tab, columns A–V) |
 | E-mail | SendGrid REST API |
 | SMS | Twilio REST API |
 | E-signature | DocuSeal REST API |
@@ -769,8 +769,21 @@ location does not automatically create a filtered tab; that must be done manuall
 
 ## 7. Google Forms
 
-Two Google Forms support the rental workflow. The script generates pre-filled URLs for both forms;
-it does not read form responses or manage form structure.
+Two Google Forms support the rental workflow. The script generates pre-filled URLs for both forms
+and does not manage form structure. It also does not read the *content* of any form response —
+with one narrow exception: `onIntakeFormSubmit()` (`src/Forms.js`) reacts to intake form
+submissions to detect that the intake form was actually *completed*, as opposed to merely sent.
+It reads only the submitted `Email Address` and `Rental Date` answers (the exact question titles
+on the live form, to match the submission to the correct booking row) and writes a single
+`Yes`/blank completion flag — it does not store or forward the rest of the response.
+
+The intake Google Form must remain linked to the same spreadsheet as the Bookings sheet, with its
+active response tab named `Rental Intake Form`. `setupTriggers()` installs five triggers total —
+the four time-based engines plus a spreadsheet-bound `onIntakeFormSubmit` form-submit trigger,
+created programmatically (no manual Triggers UI setup, no new Script Property). **`setupTriggers()`
+must be re-run after every `clasp push`** to (re)install all five. See "Trigger setup" in
+`docs/setup-notes.md` for the full details, including what happens when a submission can't be
+safely matched to exactly one booking (it's ignored, not guessed).
 
 ### Rental Intake Form
 
@@ -1501,7 +1514,7 @@ triggers.
 ### Quick start
 
 ```
-1. runAllSandboxConfigurationTests()           — run first; validates entire config (10 tests)
+1. runAllSandboxConfigurationTests()           — run first; validates entire config (15 tests)
 2. testCalendarConfigs()                       — confirm calendar connectivity
 3. testSyncCalendarBookingsNoNotifications()   — add rows without sending messages
 4. Then test the full webhook flow with curl (see Sandbox section)
@@ -1571,7 +1584,7 @@ triggers.
 
 | Function | What it does |
 |---|---|
-| `runAllSandboxConfigurationTests()` | Runs 10 tests in sequence: `validateConfig`, `testSheetConnection`, `testCalendarConfigs`, `testVehicleTypeAndLocationMapping`, `testStripeConfiguration`, `testDepositAmounts`, `testDocuSealPropertyNames`, `testSendGridConfiguration`, `testTwilioConfiguration`, `testLocationSenderConfig`. Logs a clear header before starting and a completion banner when all pass. |
+| `runAllSandboxConfigurationTests()` | Runs 15 tests in sequence: `validateConfig`, `testSheetConnection`, `testCalendarConfigs`, `testVehicleTypeAndLocationMapping`, `testStripeConfiguration`, `testDepositAmounts`, `testDocuSealPropertyNames`, `testSendGridConfiguration`, `testTwilioConfiguration`, `testLocationSenderConfig`, `testApprovalNotificationEligibility`, `testDocuSealEligibility`, `testIntakeFormSubmitRowMatching`, `testExtractIntakeSubmissionFields`, `testTriggerRegistrationIsWellFormed`. Logs a clear header before starting and a completion banner when all pass. |
 
 ### Standalone manual tests (not in runner)
 

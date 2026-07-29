@@ -51,16 +51,25 @@ function sendLeaseViaDocuSeal(name, email, secondEmail, startTime, endTime, vehi
     template_id: templateId,
     send_email:  true,
     message: {
-      subject: 'Your ' + CONFIG.COMPANY_NAME + ' rental agreement — ' + dateStr,
+      subject: 'Your ' + CONFIG.COMPANY_NAME + ' rental agreement for ' + dateStr,
       // DocuSeal message.body is plain text — HTML tags are displayed literally.
       // {{submitter.link}} is substituted by DocuSeal with the signing URL.
+      // This message is shared across all submitters (customer, second driver,
+      // and the Reliable Storage Manager submitter), so the wording below is
+      // written to make sense for anyone who receives it: it explains that a
+      // signature is required from this recipient specifically, and that the
+      // rental cannot proceed for the customer until every required signature,
+      // including the manager's, is complete.
       body: 'Hi ' + name + ',\n\n' +
-            'Please review and sign your ' + CONFIG.COMPANY_NAME + ' rental agreement.\n\n' +
+            'A ' + CONFIG.COMPANY_NAME + ' rental agreement is ready for your review and signature.\n\n' +
+            'Please open the link below, review the details, and sign electronically. ' +
+            'The rental cannot proceed until every required signer, including the Reliable ' +
+            'Storage manager, has signed.\n\n' +
             (vehicleType ? 'Vehicle: '  + vehicleType + '\n' : '') +
             (location   ? 'Location: ' + location   + '\n' : '') +
             'Pickup: '    + dateStr + '\n' +
             'Sign here: {{submitter.link}}\n\n' +
-            'Please complete the agreement before your scheduled pickup.\n\n' +
+            'Please complete this before the scheduled pickup.\n\n' +
             'Thank you,\n' +
             CONFIG.COMPANY_NAME
     },

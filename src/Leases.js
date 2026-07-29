@@ -7,18 +7,20 @@ function sendLeaseToNewBookings() {
   Logger.log('sendLeaseToNewBookings: checking ' + (data.length - 1) + ' row(s)');
 
   for (let i = 1; i < data.length; i++) {
-    const depositPaid = data[i][6];
-    const leaseSent   = data[i][9];
-    const email       = data[i][2];
-    const name        = data[i][1];
-    const secondEmail = data[i][12] || '';
-    const startTime   = new Date(data[i][4]);
-    const endTime     = new Date(data[i][5]);
-    const vehicleType = data[i][17] || '';  // R: Vehicle Type
-    const location    = data[i][18] || '';  // S: Location
+    const depositPaid     = data[i][6];
+    const leaseSent       = data[i][9];
+    const email           = data[i][2];
+    const name            = data[i][1];
+    const secondEmail     = data[i][12] || '';
+    const startTime       = new Date(data[i][4]);
+    const endTime         = new Date(data[i][5]);
+    const vehicleType     = data[i][17] || '';  // R: Vehicle Type
+    const location        = data[i][18] || '';  // S: Location
+    const intakeCompleted = data[i][21] || '';  // V: Intake Form Completed
 
     const approved = data[i][14]; // O: Rental Approved
     Logger.log('Row ' + (i + 1) + ': G(DepositPaid)="' + depositPaid +
+               '", V(IntakeCompleted)="' + intakeCompleted +
                '", J(LeaseSent)="' + leaseSent +
                '", O(Approved)="' + approved + '"');
 
@@ -28,7 +30,7 @@ function sendLeaseToNewBookings() {
       continue; // denied or pending — skip
     }
 
-    if (depositPaid === 'Yes' && leaseSent !== 'Yes' && email !== 'No Email'
+    if (isDocuSealEligible(depositPaid, intakeCompleted, leaseSent) && email !== 'No Email'
         && (approved === 'Approved - Free' || approved === 'Approved - Paid')) {
       Logger.log('Row ' + (i + 1) + ': ELIGIBLE — calling sendLeaseViaDocuSeal() for ' + email);
       try {
@@ -47,11 +49,12 @@ function sendLeaseToNewBookings() {
       }
     } else {
       const reasons = [];
-      if (depositPaid !== 'Yes')   reasons.push('G="' + depositPaid + '" (need "Yes")');
-      if (leaseSent === 'Yes')     reasons.push('J="Yes" (already sent)');
-      if (email === 'No Email')    reasons.push('C="No Email"');
+      if (depositPaid !== 'Yes')     reasons.push('G="' + depositPaid + '" (need "Yes")');
+      if (intakeCompleted !== 'Yes') reasons.push('V="' + intakeCompleted + '" (need "Yes" — intake form not yet completed)');
+      if (leaseSent === 'Yes')       reasons.push('J="Yes" (already sent)');
+      if (email === 'No Email')      reasons.push('C="No Email"');
       if (approved !== 'Approved - Free' && approved !== 'Approved - Paid')
-                                   reasons.push('O="' + approved + '" (unrecognized value)');
+                                     reasons.push('O="' + approved + '" (unrecognized value)');
       Logger.log('Row ' + (i + 1) + ': SKIP — ' + reasons.join('; '));
     }
   }

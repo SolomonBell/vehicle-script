@@ -453,6 +453,115 @@ function testDepositAmounts() {
     : passed + ' passed, ' + failed + ' failed.');
 }
 
+// ---------------------------------------------------------------------------
+// TEST 19: Approval notification eligibility (shouldNotifyCustomerOfApproval) [CONFIG]
+// Verifies the pure decision helper checkRentalEligibility() uses to decide
+// whether to send the customer their one-time approval notification, and that
+// it never signals a duplicate send once column U is already 'Yes'. No sheet
+// reads, no external calls, no writes, no email or SMS sent.
+// ---------------------------------------------------------------------------
+function testApprovalNotificationEligibility() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, approved, customerNotified, expected) {
+    const actual = shouldNotifyCustomerOfApproval(approved, customerNotified);
+    if (actual === expected) {
+      Logger.log('OK (' + label + '): shouldNotifyCustomerOfApproval(' +
+                 JSON.stringify(approved) + ', ' + JSON.stringify(customerNotified) + ') = ' + actual);
+      passed++;
+    } else {
+      Logger.log('FAIL (' + label + '): expected ' + expected + ', got ' + actual +
+                 ' for approved=' + JSON.stringify(approved) + ', customerNotified=' + JSON.stringify(customerNotified));
+      failed++;
+    }
+  }
+
+  // Approved - Paid, not yet notified -> should notify
+  check('Approved - Paid, not notified', 'Approved - Paid', '', true);
+  check('Approved - Paid, blank flag',   'Approved - Paid', undefined, true);
+
+  // Approved - Free, not yet notified -> should notify
+  check('Approved - Free, not notified', 'Approved - Free', '', true);
+
+  // Already notified -> must NOT notify again (this is the no-duplicates guarantee)
+  check('Approved - Paid, already notified', 'Approved - Paid', 'Yes', false);
+  check('Approved - Free, already notified', 'Approved - Free', 'Yes', false);
+
+  // Denied -> never notify the customer, regardless of the flag
+  check('Denied, not notified',     'Denied', '', false);
+  check('Denied, flag somehow Yes', 'Denied', 'Yes', false);
+
+  // Pending (blank) -> never notify
+  check('Pending (blank)', '', '', false);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' approval notification eligibility checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+}
+
+// ---------------------------------------------------------------------------
+// TEST 20: DocuSeal send eligibility (isDocuSealEligible) [CONFIG]
+// Verifies the pure decision helper that gates every DocuSeal send point
+// (markDepositPaid, onIntakeFormSubmit, sendLeaseToNewBookings): blocked when
+// only one of deposit/intake is complete, allowed exactly once when both are
+// complete, and never eligible again once the lease has already been sent.
+// No sheet reads, no external calls, no writes, no DocuSeal request is made.
+// ---------------------------------------------------------------------------
+function testDocuSealEligibility() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, depositPaid, intakeCompleted, leaseSent, expected) {
+    const actual = isDocuSealEligible(depositPaid, intakeCompleted, leaseSent);
+    if (actual === expected) {
+      Logger.log('OK (' + label + '): isDocuSealEligible = ' + actual);
+      passed++;
+    } else {
+      Logger.log('FAIL (' + label + '): expected ' + expected + ', got ' + actual);
+      failed++;
+    }
+  }
+
+  // Deposit paid, intake NOT complete -> blocked. This is the exact scenario
+  // item 2 fixes: Intake Sent (I) = 'Yes' does not mean the intake was
+  // completed, so this must stay blocked even though a naive check on column
+  // I alone would have allowed it.
+  check('deposit paid, intake incomplete', 'Yes', '', '', false);
+  check('deposit paid, intake blank flag', 'Yes', undefined, '', false);
+
+  // Intake complete, deposit NOT paid -> blocked
+  check('intake complete, deposit unpaid', '', 'Yes', '', false);
+
+  // Neither complete -> blocked
+  check('neither complete', '', '', '', false);
+
+  // Both complete, lease not yet sent -> allowed exactly once
+  check('both complete, not yet sent', 'Yes', 'Yes', '', true);
+
+  // Both complete, but lease already sent -> blocked (no duplicate submission)
+  check('both complete, already sent', 'Yes', 'Yes', 'Yes', false);
+
+  // Order independence: the helper only looks at final state, not arrival
+  // order, so "deposit first" and "intake first" converge to the same result
+  // once both conditions are true — this is what makes the DocuSeal send
+  // point order-independent per item 2's requirement.
+  const depositFirstThenIntake = isDocuSealEligible('Yes', 'Yes', '');
+  const intakeFirstThenDeposit = isDocuSealEligible('Yes', 'Yes', '');
+  if (depositFirstThenIntake === true && intakeFirstThenDeposit === true) {
+    Logger.log('OK (order independence): both arrival orders converge to eligible=true');
+    passed++;
+  } else {
+    Logger.log('FAIL (order independence): depositFirst=' + depositFirstThenIntake +
+               ', intakeFirst=' + intakeFirstThenDeposit);
+    failed++;
+  }
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' DocuSeal eligibility checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+}
+
 // ============================================================
 // DOCUSEAL TESTS
 // ============================================================
@@ -831,6 +940,268 @@ function testMarkLeaseSignedRowLookup() {
     : passed + ' passed, ' + failed + ' failed.');
 }
 
+// ---------------------------------------------------------------------------
+// TEST 21: Intake form row-matching logic (findIntakeMatchRow) [CONFIG]
+// Pure test against synthetic booking rows -- no sheet reads, no sheet
+// writes, no live form event, no external calls. This is a safety-critical
+// path: findIntakeMatchRow() must NEVER guess. When a submission's email
+// matches more than one eligible (not-yet-complete) booking and the rental
+// date cannot tell them apart, the correct result is 'ambiguous', not an
+// arbitrary pick -- picking wrong here would mark the wrong booking's
+// intake complete and could trigger the wrong DocuSeal agreement.
+// ---------------------------------------------------------------------------
+function testIntakeFormSubmitRowMatching() {
+  let passed = 0;
+  let failed = 0;
+
+  // Column layout matches the real sheet (0-indexed): ... C=2 Email ...
+  // E=4 Start Time ... V=21 Intake Form Completed. Only the columns
+  // findIntakeMatchRow() actually reads are populated; the rest are left
+  // undefined, which is fine since the function under test never touches them.
+  function fakeRow(email, startTime, intakeCompleted) {
+    const row = new Array(22);
+    row[2]  = email;
+    row[4]  = startTime;
+    row[21] = intakeCompleted;
+    return row;
+  }
+
+  function check(label, data, email, dateStr, expectedStatus, expectedRow) {
+    const actual = findIntakeMatchRow(data, email, dateStr);
+    if (actual.status === expectedStatus && actual.row === expectedRow) {
+      Logger.log('OK (' + label + '): status=' + actual.status +
+                 ', row=' + actual.row +
+                 (actual.precision ? ', precision=' + actual.precision : ''));
+      passed++;
+    } else {
+      Logger.log('FAIL (' + label + '): expected status=' + expectedStatus + ', row=' + expectedRow +
+                 ' but got status=' + actual.status + ', row=' + actual.row);
+      failed++;
+    }
+  }
+
+  // ---- Case 1: one email match, no usable date -- succeeds -------------------
+  (function case1() {
+    const data = [
+      [],
+      fakeRow('solo@example.com', new Date('2026-08-01T10:00:00'), ''), // row 1: only booking for this email
+    ];
+    check('case 1: single booking, no date', data, 'solo@example.com', null, 'matched', 1);
+  })();
+
+  // ---- Case 2: two incomplete bookings, same email, different dates, ---------
+  // matching date supplied -- correct row succeeds (the core repeat-customer fix).
+  (function case2() {
+    const data = [
+      [],
+      fakeRow('repeat@example.com', new Date('2026-08-01T10:00:00'), ''), // row 1: booking A
+      fakeRow('repeat@example.com', new Date('2026-08-10T10:00:00'), ''), // row 2: booking B
+    ];
+    check('case 2: repeat customer, date selects booking A', data, 'repeat@example.com', '2026-08-01', 'matched', 1);
+    check('case 2: repeat customer, date selects booking B', data, 'repeat@example.com', '2026-08-10', 'matched', 2);
+  })();
+
+  // ---- Case 3: two incomplete bookings, same email, no usable date -----------
+  // -- ambiguous, no row selected. This is the exact scenario that was
+  // previously (incorrectly) resolved by picking "the first incomplete row".
+  (function case3() {
+    const data = [
+      [],
+      fakeRow('repeat@example.com', new Date('2026-08-01T10:00:00'), ''),
+      fakeRow('repeat@example.com', new Date('2026-08-10T10:00:00'), ''),
+    ];
+    check('case 3: repeat customer, no date -- ambiguous', data, 'repeat@example.com', null, 'ambiguous', -1);
+  })();
+
+  // ---- Case 4: two incomplete bookings, same email, unmatched date -----------
+  // -- ambiguous, no row selected (the date didn't help, so this falls back to
+  // the same unresolved multi-row situation as case 3).
+  (function case4() {
+    const data = [
+      [],
+      fakeRow('repeat@example.com', new Date('2026-08-01T10:00:00'), ''),
+      fakeRow('repeat@example.com', new Date('2026-08-10T10:00:00'), ''),
+    ];
+    check('case 4: repeat customer, date matches neither -- ambiguous', data, 'repeat@example.com', '2026-08-31', 'ambiguous', -1);
+  })();
+
+  // ---- Case 5: same email AND same date on two incomplete bookings -----------
+  // -- ambiguous, no row selected. The date narrows to two rows instead of
+  // one, which must still refuse to guess.
+  (function case5() {
+    const data = [
+      [],
+      fakeRow('twins@example.com', new Date('2026-08-01T10:00:00'), ''), // e.g. two different vehicle types, same day
+      fakeRow('twins@example.com', new Date('2026-08-01T10:00:00'), ''),
+    ];
+    check('case 5: same email and same date -- ambiguous', data, 'twins@example.com', '2026-08-01', 'ambiguous', -1);
+  })();
+
+  // ---- Case 6: completed rows are ignored -------------------------------------
+  (function case6() {
+    const data = [
+      [],
+      fakeRow('repeat@example.com', new Date('2026-08-01T10:00:00'), 'Yes'), // already complete -- not eligible
+      fakeRow('repeat@example.com', new Date('2026-08-10T10:00:00'), ''),    // the only eligible row
+    ];
+    check('case 6: completed row ignored, only one eligible row remains', data, 'repeat@example.com', null, 'matched', 2);
+    check('case 6: completed row never matched even with its own date', data, 'repeat@example.com', '2026-08-01', 'matched', 2);
+  })();
+
+  // ---- Case 7: unknown email returns no match ---------------------------------
+  (function case7() {
+    const data = [
+      [],
+      fakeRow('someone@example.com', new Date('2026-08-01T10:00:00'), ''),
+    ];
+    check('case 7: unknown email -- not found', data, 'nonexistent-intake@example.com', null, 'not_found', -1);
+    check('case 7: unknown email with a real date -- not found', data, 'nonexistent-intake@example.com', '2026-08-01', 'not_found', -1);
+  })();
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' intake form row-matching checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+}
+
+// ---------------------------------------------------------------------------
+// TEST 22: Spreadsheet form-submit event extraction (extractIntakeSubmissionFields) [CONFIG]
+// Pure test against synthetic spreadsheet form-submit event objects -- no
+// sheet reads, no real trigger, no external calls. Covers the event-shape
+// extraction onIntakeFormSubmit() depends on: e.namedValues keyed by the
+// (currently placeholder, must-be-verified) question title constants, and
+// e.range used only to confirm the submission came from the intake
+// response sheet.
+// ---------------------------------------------------------------------------
+function testExtractIntakeSubmissionFields() {
+  let passed = 0;
+  let failed = 0;
+
+  // Minimal fake Range -- only getSheet().getName() is used by the function
+  // under test.
+  function fakeRange(sheetName) {
+    return { getSheet: function() { return { getName: function() { return sheetName; } }; } };
+  }
+
+  function fakeEvent(sheetName, namedValues) {
+    return { range: fakeRange(sheetName), namedValues: namedValues };
+  }
+
+  function check(label, event, expectEmail, expectDateOrNull) {
+    const actual = extractIntakeSubmissionFields(event);
+    if (expectEmail === null) {
+      if (actual === null) {
+        Logger.log('OK (' + label + '): correctly returned null');
+        passed++;
+      } else {
+        Logger.log('FAIL (' + label + '): expected null, got ' + JSON.stringify(actual));
+        failed++;
+      }
+      return;
+    }
+    if (actual && actual.email === expectEmail &&
+        (expectDateOrNull === undefined || actual.date === expectDateOrNull)) {
+      Logger.log('OK (' + label + '): email=' + actual.email + ', date=' + actual.date);
+      passed++;
+    } else {
+      Logger.log('FAIL (' + label + '): expected email=' + expectEmail +
+                 (expectDateOrNull !== undefined ? ', date=' + expectDateOrNull : '') +
+                 ', got ' + JSON.stringify(actual));
+      failed++;
+    }
+  }
+
+  // ---- Extraction of email and date from a synthetic event succeeds ----
+  (function extractionSucceeds() {
+    const namedValues = {};
+    namedValues[INTAKE_RESPONSE_EMAIL_QUESTION_TITLE] = ['Customer@Example.com']; // mixed case, on purpose
+    namedValues[INTAKE_RESPONSE_DATE_QUESTION_TITLE]  = ['2026-08-01'];
+    const event = fakeEvent(INTAKE_RESPONSE_SHEET_NAME, namedValues);
+    check('extraction succeeds, email lowercased', event, 'customer@example.com', '2026-08-01');
+  })();
+
+  // ---- Extraction succeeds with no date answer present ----
+  (function extractionNoDate() {
+    const namedValues = {};
+    namedValues[INTAKE_RESPONSE_EMAIL_QUESTION_TITLE] = ['customer@example.com'];
+    const event = fakeEvent(INTAKE_RESPONSE_SHEET_NAME, namedValues);
+    check('extraction succeeds with no date answer', event, 'customer@example.com', null);
+  })();
+
+  // ---- Unrelated response-sheet submission is ignored ----
+  (function unrelatedSheetIgnored() {
+    const namedValues = {};
+    namedValues[INTAKE_RESPONSE_EMAIL_QUESTION_TITLE] = ['customer@example.com'];
+    namedValues[INTAKE_RESPONSE_DATE_QUESTION_TITLE]  = ['2026-08-01'];
+    const event = fakeEvent('Some Other Form Responses', namedValues); // not INTAKE_RESPONSE_SHEET_NAME
+    check('unrelated response sheet is ignored', event, null);
+  })();
+
+  // ---- Missing email is rejected ----
+  (function missingEmailRejected() {
+    const namedValues = {};
+    namedValues[INTAKE_RESPONSE_DATE_QUESTION_TITLE] = ['2026-08-01']; // no email key at all
+    const event = fakeEvent(INTAKE_RESPONSE_SHEET_NAME, namedValues);
+    check('missing email answer is rejected', event, null);
+  })();
+
+  // ---- Blank email is rejected ----
+  (function blankEmailRejected() {
+    const namedValues = {};
+    namedValues[INTAKE_RESPONSE_EMAIL_QUESTION_TITLE] = [''];
+    const event = fakeEvent(INTAKE_RESPONSE_SHEET_NAME, namedValues);
+    check('blank email answer is rejected', event, null);
+  })();
+
+  // ---- Malformed event object (missing range/namedValues) is rejected ----
+  (function malformedEventRejected() {
+    check('event with no range is rejected', { namedValues: {} }, null);
+    check('event with no namedValues is rejected', { range: fakeRange(INTAKE_RESPONSE_SHEET_NAME) }, null);
+    check('null event is rejected', null, null);
+  })();
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' intake submission extraction checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+}
+
+// ---------------------------------------------------------------------------
+// TEST 23: Trigger registration functions are defined and safe to reference [CONFIG]
+// This is a narrow, deliberately static check -- it does NOT invoke
+// ScriptApp, does NOT create a real trigger, and does NOT run setupTriggers()
+// or installIntakeFormSubmitTrigger_(). Full idempotency (that re-running
+// setupTriggers() never creates duplicate triggers) can only be verified by
+// actually running it in a live Apps Script project, which is out of scope
+// for a safe automated test. This only confirms the functions this design
+// depends on exist with the expected names and that the constants they use
+// are sane, so a typo or accidental deletion is caught without ever touching
+// ScriptApp.
+// ---------------------------------------------------------------------------
+function testTriggerRegistrationIsWellFormed() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) {
+      Logger.log('OK: ' + label);
+      passed++;
+    } else {
+      Logger.log('FAIL: ' + label);
+      failed++;
+    }
+  }
+
+  check('setupTriggers is defined', typeof setupTriggers === 'function');
+  check('installIntakeFormSubmitTrigger_ is defined', typeof installIntakeFormSubmitTrigger_ === 'function');
+  check('onIntakeFormSubmit is defined', typeof onIntakeFormSubmit === 'function');
+  check('INTAKE_RESPONSE_SHEET_NAME is a non-empty string',
+        typeof INTAKE_RESPONSE_SHEET_NAME === 'string' && INTAKE_RESPONSE_SHEET_NAME.length > 0);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' trigger registration well-formedness checks passed. ' +
+      'Note: this does not create or inspect any real trigger.'
+    : passed + ' passed, ' + failed + ' failed.');
+}
+
 // ============================================================
 // CONFIGURATION TESTS
 // ============================================================
@@ -887,7 +1258,7 @@ function testEmailTemplateStrings() {
   const name         = 'Test Customer';
 
   // ---- Welcome email subject must not say "truck rental" for Cargo Van ----
-  const welcomeSubject = 'Your ' + cargoVanType + ' reservation — ' + dateStr;
+  const welcomeSubject = 'Your ' + cargoVanType + ' reservation for ' + dateStr;
   if (welcomeSubject.toLowerCase().includes('moving truck') ||
       welcomeSubject.toLowerCase().includes('truck rental')) {
     Logger.log('FAIL (welcome subject): contains hardcoded vehicle wording: ' + welcomeSubject);
@@ -899,8 +1270,8 @@ function testEmailTemplateStrings() {
 
   // ---- Welcome email body must not say "moving truck" for Cargo Van ----
   const welcomeBody =
-    'Your <strong>' + cargoVanType + '</strong> reservation at our <strong>' +
-    location + '</strong> location is scheduled for <strong>' + dateStr + '</strong>.';
+    'Your ' + cargoVanType + ' reservation at our ' +
+    location + ' location is scheduled for ' + dateStr + '.';
   if (welcomeBody.toLowerCase().includes('moving truck')) {
     Logger.log('FAIL (welcome body): contains "moving truck": ' + welcomeBody);
     failed++;
@@ -911,8 +1282,8 @@ function testEmailTemplateStrings() {
 
   // ---- Post-rental email body must not say "returning the truck" ----
   const postRentalBody =
-    'Thank you for completing your <strong>' + cargoVanType + '</strong> rental ' +
-    'at our <strong>' + location + '</strong> location on <strong>' + dateStr + '</strong>.';
+    'Thank you for completing your ' + cargoVanType + ' rental ' +
+    'at our ' + location + ' location on ' + dateStr + '.';
   if (postRentalBody.toLowerCase().includes('returning the truck')) {
     Logger.log('FAIL (post-rental body): contains "returning the truck"');
     failed++;
@@ -921,17 +1292,39 @@ function testEmailTemplateStrings() {
     passed++;
   }
 
-  // ---- DocuSeal subject must use em dash, not double hyphen ----
-  const docuSealSubject = 'Your ' + CONFIG.COMPANY_NAME + ' rental agreement — ' + dateStr;
-  if (docuSealSubject.includes('--')) {
-    Logger.log('FAIL (DocuSeal subject): contains "--" instead of "—": ' + docuSealSubject);
+  // ---- DocuSeal subject must not use an em dash or a double hyphen ----
+  const docuSealSubject = 'Your ' + CONFIG.COMPANY_NAME + ' rental agreement for ' + dateStr;
+  if (docuSealSubject.includes('--') || docuSealSubject.includes('—')) {
+    Logger.log('FAIL (DocuSeal subject): contains a dash separator that should have been removed: ' + docuSealSubject);
     failed++;
-  } else if (docuSealSubject.includes('—')) {
-    Logger.log('OK (DocuSeal subject): uses em dash');
-    passed++;
   } else {
-    Logger.log('FAIL (DocuSeal subject): no dash separator found');
-    failed++;
+    Logger.log('OK (DocuSeal subject): no em dash or double hyphen');
+    passed++;
+  }
+
+  // ---- Sample outgoing email strings must contain no em dash and no bold markup ----
+  // Mirrors the same style rules enforced across src/ (Approval.js, CalendarSync.js,
+  // Reminders.js, Webhooks.js, DocuSeal.js): no "—", no <b>/<strong>.
+  const sampleOutgoingStrings = [
+    welcomeSubject,
+    welcomeBody,
+    postRentalBody,
+    docuSealSubject,
+    'Deposit confirmed: ' + cargoVanType + ' rental on ' + dateStr,
+    'Your rental is approved',
+    'Action needed: approve rental for ' + name,
+  ];
+  let dashOrBoldFound = false;
+  sampleOutgoingStrings.forEach(function(s) {
+    if (s.includes('—') || s.includes('<b>') || s.includes('<strong>')) {
+      Logger.log('FAIL (style check): forbidden em dash or bold markup in: ' + s);
+      dashOrBoldFound = true;
+      failed++;
+    }
+  });
+  if (!dashOrBoldFound) {
+    Logger.log('OK (style check): ' + sampleOutgoingStrings.length + ' sample strings contain no em dash or bold markup.');
+    passed++;
   }
 
   // ---- Manager deposit status must use consistent casing ----
@@ -1192,10 +1585,13 @@ function testLocationSenderConfig() {
 // ---------------------------------------------------------------------------
 // RUNNER: runAllSandboxConfigurationTests [CONFIG + CALENDAR]
 // Runs configuration-only tests in sequence. Stops and re-throws on first
-// failure. Does not include sync, intake-form, or response-parsing tests.
+// failure. Does not include sync or response-parsing tests that require a
+// live sheet row (see testMarkDepositPaidRowLookup, testMarkLeaseSignedRowLookup).
+// testIntakeFormSubmitRowMatching is included because it is a pure test
+// against synthetic data, with no sheet or form dependency.
 // ---------------------------------------------------------------------------
 function runAllSandboxConfigurationTests() {
-  Logger.log('===== Running Sandbox Configuration Tests (10 tests) =====');
+  Logger.log('===== Running Sandbox Configuration Tests (15 tests) =====');
 
   const tests = [
     validateConfig,
@@ -1208,6 +1604,11 @@ function runAllSandboxConfigurationTests() {
     testSendGridConfiguration,
     testTwilioConfiguration,
     testLocationSenderConfig,
+    testApprovalNotificationEligibility,
+    testDocuSealEligibility,
+    testIntakeFormSubmitRowMatching,
+    testExtractIntakeSubmissionFields,
+    testTriggerRegistrationIsWellFormed,
   ];
 
   try {

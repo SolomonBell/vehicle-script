@@ -55,25 +55,25 @@ function processReminders() {
           let emailHtml = '<p>Hi ' + name + ',</p>';
 
           if (depositPaid !== 'Yes') {
-            emailSubject = 'Action needed — deposit due for tomorrow\'s ' + vehicleType + ' pickup';
+            emailSubject = 'Action needed: deposit due for tomorrow\'s ' + vehicleType + ' pickup';
             emailHtml +=
-              '<p>Your <strong>' + vehicleType + '</strong> pickup at our <strong>' + location +
-              '</strong> location is scheduled for <strong>' + dateStr + '</strong>.</p>' +
-              '<p><strong>We have not received your $' + getDepositAmount(vehicleType) + ' deposit.</strong> ' +
+              '<p>Your ' + vehicleType + ' pickup at our ' + location +
+              ' location is scheduled for ' + dateStr + '.</p>' +
+              '<p>We have not received your $' + getDepositAmount(vehicleType) + ' deposit. ' +
               'Please check your original welcome email for the deposit payment link.</p>' +
               '<p>Reply to this email or call us if you need assistance.</p>' +
               '<p>Thank you,<br>' + CONFIG.COMPANY_NAME + '</p>';
           } else {
-            emailSubject = 'Pickup reminder — ' + vehicleType + ' rental on ' + dateStr;
+            emailSubject = 'Pickup reminder: ' + vehicleType + ' rental on ' + dateStr;
             emailHtml +=
-              '<p>This is a reminder that your <strong>' + vehicleType + '</strong> pickup at our <strong>' +
-              location + '</strong> location is scheduled for <strong>' + dateStr + '</strong>.</p>' +
+              '<p>This is a reminder that your ' + vehicleType + ' pickup at our ' +
+              location + ' location is scheduled for ' + dateStr + '.</p>' +
               '<p>Before using the vehicle, please complete the pre-trip inspection form. ' +
-              'Your booking information is already filled in — add the required photos and submit:</p>' +
+              'Your booking information is already filled in, just add the required photos and submit:</p>' +
               '<p><a href="' + preUrl + '">Complete pre-trip inspection</a></p>';
             if (leaseSigned !== 'Yes') {
               emailHtml +=
-                '<p><strong>Action needed:</strong> Your rental agreement has not been signed. ' +
+                '<p>Action needed: Your rental agreement has not been signed. ' +
                 'Please check your email for your rental agreement and sign it before your pickup.</p>';
             }
             emailHtml +=
@@ -101,17 +101,17 @@ function processReminders() {
           const managerHtml =
             '<p>Upcoming rental tomorrow:</p>' +
             '<p>' +
-            '<strong>Customer:</strong> ' + name + '<br>' +
-            '<strong>Vehicle:</strong> ' + vehicleType + '<br>' +
-            '<strong>Location:</strong> ' + location + '<br>' +
-            '<strong>Date/time:</strong> ' + dateStr + '<br>' +
-            '<strong>Deposit paid:</strong> ' + (depositPaid === 'Yes' ? '✅ Yes' : '❌ No') + '<br>' +
-            '<strong>Lease signed:</strong> ' + (leaseSigned === 'Yes' ? '✅ Yes' : '❌ Not yet') + '<br>' +
-            '<strong>Pre-trip inspection form:</strong> <a href="' + preUrl + '">Inspection form link</a>' +
+            'Customer: ' + name + '<br>' +
+            'Vehicle: ' + vehicleType + '<br>' +
+            'Location: ' + location + '<br>' +
+            'Date/time: ' + dateStr + '<br>' +
+            'Deposit paid: ' + (depositPaid === 'Yes' ? '✅ Yes' : '❌ No') + '<br>' +
+            'Lease signed: ' + (leaseSigned === 'Yes' ? '✅ Yes' : '❌ Not yet') + '<br>' +
+            'Pre-trip inspection form: <a href="' + preUrl + '">Inspection form link</a>' +
             '</p>';
 
           if (CONFIG.MANAGER_EMAIL) {
-            try { sendEmailHtml(CONFIG.MANAGER_EMAIL, "Tomorrow's rental — " + name + ' — ' + vehicleType, managerHtml, locCfg.email, locCfg.email); }
+            try { sendEmailHtml(CONFIG.MANAGER_EMAIL, "Tomorrow's rental: " + name + ' (' + vehicleType + ')', managerHtml, locCfg.email, locCfg.email); }
             catch(e) { Logger.log('Manager email failed: ' + e); }
           }
           if (CONFIG.MANAGER_PHONE) {
@@ -135,10 +135,10 @@ function processReminders() {
 
           const emailHtml =
             '<p>Hi ' + name + ',</p>' +
-            '<p>Thank you for completing your <strong>' + vehicleType + '</strong> rental ' +
-            'at our <strong>' + location + '</strong> location on <strong>' + dateStr + '</strong>.</p>' +
+            '<p>Thank you for completing your ' + vehicleType + ' rental ' +
+            'at our ' + location + ' location on ' + dateStr + '.</p>' +
             '<p>Please complete the post-trip inspection form. ' +
-            'Your booking information is already filled in — add the required photos and submit:</p>' +
+            'Your booking information is already filled in, just add the required photos and submit:</p>' +
             '<p><a href="' + postUrl + '">Complete post-trip inspection</a></p>' +
             '<p>We appreciate your business.</p>' +
             '<p>Thank you,<br>' + CONFIG.COMPANY_NAME + '</p>';
@@ -148,23 +148,23 @@ function processReminders() {
             catch(e) { Logger.log('Post-rental SMS failed for ' + name + ': ' + e); }
           }
           if (email !== 'No Email') {
-            try { sendEmailHtml(email, 'Post-trip inspection — ' + vehicleType + ' rental', emailHtml, locCfg.email, locCfg.email); }
+            try { sendEmailHtml(email, 'Post-trip inspection: ' + vehicleType + ' rental', emailHtml, locCfg.email, locCfg.email); }
             catch(e) { Logger.log('Post-rental email failed for ' + name + ': ' + e); }
           }
 
           if (CONFIG.MANAGER_EMAIL) {
             try {
               const mgrPostHtml =
-                '<p>Post-trip inspection form sent to <strong>' + name + '</strong>.</p>' +
+                '<p>Post-trip inspection form sent to ' + name + '.</p>' +
                 '<p>' +
-                '<strong>Vehicle:</strong> ' + vehicleType + '<br>' +
-                '<strong>Location:</strong> ' + location + '<br>' +
-                '<strong>Rental date:</strong> ' + dateStr + '<br>' +
-                '<strong>Email:</strong> ' + email + '<br>' +
-                '<strong>Post-trip form:</strong> <a href="' + postUrl + '">View inspection form</a>' +
+                'Vehicle: ' + vehicleType + '<br>' +
+                'Location: ' + location + '<br>' +
+                'Rental date: ' + dateStr + '<br>' +
+                'Email: ' + email + '<br>' +
+                'Post-trip form: <a href="' + postUrl + '">View inspection form</a>' +
                 '</p>' +
                 '<p>If the form is not submitted within 24 hours, please follow up directly.</p>';
-              sendEmailHtml(CONFIG.MANAGER_EMAIL, 'Post-rental inspection — ' + name + ' — ' + vehicleType, mgrPostHtml, locCfg.email, locCfg.email);
+              sendEmailHtml(CONFIG.MANAGER_EMAIL, 'Post-rental inspection: ' + name + ' (' + vehicleType + ')', mgrPostHtml, locCfg.email, locCfg.email);
             } catch(e) { Logger.log('Post-rental manager email failed for ' + name + ': ' + e); }
           }
         }

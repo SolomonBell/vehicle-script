@@ -137,6 +137,26 @@ function createStripeCheckoutSession(vehicleType, clientReferenceId, customerEma
   return JSON.parse(resp.getContentText()).url;
 }
 
+// Returns true only when the deposit has cleared AND the intake form has
+// actually been completed (column V — set by onIntakeFormSubmit(), not by
+// Intake Sent/column I, which only means the intake link was emailed) AND
+// the lease has not already been sent. Deliberately order-independent: it
+// does not matter whether the deposit or the intake form completes first,
+// only that both are true before a DocuSeal submission is created.
+function isDocuSealEligible(depositPaid, intakeCompleted, leaseSent) {
+  return depositPaid === 'Yes' && intakeCompleted === 'Yes' && leaseSent !== 'Yes';
+}
+
+// Returns true only when the manager has approved the rental (paid or free)
+// and the customer has not already been sent the one-time approval
+// notification (column U). Denied and blank/pending values return false, same
+// as an unset customerNotified value. Used by checkRentalEligibility() to
+// decide whether notifyCustomerOfApproval() should run for a given row.
+function shouldNotifyCustomerOfApproval(approved, customerNotified) {
+  return (approved === 'Approved - Free' || approved === 'Approved - Paid') &&
+         customerNotified !== 'Yes';
+}
+
 // Returns { email, phone } for the given booking location — the from-address and
 // from-number to use for all emails and SMS related to that booking.
 // Throws if the location is not one of the four active locations so the caller's

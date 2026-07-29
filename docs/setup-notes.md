@@ -124,6 +124,9 @@ Role names in DocuSeal templates must match exactly what the script sends:
 | `INTAKE_ENTRY_PHONE` | Form entry ID for the phone field               |
 | `INTAKE_ENTRY_DATE`  | Form entry ID for the rental date field         |
 
+No additional Script Property is used for intake-completion detection or matching — see
+"Matching an intake submission to the correct booking row" below.
+
 ### Inspection Form (Form 2)
 
 | Property key          | What it is                                              |
@@ -165,7 +168,8 @@ The helper function `getLocationConfig(location)` in `Helpers.js` is the single 
 
 Sheet tab must be named `Bookings` (exact, case-sensitive).
 
-Row 1 headers (columns A–T). Columns R and S are written by `syncCalendarBookings()` and set up by `setupSheetSchema()`:
+Row 1 headers (columns A–V). Columns R, S, U, and V are written by `syncCalendarBookings()` /
+`setupSheetSchema()` as noted below:
 
 | Col | Header                  | Written by         |
 |-----|--------------------------|--------------------|
@@ -178,7 +182,7 @@ Row 1 headers (columns A–T). Columns R and S are written by `syncCalendarBooki
 | G   | Deposit Paid            | markDepositPaid (webhook) |
 | H   | Stripe Amount           | markDepositPaid (webhook) |
 | I   | Intake Sent             | syncCalendarBookings |
-| J   | Lease Sent              | markDepositPaid / sendLeaseToNewBookings |
+| J   | Lease Sent              | markDepositPaid / onIntakeFormSubmit / sendLeaseToNewBookings |
 | K   | 24hr Sent               | processReminders   |
 | L   | Post-Rental Sent        | processReminders   |
 | M   | Second Driver Email     | syncCalendarBookings |
@@ -188,7 +192,76 @@ Row 1 headers (columns A–T). Columns R and S are written by `syncCalendarBooki
 | Q   | Approval Reminder Count | checkRentalEligibility |
 | R   | Vehicle Type            | syncCalendarBookings (from CALENDAR_CONFIGS) |
 | S   | Location                | syncCalendarBookings (from CALENDAR_CONFIGS) |
-| T   | DocuSeal Submission ID  | markDepositPaid / sendLeaseToNewBookings (via sendLeaseViaDocuSeal) |
+| T   | DocuSeal Submission ID  | markDepositPaid / onIntakeFormSubmit / sendLeaseToNewBookings (via sendLeaseViaDocuSeal) |
+| U   | Customer Approval Notified | checkRentalEligibility (via notifyCustomerOfApproval) |
+| V   | Intake Form Completed   | onIntakeFormSubmit (installable trigger — see below) |
+
+**Column U** is a simple `Yes`/blank flag, same pattern as I/J/K/L. It tracks whether the
+customer has been sent the one-time "your rental is approved" notification, so the notification
+is never sent twice.
+
+> **Why not reuse columns P/Q instead of adding U?** P (Approval Notified At) and Q (Approval
+> Reminder Count) are the *manager* reminder loop's own state — they record when the manager was
+> last asked to approve and how many times. `checkRentalEligibility` stops touching P/Q the
+> moment a row is approved (see the code comments), so they freeze at whatever value they held
+> when the manager acted — a useful historical record of the manager's response time that would
+> be destroyed by overloading them with a second, unrelated meaning. Repurposing Q in particular
+> (e.g. a special value meaning "customer notified") would make a single number mean two
+> different things depending on context, which is exactly the kind of ambiguous state this
+> column avoids. No other existing column (I/J/K/L/N) represents "customer told about the
+> approval decision" either — each already has its own distinct, unambiguous meaning. Column U
+> is therefore necessary, not a convenience.
+
+**Column V** is also a simple `Yes`/blank flag. It is the only reliable signal that the intake
+form was actually *submitted* — column I (Intake Sent) only means the pre-filled link was
+emailed to the customer, not that they filled it out. `markDepositPaid`, `onIntakeFormSubmit`,
+and `sendLeaseToNewBookings` all require column V = `Yes` (in addition to column G = `Yes`)
+before sending the DocuSeal lease, so the deposit and the intake form can arrive in either order
+and the lease is still only ever sent once. It is written only inside `onIntakeFormSubmit()`,
+which Apps Script invokes only after Google Forms has already accepted and recorded the
+submission — there is no earlier point in the flow at which the script could observe it.
+
+> **Why a flag instead of scanning the intake response sheet on every trigger run?** The intake
+> form's responses are linked to the "Rental Intake Form" tab in the same spreadsheet as Bookings.
+> Re-scanning that tab from `checkRentalEligibility` (every 5 min), `sendLeaseToNewBookings`
+> (every 15 min), or the deposit webhook would mean repeatedly reading a sheet that only grows
+> over time and re-solving the same row-matching problem on every run. The `onIntakeFormSubmit`
+> trigger is spreadsheet-bound (see "Trigger setup" below), but it only ever *reacts* to the one
+> newly-appended row a form-submit event carries in `e.range`/`e.namedValues` — it never scans or
+> reads the rest of the "Rental Intake Form" tab's history. The event-driven flag does the matching
+> work exactly once, at submission time, for the cost of one row write — no matter how large the
+> response sheet grows.
+
+### Matching an intake submission to the correct booking row
+
+`onIntakeFormSubmit()` matches by the submitted email (case-insensitive) plus, when available,
+the pre-filled rental date — see `findIntakeMatchRow()` in `src/Forms.js`. This is deliberately
+**not** name-based matching.
+
+**This never guesses.** `findIntakeMatchRow()` returns one of three outcomes: `matched` (exactly
+one eligible row identified — the only case that writes anything), `ambiguous` (two or more
+not-yet-complete rows share the email and the rental date could not tell them apart), or
+`not_found` (no eligible row has that email at all). Email-only matching is used only as a
+controlled fallback, and only when it is itself unambiguous — i.e. exactly one not-yet-complete
+row exists for that email overall. If two or more do, the result is `ambiguous`, not an arbitrary
+pick. On `ambiguous` or `not_found`, `onIntakeFormSubmit()` writes nothing to the sheet and sends
+no DocuSeal lease — it only logs a warning naming the submission's email so it can be resolved
+manually. Already-completed rows (column V = `Yes`) are never eligible and can never cause or
+block a match.
+
+**No unique booking identifier is carried through the intake form.** `buildIntakeUrl()` only
+pre-fills name, email, phone, and rental date. There is no Event ID (or similar) field on the
+form and no corresponding Script Property, and the current design does not add one — that would
+require both a manual change to the live Google Form (which this repository does not own or
+control) and a new Script Property, neither of which is in scope right now.
+
+This means a repeat customer with two *simultaneous, incomplete* bookings that also happen to
+share the same rental date is a case this repository's matching cannot resolve automatically.
+That is intentional and by design: rather than guess which booking the submission belongs to,
+`findIntakeMatchRow()` reports `ambiguous`, and `onIntakeFormSubmit()` deliberately processes
+nothing for it — no column write, no DocuSeal submission — logging a warning naming the
+submission's email so it can be resolved manually instead. This is the accepted tradeoff of not
+carrying a unique identifier through the form: safe-but-occasionally-manual, never silently wrong.
 
 **Column O** must have a data-validation dropdown restricted to:
 - `Approved - Free`
@@ -202,16 +275,79 @@ The script never writes to column O. Only the manager does.
 ## Trigger setup
 
 Run `setupTriggers()` once manually from the Apps Script editor toolbar.
-This deletes all existing project triggers and registers four new ones:
+This deletes all existing project triggers and registers five new ones:
 
-| Function                  | Interval     |
-|---------------------------|--------------|
-| `syncCalendarBookings`    | every 5 min  |
-| `checkRentalEligibility`  | every 5 min  |
-| `sendLeaseToNewBookings`  | every 15 min |
-| `processReminders`        | every 30 min |
+| Function                  | Trigger type | Interval / event |
+|---------------------------|--------------|-------------------|
+| `syncCalendarBookings`    | time-based   | every 5 min  |
+| `checkRentalEligibility`  | time-based   | every 5 min  |
+| `sendLeaseToNewBookings`  | time-based   | every 15 min |
+| `processReminders`        | time-based   | every 30 min |
+| `onIntakeFormSubmit`      | spreadsheet-bound | on form submit (see below) |
 
 `setupTriggers()` also calls `setupSheetSchema()` to apply column headers and dropdown validation.
+
+**No manual trigger installation is required.** In this project's Apps Script configuration, the
+Triggers UI's "Select event source" dropdown offers only **Time-driven** and **From calendar** —
+verified live against the sandbox project. It does not offer **From form** or **From
+spreadsheet**, so a manually-created "on form submit" trigger is not an option here at all.
+
+Instead, `setupTriggers()` creates the `onIntakeFormSubmit` trigger **programmatically**, via
+`installIntakeFormSubmitTrigger_()` in `Setup.js`:
+
+```javascript
+ScriptApp.newTrigger('onIntakeFormSubmit')
+  .forSpreadsheet(ss)
+  .onFormSubmit()
+  .create();
+```
+
+The `ScriptApp` API supports creating this trigger type regardless of what the Triggers UI
+dropdown lists — the UI and the API are not the same surface. `ss` is obtained via `getSheet().getParent()`
+(`Helpers.js`) — the same spreadsheet Bookings already lives in, resolved through the existing
+`SHEET_ID` Script Property. **No new Script Property is added or required.**
+
+Because `setupTriggers()` deletes every existing project trigger before recreating them, it is
+safe to run more than once and never creates a duplicate `onIntakeFormSubmit` trigger.
+
+### Why a spreadsheet trigger, and what that changes about the event shape
+
+The intake Google Form must remain linked to the same spreadsheet that contains the Bookings
+sheet — currently the sandbox spreadsheet, with the active response tab named **`Rental Intake Form`**.
+A trigger created with `.forSpreadsheet(ss).onFormSubmit()` fires on that spreadsheet's form-submit
+event, which has a **different shape** than a form-bound trigger's event: it provides
+`e.namedValues` (an object keyed by the exact form question title) and `e.range` (the newly
+appended response row), not `e.response`. `onIntakeFormSubmit()` in `src/Forms.js` is written for
+this shape — it does not use `e.response`, Google Form `ItemResponse` parsing, or any `FormApp`
+call.
+
+Because a spreadsheet-bound trigger fires for *any* form linked to that spreadsheet, not only the
+intake form, `onIntakeFormSubmit()` first checks `e.range.getSheet().getName()` against the
+`INTAKE_RESPONSE_SHEET_NAME` constant (`'Rental Intake Form'`, isolated in one place in
+`src/Forms.js`) and ignores anything else.
+
+**The two response-sheet question-title constants are filled in and verified**, not placeholders:
+`INTAKE_RESPONSE_EMAIL_QUESTION_TITLE` = `'Email Address'` and `INTAKE_RESPONSE_DATE_QUESTION_TITLE`
+= `'Rental Date'`, matching the sandbox intake response sheet's exact header row. If the live
+form's questions are ever retitled, these three constants (the two question titles and
+`INTAKE_RESPONSE_SHEET_NAME`) are the only place that needs updating — `onIntakeFormSubmit()` would
+otherwise safely find nothing and process nothing rather than silently reading the wrong field.
+
+### Matching stays ambiguity-safe
+
+Matching logic (`findIntakeMatchRow()`) is unchanged by any of this: email plus rental date when
+available, a controlled email-only fallback only when unambiguous, and an explicit `ambiguous`
+result — no sheet write, no DocuSeal request — whenever a submission cannot be safely resolved to
+exactly one booking. See "Matching an intake submission to the correct booking row" above.
+
+### After deploying
+
+**`setupTriggers()` must be re-run after every `clasp push`** that touches trigger-related code —
+pushing new source does not itself install or update triggers. This is not new to this feature; it
+applies to the four original time-based triggers too, and now also to the `onIntakeFormSubmit`
+spreadsheet trigger described above.
+
+See `src/Forms.js` and `src/Setup.js` for the full implementation.
 
 ## Apps Script web app deployment
 

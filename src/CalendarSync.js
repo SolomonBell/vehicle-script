@@ -79,20 +79,21 @@ function syncCalendarBookings() {
         // Welcome HTML email
         const welcomeEmailHtml =
           '<p>Hi ' + name + ',</p>' +
-          '<p>Your <strong>' + calCfg.vehicleType + '</strong> reservation at our <strong>' +
-          calCfg.location + '</strong> location is scheduled for <strong>' + dateStr + '</strong>.</p>' +
-          '<p>Please complete the following steps to continue your reservation:</p>' +
-          '<p><strong>1. Pay the $' + getDepositAmount(calCfg.vehicleType) + ' deposit:</strong> ' +
+          '<p>Your ' + calCfg.vehicleType + ' reservation at our ' +
+          calCfg.location + ' location is scheduled for ' + dateStr + '.</p>' +
+          '<p>Please complete these two steps to continue your reservation:</p>' +
+          '<p>1. Pay the $' + getDepositAmount(calCfg.vehicleType) + ' deposit: ' +
           '<a href="' + stripeUrl + '">Pay deposit</a></p>' +
-          '<p><strong>2. Review and submit your pre-filled intake form:</strong> ' +
+          '<p>2. Review and submit your pre-filled intake form: ' +
           '<a href="' + intakeUrl + '">Complete intake form</a></p>' +
-          '<p>After your deposit is received and the booking is approved, you\'ll receive ' +
-          'a rental agreement by email for electronic signature.</p>' +
+          '<p>Once both steps are done, we will send your rental agreement by email for ' +
+          'electronic signature. A Reliable Storage manager will also review your booking, ' +
+          'and we will notify you once it is approved.</p>' +
           '<p>Reply to this email or call us if you have any questions.</p>' +
           '<p>Thank you,<br>' + CONFIG.COMPANY_NAME + '</p>';
 
         if (phone && phone !== 'No Phone') sendSms(phone, welcomeSms, locCfg.phone);
-        if (email && email !== 'No Email') sendEmailHtml(email, 'Your ' + calCfg.vehicleType + ' reservation — ' + dateStr, welcomeEmailHtml, locCfg.email, locCfg.email);
+        if (email && email !== 'No Email') sendEmailHtml(email, 'Your ' + calCfg.vehicleType + ' reservation for ' + dateStr, welcomeEmailHtml, locCfg.email, locCfg.email);
 
         // Manager notification
         if (CONFIG.MANAGER_EMAIL) {
@@ -100,15 +101,15 @@ function syncCalendarBookings() {
             const mgrHtml =
               '<p>A new booking has been created.</p>' +
               '<p>' +
-              '<strong>Customer:</strong> ' + name + '<br>' +
-              '<strong>Vehicle:</strong> ' + calCfg.vehicleType + '<br>' +
-              '<strong>Location:</strong> ' + calCfg.location + '<br>' +
-              '<strong>Date/time:</strong> ' + dateStr + '<br>' +
-              '<strong>Email:</strong> ' + (email || 'No Email') + '<br>' +
-              '<strong>Phone:</strong> ' + (phone || 'No Phone') + '<br>' +
-              '<strong>Deposit due:</strong> $' + getDepositAmount(calCfg.vehicleType) +
+              'Customer: ' + name + '<br>' +
+              'Vehicle: ' + calCfg.vehicleType + '<br>' +
+              'Location: ' + calCfg.location + '<br>' +
+              'Date/time: ' + dateStr + '<br>' +
+              'Email: ' + (email || 'No Email') + '<br>' +
+              'Phone: ' + (phone || 'No Phone') + '<br>' +
+              'Deposit due: $' + getDepositAmount(calCfg.vehicleType) +
               '</p>';
-            sendEmailHtml(CONFIG.MANAGER_EMAIL, 'New booking — ' + name + ' — ' + calCfg.vehicleType, mgrHtml, locCfg.email, locCfg.email);
+            sendEmailHtml(CONFIG.MANAGER_EMAIL, 'New booking: ' + name + ' (' + calCfg.vehicleType + ')', mgrHtml, locCfg.email, locCfg.email);
           } catch(e) { Logger.log('Manager email failed for new booking ' + name + ': ' + e); }
         }
         if (CONFIG.MANAGER_PHONE) {
