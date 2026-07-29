@@ -4,14 +4,38 @@
 // HOURS_BETWEEN_APPROVAL_REMINDERS until MAX_APPROVAL_REMINDERS
 // is reached, then escalates once to ADMIN_EMAIL and goes silent.
 // Once the manager sets Rental Approved to Approved - Free or
-// Approved - Paid, the next run notifies the CUSTOMER once (tracked
-// in column U so later runs do not resend). Script never writes to
-// column O -- only the manager touches it.
+// Approved - Paid, manager reminders stop immediately -- but the
+// CUSTOMER is not notified until the lease has actually been signed
+// (column N, set only by the DocuSeal signed webhook). The approved
+// value may sit in the sheet for as long as it takes; each run just
+// checks column N again. Once signed, the very next run sends the
+// one-time customer notification (tracked in column U so later runs
+// do not resend). Script never writes to column O -- only the manager
+// touches it.
 // State is tracked in P (Approval Notified At) and Q (Reminder Count)
 // for the manager reminder loop, and U (Customer Approval Notified)
 // for the one-time customer notification.
 // ============================================================
 function checkRentalEligibility() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) {
+    Logger.log('checkRentalEligibility: could not acquire lock, skipping');
+    return;
+  }
+
+  try {
+    checkRentalEligibility_();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Actual implementation, run only while checkRentalEligibility() holds the
+// script lock -- guards against an overlapping execution reading column U
+// before a prior run has finished writing it, which could otherwise send
+// the customer approval email twice. Same locking pattern as
+// processReminders() (Reminders.js).
+function checkRentalEligibility_() {
   const sheet = getSheet();
   const data  = sheet.getDataRange().getValues();
 
@@ -20,15 +44,18 @@ function checkRentalEligibility() {
     const approved         = data[i][14];               // O: Rental Approved
     const lastNotified     = data[i][15];               // P: Approval Notified At
     const reminderCount    = Number(data[i][16]) || 0;  // Q: Approval Reminder Count
+    const leaseSigned      = data[i][13];                // N: Lease Signed
     const customerNotified = data[i][20];                // U: Customer Approval Notified
 
     // Skip rows that aren't fully initialized yet
     if (intakeSent !== 'Yes') continue;
 
-    // Manager has approved (with or without a fee) -- notify the customer
-    // exactly once, then leave the row alone on every later run.
+    // Manager has approved (with or without a fee) -- manager reminders
+    // stop here regardless of lease-signature status. The customer is only
+    // notified once the lease has actually been signed (column N); until
+    // then this row is silently skipped and re-checked on the next run.
     if (approved === 'Approved - Free' || approved === 'Approved - Paid') {
-      if (shouldNotifyCustomerOfApproval(approved, customerNotified)) {
+      if (shouldNotifyCustomerOfApproval(approved, leaseSigned, customerNotified)) {
         notifyCustomerOfApproval(sheet, data, i);
       }
       continue;
@@ -156,10 +183,13 @@ function checkRentalEligibility() {
 // ============================================================
 // NOTIFY CUSTOMER OF APPROVAL (called once per row from checkRentalEligibility)
 // Sends the customer a one-time email (and SMS, if a phone is on file) telling
-// them their rental has been approved. Idempotency is tracked in column U
-// (Customer Approval Notified) — separate from columns P/Q, which belong only
-// to the manager reminder loop. U is set to 'Yes' only after a successful send
-// so a failed attempt is retried on the next trigger run.
+// them their rental has been approved. Only ever called once column N (Lease
+// Signed) is already 'Yes' -- see shouldNotifyCustomerOfApproval() -- so this
+// does not need to hedge about whether the lease has been signed yet, and
+// does not read column J (Lease Sent) at all. Idempotency is tracked in
+// column U (Customer Approval Notified) — separate from columns P/Q, which
+// belong only to the manager reminder loop. U is set to 'Yes' only after a
+// successful send so a failed attempt is retried on the next trigger run.
 // ============================================================
 function notifyCustomerOfApproval(sheet, data, i) {
   const name        = data[i][1];
@@ -167,8 +197,7 @@ function notifyCustomerOfApproval(sheet, data, i) {
   const phone       = data[i][3];
   const dateStr     = formatDateTime(new Date(data[i][4]));
   const vehicleType = data[i][17] || ''; // R: Vehicle Type
-  const location     = data[i][18] || ''; // S: Location
-  const leaseSent    = data[i][9];        // J: Lease Sent
+  const location    = data[i][18] || ''; // S: Location
 
   let locCfg;
   try {
@@ -179,21 +208,17 @@ function notifyCustomerOfApproval(sheet, data, i) {
   }
 
   const firstName = (name || '').split(' ')[0];
-  const nextStepLine = leaseSent === 'Yes'
-    ? 'Check your email for the rental agreement to sign if you have not already.'
-    : "You'll receive your rental agreement by email shortly.";
 
   const html =
     '<p>Hi ' + name + ',</p>' +
     '<p>Good news, your ' + vehicleType + ' rental at our ' + location +
     ' location on ' + dateStr + ' has been approved.</p>' +
-    '<p>' + nextStepLine + '</p>' +
     '<p>Reply to this email or call us if you have any questions.</p>' +
     '<p>Thank you,<br>' + CONFIG.COMPANY_NAME + '</p>';
 
   const sms =
     CONFIG.COMPANY_NAME + ': Good news ' + firstName + ', your ' + vehicleType +
-    ' rental on ' + dateStr + ' is approved. ' + nextStepLine;
+    ' rental on ' + dateStr + ' is approved.';
 
   let delivered = false;
 

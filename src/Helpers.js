@@ -147,13 +147,18 @@ function isDocuSealEligible(depositPaid, intakeCompleted, leaseSent) {
   return depositPaid === 'Yes' && intakeCompleted === 'Yes' && leaseSent !== 'Yes';
 }
 
-// Returns true only when the manager has approved the rental (paid or free)
-// and the customer has not already been sent the one-time approval
-// notification (column U). Denied and blank/pending values return false, same
-// as an unset customerNotified value. Used by checkRentalEligibility() to
-// decide whether notifyCustomerOfApproval() should run for a given row.
-function shouldNotifyCustomerOfApproval(approved, customerNotified) {
+// Returns true only when the manager has approved the rental (paid or free),
+// the lease has actually been signed (column N -- not merely sent), and the
+// customer has not already been sent the one-time approval notification
+// (column U). Denied and blank/pending approval values return false, and so
+// does an approved-but-not-yet-signed row: the manager's approval value may
+// sit in the sheet for as long as it takes the DocuSeal signed webhook to
+// update column N -- this deliberately does not fire early just because
+// column O already has an approved value. Used by checkRentalEligibility()
+// to decide whether notifyCustomerOfApproval() should run for a given row.
+function shouldNotifyCustomerOfApproval(approved, leaseSigned, customerNotified) {
   return (approved === 'Approved - Free' || approved === 'Approved - Paid') &&
+         leaseSigned === 'Yes' &&
          customerNotified !== 'Yes';
 }
 

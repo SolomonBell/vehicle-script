@@ -160,6 +160,14 @@ Customer books vehicle via Google Booking
                     • Col N (Lease Signed) = Yes
                          │
                          ▼
+                  checkRentalEligibility sees Col N = Yes
+                    • Customer approval email + SMS sent
+                    • Col U (Customer Approval Notified) = Yes
+                    (only fires once Col O was already an approved value;
+                     if approval and signature arrive out of order, this
+                     step waits until both are true)
+                         │
+                         ▼
                   processReminders — 24-hour window before pickup
                     • Col K (24hr Sent) = Yes (written BEFORE sending)
                     • 24-hr reminder SMS + email to customer
@@ -247,8 +255,9 @@ flowchart TD
     M --> N([Customer signs lease])
     N --> O[DocuSeal → Pipedream validates + forwards\nPOST to doPost with shared secret]
     O --> P[markLeaseSigned — Col N = Yes]
+    P --> P2[checkRentalEligibility sees Col N = Yes\nand Col O already approved\nCustomer approval email/SMS sent — Col U = Yes]
 
-    P --> Q[processReminders fires within\n24-26 hours of pickup — Col K = Yes]
+    P2 --> Q[processReminders fires within\n24-26 hours of pickup — Col K = Yes]
     Q --> R[24-hour reminder SMS and email\nPre-trip inspection form link]
     R --> S([Rental day])
     S --> T[processReminders fires POST_RENTAL_HOURS\nafter end time — Col L = Yes]
@@ -512,9 +521,17 @@ lease (e.g., DocuSeal was temporarily unreachable, or approval arrived after the
 **Function:** `checkRentalEligibility()`
 **Trigger:** Every 5 minutes
 
-Drives the manager approval state machine using columns P and Q. Only processes rows where column
-I (Intake Sent) = `Yes`. Skips rows where column O (Rental Approved) has any decision value.
-Never writes to column O. See [Approval State Machine](#12-approval-state-machine).
+Acquires a `LockService.getScriptLock()` with a 10-second timeout to prevent overlapping
+executions, same pattern as `processReminders`. Drives the manager approval state machine using
+columns P and Q. Only processes rows where column I (Intake Sent) = `Yes`. Skips rows where
+column O (Rental Approved) has any decision value — manager reminders stop as soon as O is set.
+Never writes to column O.
+
+Once O is approved, sends the customer their one-time "your rental is approved" email only when
+column N (Lease Signed) is also `Yes` — manager approval alone does not trigger it. If the lease
+is not yet signed, the row is skipped and re-checked on the next run until the DocuSeal signed
+webhook (`markLeaseSigned`) updates column N. Tracked in column U so it is never sent twice. See
+[Approval State Machine](#12-approval-state-machine).
 
 ---
 
@@ -1258,6 +1275,7 @@ not block the confirmation email or the DocuSeal lease send.
 |---|---|---|
 | New booking detected | Email + SMS | Welcome message; Stripe Checkout Session URL; pre-filled intake form URL |
 | Deposit confirmed | Email + SMS | Deposit confirmation; rental agreement coming by email |
+| Rental approved (only once lease is signed — Col N = Yes) | Email + SMS | "Your rental is approved" notice; sent once, tracked in Col U |
 | 24hr before pickup (deposit paid) | Email + SMS | Pickup reminder; pre-trip inspection form link |
 | 24hr before pickup (deposit NOT paid) | Email + SMS | Urgency notice; direct customer to original welcome email for payment link |
 | After rental ends | Email + SMS | Thank-you; post-trip inspection form link |
@@ -1332,6 +1350,35 @@ silence.
 P is updated when the initial email and each reminder are sent. P is not updated at escalation.
 Rows where the manager sets column O to any decision value are excluded at the top of the loop
 and never receive another notification.
+
+### Customer approval notification (separate from the manager loop)
+
+The P/Q state machine above governs only the manager reminder loop, and it exits the moment
+column O is set — it does not decide when the customer is told. **Manager approval alone never
+triggers the customer's approval email.** That is a separate, one-time check:
+
+```
+Column O = Approved - Free or Approved - Paid
+     │
+     ▼
+Column N (Lease Signed) = Yes?
+     │
+     ├── No  → skip this row; re-check on the next 5-minute run
+     │          (approval sits in the sheet for however long signing takes;
+     │           no timeout, no reminder loop for this wait)
+     │
+     └── Yes → Column U (Customer Approval Notified) = Yes already?
+                    │
+                    ├── Yes → skip (already sent)
+                    └── No  → send the customer's approval email/SMS,
+                               then set Column U = Yes
+```
+
+Column N is set only by the DocuSeal signed webhook (`markLeaseSigned`), so if the manager
+approves before the customer signs, the system waits — the next `checkRentalEligibility` run
+after the webhook updates column N is what actually sends the email. `checkRentalEligibility`
+holds `LockService.getScriptLock()` for the duration of each run, so an overlapping execution
+cannot read column U before a prior run has written it, preventing a duplicate send.
 
 ---
 
@@ -1940,11 +1987,11 @@ but there is no automated recovery path.
 ID is not available at row creation time — but it means `getDataRange().getValues()` returns an
 array where index 19 is undefined for new rows.
 
-**Single lock for processReminders only:** `processReminders` uses `LockService` to prevent
-overlapping executions. `syncCalendarBookings` and `checkRentalEligibility` do not. Concurrent
-runs of those functions could, in theory, both see the same new booking event (before column A is
-updated) and send duplicate welcome messages. In practice, `appendRow` is atomic from the sheet's
-perspective, but the race window exists.
+**No lock for syncCalendarBookings:** `processReminders` and `checkRentalEligibility` both use
+`LockService` to prevent overlapping executions. `syncCalendarBookings` does not. A concurrent
+run could, in theory, see the same new booking event (before column A is updated) and send a
+duplicate welcome message. In practice, `appendRow` is atomic from the sheet's perspective, but
+the race window exists.
 
 **`setupSheetSchema` only manages columns R and S:** Column headers A–Q and T must be set up
 manually. If a column is accidentally deleted or renamed, the script will silently read the wrong

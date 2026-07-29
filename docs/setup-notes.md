@@ -200,6 +200,13 @@ Row 1 headers (columns A–V). Columns R, S, U, and V are written by `syncCalend
 customer has been sent the one-time "your rental is approved" notification, so the notification
 is never sent twice.
 
+**Manager approval alone does not trigger the customer email.** `checkRentalEligibility` only
+sends the customer notification once column N (Lease Signed) is also `Yes`. If the manager sets
+column O before the lease is signed, the approval value simply waits in the sheet — manager
+reminders stop immediately, but the customer email is not sent until a later run of
+`checkRentalEligibility` sees column N updated by the DocuSeal signed webhook
+(`markLeaseSigned`). See [Approval reminder behavior](#approval-reminder-behavior-v7) below.
+
 > **Why not reuse columns P/Q instead of adding U?** P (Approval Notified At) and Q (Approval
 > Reminder Count) are the *manager* reminder loop's own state — they record when the manager was
 > last asked to approve and how many times. `checkRentalEligibility` stops touching P/Q the
@@ -439,4 +446,15 @@ The reminder interval and cap are Script Properties, not fixed values — see
 - 1 ≤ Q < MAX_APPROVAL_REMINDERS, hours since P ≥ HOURS_BETWEEN_APPROVAL_REMINDERS: sends reminder → increments Q
 - Q = MAX_APPROVAL_REMINDERS, hours since P ≥ HOURS_BETWEEN_APPROVAL_REMINDERS: escalates to ADMIN_EMAIL → sets Q = MAX_APPROVAL_REMINDERS + 1 (permanent skip)
 - Q > MAX_APPROVAL_REMINDERS: row is silently skipped forever
-- Manager sets column O to resolve; script skips all resolved rows
+- Manager sets column O to resolve; script skips all resolved rows for the reminder loop
+
+This state machine (P/Q) governs only the manager reminder loop and stops the moment column O is
+set. It does not govern the customer notification. The customer's one-time "your rental is
+approved" email is a separate check: once column O is `Approved - Free` or `Approved - Paid`,
+`checkRentalEligibility` sends it only when column N (Lease Signed) is also `Yes` and column U is
+not already `Yes`. If the lease has not been signed yet, the row is skipped and re-checked on
+every subsequent 5-minute run until the DocuSeal signed webhook sets column N — there is no
+separate reminder loop or timeout for this wait. `checkRentalEligibility` acquires
+`LockService.getScriptLock()` before each run (same pattern as `processReminders`) so an
+overlapping execution cannot read column U before a prior run finishes writing it, which
+prevents a duplicate send of the customer email.

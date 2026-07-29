@@ -456,44 +456,55 @@ function testDepositAmounts() {
 // ---------------------------------------------------------------------------
 // TEST 19: Approval notification eligibility (shouldNotifyCustomerOfApproval) [CONFIG]
 // Verifies the pure decision helper checkRentalEligibility() uses to decide
-// whether to send the customer their one-time approval notification, and that
-// it never signals a duplicate send once column U is already 'Yes'. No sheet
-// reads, no external calls, no writes, no email or SMS sent.
+// whether to send the customer their one-time approval notification. The
+// customer must never be notified before the lease has actually been signed
+// (column N) -- a manager approval value alone (column O) is not enough, no
+// matter how long it has been sitting in the sheet. Also verifies the
+// no-duplicates guarantee once column U is already 'Yes'. No sheet reads, no
+// external calls, no writes, no email or SMS sent.
 // ---------------------------------------------------------------------------
 function testApprovalNotificationEligibility() {
   let passed = 0;
   let failed = 0;
 
-  function check(label, approved, customerNotified, expected) {
-    const actual = shouldNotifyCustomerOfApproval(approved, customerNotified);
+  function check(label, approved, leaseSigned, customerNotified, expected) {
+    const actual = shouldNotifyCustomerOfApproval(approved, leaseSigned, customerNotified);
     if (actual === expected) {
       Logger.log('OK (' + label + '): shouldNotifyCustomerOfApproval(' +
-                 JSON.stringify(approved) + ', ' + JSON.stringify(customerNotified) + ') = ' + actual);
+                 JSON.stringify(approved) + ', ' + JSON.stringify(leaseSigned) + ', ' +
+                 JSON.stringify(customerNotified) + ') = ' + actual);
       passed++;
     } else {
       Logger.log('FAIL (' + label + '): expected ' + expected + ', got ' + actual +
-                 ' for approved=' + JSON.stringify(approved) + ', customerNotified=' + JSON.stringify(customerNotified));
+                 ' for approved=' + JSON.stringify(approved) + ', leaseSigned=' + JSON.stringify(leaseSigned) +
+                 ', customerNotified=' + JSON.stringify(customerNotified));
       failed++;
     }
   }
 
-  // Approved - Paid, not yet notified -> should notify
-  check('Approved - Paid, not notified', 'Approved - Paid', '', true);
-  check('Approved - Paid, blank flag',   'Approved - Paid', undefined, true);
+  // Approved but lease not yet signed -> must NOT notify, regardless of how
+  // the approval got there or how long it has been waiting. This is the
+  // core business rule: manager approval alone never triggers the email.
+  check('Approved - Free, lease blank -> not eligible',  'Approved - Free', '',  '', false);
+  check('Approved - Paid, lease blank -> not eligible',  'Approved - Paid', '',  '', false);
+  check('Approved - Paid, lease undefined -> not eligible', 'Approved - Paid', undefined, '', false);
 
-  // Approved - Free, not yet notified -> should notify
-  check('Approved - Free, not notified', 'Approved - Free', '', true);
+  // Approved AND signed AND not yet notified -> eligible
+  check('Approved - Free, signed, not notified -> eligible', 'Approved - Free', 'Yes', '', true);
+  check('Approved - Paid, signed, not notified -> eligible', 'Approved - Paid', 'Yes', '', true);
 
-  // Already notified -> must NOT notify again (this is the no-duplicates guarantee)
-  check('Approved - Paid, already notified', 'Approved - Paid', 'Yes', false);
-  check('Approved - Free, already notified', 'Approved - Free', 'Yes', false);
+  // Signed and already notified -> must NOT notify again (no-duplicates guarantee)
+  check('Approved - Paid, signed, already notified -> not eligible', 'Approved - Paid', 'Yes', 'Yes', false);
+  check('Approved - Free, signed, already notified -> not eligible', 'Approved - Free', 'Yes', 'Yes', false);
 
-  // Denied -> never notify the customer, regardless of the flag
-  check('Denied, not notified',     'Denied', '', false);
-  check('Denied, flag somehow Yes', 'Denied', 'Yes', false);
+  // Denied -> never notify the customer, regardless of lease or flag state
+  check('Denied, lease blank -> not eligible',        'Denied', '',    '',    false);
+  check('Denied, lease signed -> not eligible',        'Denied', 'Yes', '',    false);
+  check('Denied, already notified somehow -> not eligible', 'Denied', 'Yes', 'Yes', false);
 
-  // Pending (blank) -> never notify
-  check('Pending (blank)', '', '', false);
+  // Pending (blank approval) -> never notify
+  check('Pending (blank approval), lease blank -> not eligible',  '', '',    '', false);
+  check('Pending (blank approval), lease signed -> not eligible', '', 'Yes', '', false);
 
   Logger.log(failed === 0
     ? 'All ' + passed + ' approval notification eligibility checks passed.'
