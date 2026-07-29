@@ -1322,12 +1322,14 @@ function testInspectionFormSubmitRowMatching() {
 // whitespace-normalization of the submitted answer and the case where the
 // type answer cannot be classified at all.
 //
-// Deliberately does NOT use CONFIG.INSPECT_VAL_PRE / CONFIG.INSPECT_VAL_POST
-// anywhere below -- response classification is independent of those (they
-// are the longer display strings used only to pre-fill the form's dropdown
-// via buildInspectUrl()). The response sheet is expected to record exactly
-// "pre" or "post", so these tests use those literal strings, including
-// varied case and surrounding whitespace.
+// Classification compares the submitted answer against CONFIG.INSPECT_VAL_PRE
+// / CONFIG.INSPECT_VAL_POST (both normalized the same way as the answer) --
+// this test temporarily stubs those two CONFIG properties to the live
+// form's exact option text ("Pre-Trip (Before Vehicle Pickup)" / "Post-Trip
+// (After Vehicle Return)") for the duration of the test, and always restores
+// the originals in a finally block. This exercises the real production
+// comparison without ever reading or writing the live Script Properties
+// those CONFIG values are sourced from.
 // ---------------------------------------------------------------------------
 function testExtractInspectionSubmissionFields() {
   let passed = 0;
@@ -1367,116 +1369,137 @@ function testExtractInspectionSubmissionFields() {
     }
   }
 
-  // ---- Exact lowercase "pre" is classified as type 'pre' ----
-  (function preTypeExtracted() {
-    const namedValues = {};
-    namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE] = ['Customer@Example.com']; // mixed case, on purpose
-    namedValues[INSPECT_RESPONSE_DATE_QUESTION_TITLE]  = ['2026-08-01'];
-    namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE]  = ['pre'];
-    const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
-    check('"pre" classified as pre, email lowercased', event, 'customer@example.com', '2026-08-01', 'pre');
-  })();
+  const LIVE_VAL_PRE  = 'Pre-Trip (Before Vehicle Pickup)';
+  const LIVE_VAL_POST = 'Post-Trip (After Vehicle Return)';
 
-  // ---- Exact lowercase "post" is classified as type 'post' ----
-  (function postTypeExtracted() {
-    const namedValues = {};
-    namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE] = ['customer@example.com'];
-    namedValues[INSPECT_RESPONSE_DATE_QUESTION_TITLE]  = ['2026-08-01'];
-    namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE]  = ['post'];
-    const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
-    check('"post" classified as post', event, 'customer@example.com', '2026-08-01', 'post');
-  })();
+  const realInspectValPre  = CONFIG.INSPECT_VAL_PRE;
+  const realInspectValPost = CONFIG.INSPECT_VAL_POST;
+  CONFIG.INSPECT_VAL_PRE  = LIVE_VAL_PRE;
+  CONFIG.INSPECT_VAL_POST = LIVE_VAL_POST;
 
-  // ---- Inspection type is trimmed and case-normalized ----
-  (function typeIsTrimmedAndCaseNormalized() {
-    const cases = [
-      ['PRE', 'pre'],
-      ['Pre', 'pre'],
-      ['  pre  ', 'pre'],
-      ['  PRE  ', 'pre'],
-      ['POST', 'post'],
-      ['Post', 'post'],
-      ['  post  ', 'post'],
-      ['  POST  ', 'post'],
-    ];
-    cases.forEach(function(pair) {
-      const rawValue = pair[0];
-      const expected = pair[1];
+  try {
+    // ---- 1. The exact live-style pre-inspection option classifies as pre ----
+    (function preTypeExtracted() {
+      const namedValues = {};
+      namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE] = ['Customer@Example.com']; // mixed case, on purpose
+      namedValues[INSPECT_RESPONSE_DATE_QUESTION_TITLE]  = ['2026-08-01'];
+      namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE]  = [LIVE_VAL_PRE];
+      const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
+      check('live pre-trip option classified as pre, email lowercased', event, 'customer@example.com', '2026-08-01', 'pre');
+    })();
+
+    // ---- 2. The exact live-style post-inspection option classifies as post ----
+    (function postTypeExtracted() {
       const namedValues = {};
       namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE] = ['customer@example.com'];
-      namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE]  = [rawValue];
+      namedValues[INSPECT_RESPONSE_DATE_QUESTION_TITLE]  = ['2026-08-01'];
+      namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE]  = [LIVE_VAL_POST];
       const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
-      check('type answer ' + JSON.stringify(rawValue) + ' normalizes to ' + expected,
-            event, 'customer@example.com', undefined, expected);
-    });
-  })();
+      check('live post-trip option classified as post', event, 'customer@example.com', '2026-08-01', 'post');
+    })();
 
-  // ---- Unrecognized type answer -- type is null; caller must refuse to update ----
-  (function unknownTypeRejected() {
-    const namedValues = {};
-    namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE] = ['customer@example.com'];
-    namedValues[INSPECT_RESPONSE_DATE_QUESTION_TITLE]  = ['2026-08-01'];
-    namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE]  = ['Some Unrelated Answer'];
-    const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
-    check('unrecognized type answer -- type is null, not a guess', event, 'customer@example.com', '2026-08-01', null);
-  })();
+    // ---- 3. Leading/trailing whitespace and case differences still normalize correctly ----
+    (function typeIsTrimmedAndCaseNormalized() {
+      const pairs = [
+        [LIVE_VAL_PRE.toUpperCase(),   'pre'],
+        [LIVE_VAL_PRE.toLowerCase(),   'pre'],
+        ['  ' + LIVE_VAL_PRE + '  ',   'pre'],
+        [LIVE_VAL_POST.toUpperCase(),  'post'],
+        [LIVE_VAL_POST.toLowerCase(),  'post'],
+        ['  ' + LIVE_VAL_POST + '  ',  'post'],
+      ];
+      pairs.forEach(function(pair) {
+        const rawValue = pair[0];
+        const expected = pair[1];
+        const namedValues = {};
+        namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE] = ['customer@example.com'];
+        namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE]  = [rawValue];
+        const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
+        check('type answer ' + JSON.stringify(rawValue) + ' normalizes to ' + expected,
+              event, 'customer@example.com', undefined, expected);
+      });
+    })();
 
-  // ---- Unrecognized type answer preserves the raw text for admin-alert context ----
-  (function unknownTypeKeepsRawTypeForAlert() {
-    const namedValues = {};
-    namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE] = ['customer@example.com'];
-    namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE]  = ['Not Pre Or Post'];
-    const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
-    const actual = extractInspectionSubmissionFields(event);
-    if (actual && actual.type === null && actual.rawType === 'Not Pre Or Post') {
-      Logger.log('OK (rawType preserved for admin alert): rawType=' + actual.rawType);
-      passed++;
-    } else {
-      Logger.log('FAIL (rawType preserved for admin alert): got ' + JSON.stringify(actual));
-      failed++;
-    }
-  })();
+    // ---- 4. An unrelated value still returns type: null ----
+    (function unknownTypeRejected() {
+      const namedValues = {};
+      namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE] = ['customer@example.com'];
+      namedValues[INSPECT_RESPONSE_DATE_QUESTION_TITLE]  = ['2026-08-01'];
+      namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE]  = ['Some Unrelated Answer'];
+      const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
+      check('unrecognized type answer -- type is null, not a guess', event, 'customer@example.com', '2026-08-01', null);
+    })();
 
-  // ---- Extraction succeeds with no date answer present ----
-  (function extractionNoDate() {
-    const namedValues = {};
-    namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE] = ['customer@example.com'];
-    namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE]  = ['pre'];
-    const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
-    check('extraction succeeds with no date answer', event, 'customer@example.com', null, 'pre');
-  })();
+    // ---- 5. rawType remains preserved (for admin-alert context) even when unrecognized ----
+    (function unknownTypeKeepsRawTypeForAlert() {
+      const namedValues = {};
+      namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE] = ['customer@example.com'];
+      namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE]  = ['Not Pre Or Post'];
+      const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
+      const actual = extractInspectionSubmissionFields(event);
+      if (actual && actual.type === null && actual.rawType === 'Not Pre Or Post') {
+        Logger.log('OK (rawType preserved for admin alert): rawType=' + actual.rawType);
+        passed++;
+      } else {
+        Logger.log('FAIL (rawType preserved for admin alert): got ' + JSON.stringify(actual));
+        failed++;
+      }
+    })();
 
-  // ---- Unrelated response-sheet submission is ignored (e.g. the intake form) ----
-  (function unrelatedSheetIgnored() {
-    const namedValues = {};
-    namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE] = ['customer@example.com'];
-    namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE]  = ['pre'];
-    const event = fakeEvent(INTAKE_RESPONSE_SHEET_NAME, namedValues); // wrong sheet on purpose
-    check('unrelated response sheet is ignored', event, null);
-  })();
+    // ---- Extraction succeeds with no date answer present ----
+    (function extractionNoDate() {
+      const namedValues = {};
+      namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE] = ['customer@example.com'];
+      namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE]  = [LIVE_VAL_PRE];
+      const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
+      check('extraction succeeds with no date answer', event, 'customer@example.com', null, 'pre');
+    })();
 
-  // ---- Missing email is rejected ----
-  (function missingEmailRejected() {
-    const namedValues = {};
-    namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE] = ['pre']; // no email key at all
-    const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
-    check('missing email answer is rejected', event, null);
-  })();
+    // ---- Unrelated response-sheet submission is ignored (e.g. the intake form) ----
+    (function unrelatedSheetIgnored() {
+      const namedValues = {};
+      namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE] = ['customer@example.com'];
+      namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE]  = [LIVE_VAL_PRE];
+      const event = fakeEvent(INTAKE_RESPONSE_SHEET_NAME, namedValues); // wrong sheet on purpose
+      check('unrelated response sheet is ignored', event, null);
+    })();
 
-  // ---- Blank email is rejected ----
-  (function blankEmailRejected() {
-    const namedValues = {};
-    namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE] = [''];
-    const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
-    check('blank email answer is rejected', event, null);
-  })();
+    // ---- Missing email is rejected ----
+    (function missingEmailRejected() {
+      const namedValues = {};
+      namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE] = [LIVE_VAL_PRE]; // no email key at all
+      const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
+      check('missing email answer is rejected', event, null);
+    })();
 
-  // ---- Malformed event object (missing range/namedValues) is rejected ----
-  (function malformedEventRejected() {
-    check('event with no range is rejected', { namedValues: {} }, null);
-    check('event with no namedValues is rejected', { range: fakeRange(INSPECT_RESPONSE_SHEET_NAME) }, null);
-    check('null event is rejected', null, null);
-  })();
+    // ---- Blank email is rejected ----
+    (function blankEmailRejected() {
+      const namedValues = {};
+      namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE] = [''];
+      const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
+      check('blank email answer is rejected', event, null);
+    })();
+
+    // ---- Malformed event object (missing range/namedValues) is rejected ----
+    (function malformedEventRejected() {
+      check('event with no range is rejected', { namedValues: {} }, null);
+      check('event with no namedValues is rejected', { range: fakeRange(INSPECT_RESPONSE_SHEET_NAME) }, null);
+      check('null event is rejected', null, null);
+    })();
+  } finally {
+    // 6. Always restore -- this test must never leave CONFIG (or the live
+    // Script Properties it was read from) altered for any other test or run.
+    CONFIG.INSPECT_VAL_PRE  = realInspectValPre;
+    CONFIG.INSPECT_VAL_POST = realInspectValPost;
+  }
+
+  if (CONFIG.INSPECT_VAL_PRE === realInspectValPre && CONFIG.INSPECT_VAL_POST === realInspectValPost) {
+    Logger.log('OK: CONFIG.INSPECT_VAL_PRE / CONFIG.INSPECT_VAL_POST restored to their original values');
+    passed++;
+  } else {
+    Logger.log('FAIL: CONFIG.INSPECT_VAL_PRE / CONFIG.INSPECT_VAL_POST were not restored');
+    failed++;
+  }
 
   Logger.log(failed === 0
     ? 'All ' + passed + ' inspection submission extraction checks passed.'

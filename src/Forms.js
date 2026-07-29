@@ -225,16 +225,17 @@ const INSPECT_RESPONSE_SHEET_NAME = 'Rental Vehicle Condition Inspection Form';
 // above); the Inspection Type answer is the only thing that tells them
 // apart.
 //
-// Response classification is DELIBERATELY independent of
-// CONFIG.INSPECT_VAL_PRE / CONFIG.INSPECT_VAL_POST -- those are the longer
-// display strings buildInspectUrl() uses to pre-fill the form's dropdown
-// (e.g. "Pre-trip Inspection"), not necessarily what the response sheet
-// records. The submitted answer is normalized with
-// String(value).trim().toLowerCase() and must equal exactly 'pre' or
-// 'post'; anything else is left unclassified (type: null) rather than
-// guessed. This keeps URL pre-fill and response classification cleanly
-// isolated so a future change to one display string cannot silently break
-// the other.
+// Response classification compares the submitted answer against
+// CONFIG.INSPECT_VAL_PRE / CONFIG.INSPECT_VAL_POST -- the same values
+// buildInspectUrl() uses to pre-fill the form's dropdown -- since the live
+// form's dropdown option text (e.g. "Pre-Trip (Before Vehicle Pickup)") is
+// what the response sheet actually records when the customer leaves the
+// pre-filled value unchanged. The submitted answer and both configured
+// values are independently normalized with String(value).trim().toLowerCase()
+// before comparing, so case and incidental whitespace differences never
+// cause a false unclassified result; anything that doesn't match either
+// normalized configured value is left unclassified (type: null) rather than
+// guessed.
 //
 // Returns { email, date, type, rawType } on success, where:
 //   - date is null if it was blank or unparseable (findInspectionMatchRow()
@@ -274,9 +275,11 @@ function extractInspectionSubmissionFields(e) {
   }
 
   const normalizedType = String(rawType).trim().toLowerCase();
+  const normalizedPre  = String(CONFIG.INSPECT_VAL_PRE).trim().toLowerCase();
+  const normalizedPost = String(CONFIG.INSPECT_VAL_POST).trim().toLowerCase();
   let type = null;
-  if (normalizedType === 'pre')       type = 'pre';
-  else if (normalizedType === 'post') type = 'post';
+  if (normalizedType === normalizedPre)       type = 'pre';
+  else if (normalizedType === normalizedPost) type = 'post';
 
   return { email: email, date: date, type: type, rawType: rawType };
 }
