@@ -99,6 +99,7 @@ function processReminders() {
           }
 
           const managerHtml =
+            '<p>Hi ' + location + ' Manager,</p>' +
             '<p>Upcoming rental tomorrow:</p>' +
             '<p>' +
             'Customer: ' + name + '<br>' +
@@ -155,6 +156,7 @@ function processReminders() {
           if (CONFIG.MANAGER_EMAIL) {
             try {
               const mgrPostHtml =
+                '<p>Hi ' + location + ' Manager,</p>' +
                 '<p>Post-trip inspection form sent to ' + name + '.</p>' +
                 '<p>' +
                 'Vehicle: ' + vehicleType + '<br>' +

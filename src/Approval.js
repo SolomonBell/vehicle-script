@@ -107,6 +107,7 @@ function checkRentalEligibility_() {
     // Branch A — First send (no email has gone out yet)
     if (reminderCount === 0) {
       const html =
+        '<p>Hi ' + location + ' Manager,</p>' +
         '<p>A new ' + vehicleType + ' rental needs your approval:</p>' +
         customerBlock +
         decisionList;
@@ -130,6 +131,7 @@ function checkRentalEligibility_() {
         && hoursSince >= CONFIG.HOURS_BETWEEN_APPROVAL_REMINDERS) {
 
       const html =
+        '<p>Hi ' + location + ' Manager,</p>' +
         '<p>This is reminder #' + reminderCount +
           '. The customer is still awaiting approval.</p>' +
         '<p>A ' + vehicleType + ' rental needs your approval:</p>' +

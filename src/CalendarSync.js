@@ -99,6 +99,7 @@ function syncCalendarBookings() {
         if (CONFIG.MANAGER_EMAIL) {
           try {
             const mgrHtml =
+              '<p>Hi ' + calCfg.location + ' Manager,</p>' +
               '<p>A new booking has been created.</p>' +
               '<p>' +
               'Customer: ' + name + '<br>' +
