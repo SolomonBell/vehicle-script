@@ -1,8 +1,11 @@
 # Reliable Storage — Vehicle Rental Automation
 
-> **Production system.** Automates the complete vehicle rental workflow for Reliable Storage across
-> four locations and two vehicle types — from calendar booking through post-rental inspection
-> follow-up — with no manual staff intervention required for the routine lifecycle.
+> **Currently in sandbox validation, not yet cut over to production.** Automates the complete
+> vehicle rental workflow for Reliable Storage across four locations and two vehicle types — from
+> calendar booking through post-rental inspection follow-up — with no manual staff intervention
+> required for the routine lifecycle once validated. See [Repository status](#repository-status)
+> below and [docs/production-rollout.md](docs/production-rollout.md) for exactly what has and has
+> not been verified yet.
 
 ---
 
@@ -40,6 +43,38 @@ across the Kitsap Peninsula. This repository contains the Google Apps Script aut
 handles every step of the vehicle rental process from the moment a customer books through the
 post-rental inspection follow-up.
 
+### Repository status
+
+**Environment:** Sandbox. The code in `src/` has been deployed and exercised in a sandbox Apps
+Script project bound to a sandbox Google Sheet, sandbox Google Forms, and test-mode Stripe/DocuSeal
+credentials. It has **not** been cut over to a production Apps Script project or production Script
+Properties. See [docs/production-rollout.md](docs/production-rollout.md) for the migration plan
+and [docs/testing-plan.md](docs/testing-plan.md) for the acceptance-test checklist.
+
+**Validated in the sandbox environment** (confirmed working end-to-end):
+- Calendar booking sync (`syncCalendarBookings`)
+- Welcome/intake message delivery
+- Stripe payment/authorization flow (Checkout Session → webhook → deposit marked paid)
+- DocuSeal lease delivery
+- Lease signing (DocuSeal webhook → Lease Signed = Yes)
+- Manager approval (request, decision, reminder stop)
+- Customer approval gating and notification (waits for both approval and signature)
+- Intake completion tracking (`onFormSubmit` → column V)
+- Trigger installation (`setupTriggers()` creates all five triggers correctly)
+
+**Still awaiting final operational validation** (implemented and believed correct from code
+review, but not yet confirmed by a live sandbox run):
+- Automatic 24-hour reminder firing on schedule
+- Manager 24-hour greeting/summary (including the new location-specific greeting)
+- Pre-trip inspection completion update (column W)
+- Post-rental reminder firing on schedule
+- Manager post-rental greeting/notice (including the new location-specific greeting)
+- Post-trip inspection completion update (column X)
+
+Do not treat the items in the second list as passed. They require a booking to actually reach the
+24-hour and post-rental windows (or a manually time-shifted test row) before they can be marked
+validated — see [docs/testing-plan.md](docs/testing-plan.md).
+
 ### Active sites
 
 | Location | Vehicle | Calendar Script Property |
@@ -71,7 +106,7 @@ post-rental inspection follow-up.
 |---|---|
 | Automation runtime | Google Apps Script (V8) |
 | Booking source | Google Calendar (Appointment Schedules) |
-| System of record | Google Sheets (Bookings tab, columns A–V) |
+| System of record | Google Sheets (Bookings tab, columns A–X) |
 | E-mail | SendGrid REST API |
 | SMS | Twilio REST API |
 | E-signature | DocuSeal REST API |
@@ -102,7 +137,7 @@ Customer books vehicle via Google Booking
   syncCalendarBookings detects event (every 5 min)
             │
             ▼
-  Row appended to Bookings sheet (columns A–T initialized)
+  Row appended to Bookings sheet (columns A–S initialized; T–X populate later)
             │
             ├──▶  Welcome SMS + email sent to customer
             │       • Stripe Checkout Session URL (unique per booking;
@@ -172,7 +207,13 @@ Customer books vehicle via Google Booking
                     • Col K (24hr Sent) = Yes (written BEFORE sending)
                     • 24-hr reminder SMS + email to customer
                     • Pre-filled pre-trip inspection form link
-                    • Manager notified with deposit/lease status summary
+                    • Manager notified with 24hr rental summary (location greeting)
+                         │
+                         ▼
+                  Customer submits pre-trip inspection form
+                    • onFormSubmit dispatcher routes to
+                      processInspectionFormSubmission_()
+                    • Col W (Pre-Inspection Form Completed) = Yes
                          │
                          ▼
                   Rental day
@@ -182,16 +223,22 @@ Customer books vehicle via Google Booking
                     • Col L (Post-Rental Sent) = Yes (written BEFORE sending)
                     • Post-rental SMS + email to customer
                     • Pre-filled post-trip inspection form link
-                    • Manager notified
+                    • Manager notified (location greeting)
                          │
                          ▼
-                  Customer completes Vehicle Inspection Form
-                    • Pre-filled with name, email, date, inspection type
-                    • Photo uploads
+                  Customer submits post-trip inspection form
+                    • onFormSubmit dispatcher routes to
+                      processInspectionFormSubmission_()
+                    • Col X (Post-Inspection Form Completed) = Yes
                          │
                          ▼
                   Workflow complete
 ```
+
+Neither W nor X currently gates any further step — they record completion only. Sending the
+pre-trip and post-trip inspection links themselves is driven by time and the K/L flag columns
+(see the `Reminders.js — Engine 3` entry in [Source File Reference](#5-source-file-reference)),
+not by Deposit Paid, Lease Signed, or approval state.
 
 ### Implementation notes
 
@@ -237,7 +284,7 @@ Customer books vehicle via Google Booking
 ```mermaid
 flowchart TD
     A([Customer books via Google Booking]) --> B[syncCalendarBookings detects\nnew Calendar event — every 5 min]
-    B --> C[Row appended to Bookings sheet\nColumns A–T initialised]
+    B --> C[Row appended to Bookings sheet\nColumns A-S initialised; T-X populate later]
     C --> D[Welcome SMS and email sent\nDeposit link + intake form URL]
     C --> E[Manager notified by email and SMS]
     C --> F[checkRentalEligibility sends\napproval request to manager\nColumns P and Q updated]
@@ -259,19 +306,23 @@ flowchart TD
 
     P2 --> Q[processReminders fires within\n24-26 hours of pickup — Col K = Yes]
     Q --> R[24-hour reminder SMS and email\nPre-trip inspection form link]
-    R --> S([Rental day])
+    R --> R2([Customer submits pre-trip inspection form])
+    R2 --> R3[onFormSubmit dispatcher routes to\nprocessInspectionFormSubmission_\nCol W = Yes]
+    R3 --> S([Rental day])
     S --> T[processReminders fires POST_RENTAL_HOURS\nafter end time — Col L = Yes]
     T --> U[Post-rental prompt SMS and email\nPost-trip inspection form link]
-    U --> V([Workflow complete])
+    U --> U2([Customer submits post-trip inspection form])
+    U2 --> U3[onFormSubmit dispatcher routes to\nprocessInspectionFormSubmission_\nCol X = Yes]
+    U3 --> V([Workflow complete])
 ```
 
 ---
 
 ## 3. System Architecture
 
-### Two execution paths
+### Three execution paths
 
-The system has two independent execution paths that converge on Google Sheets as the shared
+The system has three independent execution paths that converge on Google Sheets as the shared
 system of record.
 
 ```
@@ -319,6 +370,31 @@ system of record.
 │               ├──▶ Twilio    (confirmation SMS)     │
 │               └──▶ DocuSeal  (lease submissions)    │
 └─────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────┐
+│                FORM SUBMISSION PATH                 │
+│  (event-driven, fires on Google Form submit)         │
+│                                                     │
+│  Customer submits intake or inspection form          │
+│       │                                             │
+│       ▼                                             │
+│  Single spreadsheet-bound onFormSubmit trigger       │
+│  (fires for ANY form linked to the Bookings          │
+│   spreadsheet — both response tabs live there)       │
+│       │                                             │
+│       ▼                                             │
+│  onFormSubmit(e) dispatcher (Forms.js)               │
+│  routes by e.range.getSheet().getName():             │
+│  ├─ "Rental Intake Form" →                          │
+│  │    processIntakeFormSubmission_()                 │
+│  └─ "Rental Vehicle Condition Inspection Form" →     │
+│       processInspectionFormSubmission_()             │
+│       │                                             │
+│       ▼                                             │
+│  Google Sheets ◄──────────────── reads / writes     │
+│       (Col V, W, or X; may trigger DocuSeal lease    │
+│        send from the intake path)                    │
+└─────────────────────────────────────────────────────┘
 ```
 
 ### Detailed architecture diagram
@@ -337,11 +413,14 @@ graph TB
         checkRentalEligibility · 5 min
         sendLeaseToNewBookings · 15 min
         processReminders · 30 min"]
+        ONFORMSUBMIT["onFormSubmit dispatcher
+        (1 spreadsheet-bound trigger,
+        routes by response tab name)"]
         DOPOST["doPost — Web app endpoint"]
     end
 
     subgraph RECORD["System of Record"]
-        SHEETS[(Google Sheets — Bookings tab\nColumns A–T)]
+        SHEETS[(Google Sheets — Bookings tab\nColumns A-X)]
     end
 
     subgraph BRIDGE["Pipedream — Webhook Bridge"]
@@ -374,6 +453,11 @@ graph TB
     DOPOST --> SENDGRID
     DOPOST --> TWILIO
     DOPOST --> DOCUSEAL
+
+    CUST -->|submits intake or inspection form| FORMS
+    FORMS -->|onFormSubmit event, both response tabs\nlive in the Bookings spreadsheet| ONFORMSUBMIT
+    ONFORMSUBMIT <-->|reads / writes Col V, W, or X| SHEETS
+    ONFORMSUBMIT -.->|intake path only, if deposit already paid| DOCUSEAL
 ```
 
 ### Multi-site design
@@ -422,7 +506,10 @@ src/                          ← working copy — paste each file into Apps Scr
   Notifications.js            ← sendSms(), sendEmailHtml(), alertAdmin()
   DocuSeal.js                 ← sendLeaseViaDocuSeal(), extractDocuSealSubmissionId()
   Webhooks.js                 ← doPost(), doGet(), markDepositPaid(), markLeaseSigned()
-  Forms.js                    ← buildIntakeUrl(), buildInspectUrl()
+  Forms.js                    ← buildIntakeUrl(), buildInspectUrl(),
+                                 onFormSubmit() dispatcher,
+                                 processIntakeFormSubmission_(),
+                                 processInspectionFormSubmission_()
   Helpers.js                  ← getSheet(), extraction helpers, formatters,
                                  getDepositAmount(), getStripePriceId(),
                                  createStripeCheckoutSession(), getLocationConfig()
@@ -432,8 +519,10 @@ src/                          ← working copy — paste each file into Apps Scr
 docs/
   setup-notes.md              ← Script Properties reference, sheet schema,
                                  trigger setup, Pipedream workflow config
-  testing-plan.md             ← step-by-step end-to-end flow test checklist
-  sandbox-plan.md             ← sandbox environment setup notes
+  testing-plan.md             ← acceptance-test checklist + current validation status
+  operations-runbook.md       ← day-to-day operational quick-reference
+  production-rollout.md       ← sandbox-to-production migration plan (not yet executed)
+  sandbox-plan.md             ← historical — see README.md §14 for current sandbox setup
   architecture-proposal.md    ← historical design notes from the multi-site migration
   production-diff-summary.md  ← v7 → v8 change analysis
 
@@ -642,13 +731,48 @@ successful DocuSeal call.
 
 ### Forms.js
 
-**Functions:** `buildIntakeUrl(name, email, phone, rentalDate)`,
+**URL builders:** `buildIntakeUrl(name, email, phone, rentalDate)`,
 `buildInspectUrl(name, email, rentalDate, type)`
 
 Builds pre-filled Google Forms URLs by appending query parameters with entry IDs from Script
 Properties. The intake form uses `yyyy-MM-dd` date format. The inspection form uses
 `MMMM d, yyyy` (human-readable) — Google Forms date fields accept different formats depending on
-the field type; these values match the configured field types.
+the field type; these values match the configured field types. `buildInspectUrl`'s `type`
+parameter (`'pre'`/`'post'`) selects `CONFIG.INSPECT_VAL_PRE` or `CONFIG.INSPECT_VAL_POST` as the
+pre-filled dropdown value.
+
+**Trigger:** `onFormSubmit(e)`
+
+The single installed spreadsheet-bound form-submit trigger — installed by `setupTriggers()` (see
+the `Setup.js` entry below and [Google Forms](#7-google-forms)). Reads `e.range.getSheet().getName()` and routes to
+`processIntakeFormSubmission_(e)` or `processInspectionFormSubmission_(e)` based on which response
+tab the submission came from; ignores anything else.
+
+**Processing functions:** `processIntakeFormSubmission_(e)`, `processInspectionFormSubmission_(e)`
+
+Called only from `onFormSubmit()` (each also independently re-checks its own response-sheet name,
+so both remain safe if ever called directly, e.g. from a test). `processIntakeFormSubmission_`
+matches the submission to a booking row and sets column V; if the deposit was already paid, it
+also sends the DocuSeal lease. `processInspectionFormSubmission_` matches the submission, classifies
+it as pre- or post-inspection by comparing the `Inspection Type` answer against
+`CONFIG.INSPECT_VAL_PRE`/`INSPECT_VAL_POST` (both sides normalized with
+`String(value).trim().toLowerCase()`), and sets column W or X accordingly. Neither ever guesses —
+see [Google Forms](#7-google-forms) for the full matching and classification rules.
+
+**Matching helpers:** `findBookingMatchRow_(data, email, dateStr, completionColIndex)`,
+`findIntakeMatchRow(data, email, dateStr)`, `findInspectionMatchRow(data, email, dateStr, inspectionType)`
+
+`findBookingMatchRow_` is the shared, ambiguity-safe matcher (email plus rental date when
+available, never customer name) used by both form handlers, parameterized by which completion
+column to check. `findIntakeMatchRow` and `findInspectionMatchRow` are thin wrappers around it.
+
+**Extraction helpers:** `extractIntakeSubmissionFields(e)`, `extractInspectionSubmissionFields(e)`
+
+Pure functions that pull email/date (and, for inspection, the type answer) out of a spreadsheet
+form-submit event object, returning `null` if the event doesn't look right or the response is from
+an unrelated sheet. Isolated from the sheet-reading logic so they can be unit-tested with synthetic
+events — see `testExtractIntakeSubmissionFields` / `testExtractInspectionSubmissionFields` in
+`SandboxTests.js`.
 
 ---
 
@@ -691,15 +815,25 @@ secret key.
 
 **Functions:** `setupTriggers()`, `setupSheetSchema()`
 
-`setupTriggers()` deletes all existing project triggers and creates the four production triggers.
-Then calls `setupSheetSchema()`. **Run this once manually** after initial deployment or whenever
-trigger configuration changes.
+`setupTriggers()` deletes all existing project triggers and creates five triggers: the four
+time-based engines (`syncCalendarBookings`, `checkRentalEligibility`, `sendLeaseToNewBookings`,
+`processReminders`) plus one spreadsheet-bound `onFormSubmit` trigger, installed via
+`installFormSubmitTrigger_()`. Then calls `setupSheetSchema()`. **Run this once manually** after
+initial deployment or whenever trigger configuration changes — ordinary source-only edits do not
+require re-running it (see [Development Workflow](#16-development-workflow)).
+
+`onFormSubmit` is a single dispatcher that fires for any form linked to the Bookings spreadsheet
+(both the intake and inspection forms write into tabs of that same spreadsheet) and routes each
+event to `processIntakeFormSubmission_()` or `processInspectionFormSubmission_()` by response-tab
+name — see [Google Forms](#7-google-forms).
 
 `setupSheetSchema()` writes `Vehicle Type` to the R1 cell (if blank) and applies dropdown
 validation to column R from the unique vehicle types in `CALENDAR_CONFIGS`. Same for `Location`
-in column S. Safe to re-run — it only writes headers if the cell is currently blank, and always
-re-applies validation. **Does not touch any other column headers** — columns A–Q and T must be
-set up manually.
+in column S. It also fills in the header text (if blank) for columns U (`Customer Approval
+Notified`), V (`Intake Form Completed`), W (`Pre-Inspection Form Completed`), and X
+(`Post-Inspection Form Completed`) — no dropdown validation on these, same Yes/blank pattern as
+G/I/J/K/L/N. Safe to re-run — it only writes headers if the cell is currently blank, and always
+re-applies R/S validation. **Does not touch columns A–Q or T** — those must be set up manually.
 
 ---
 
@@ -871,10 +1005,12 @@ Form's dropdown field.
 `processIntakeFormSubmission_()` does for intake — matching on the submitted email plus, when
 available, the rental date, via the same ambiguity-safe `findBookingMatchRow_()` logic (see
 "Booking matching" below). Because one form serves both the pre-trip and post-trip inspection, it
-also reads back the `Inspection Type` answer and normalizes it with
-`String(value).trim().toLowerCase()` to decide which completion column to write — this
-classification is independent of `CONFIG.INSPECT_VAL_PRE` / `INSPECT_VAL_POST` (those are only the
-longer display strings used to pre-fill the form's dropdown):
+also reads back the `Inspection Type` answer and compares it against `CONFIG.INSPECT_VAL_PRE` /
+`CONFIG.INSPECT_VAL_POST` — the submitted answer and both configured values are independently
+normalized with `String(value).trim().toLowerCase()` before comparing, so case and incidental
+whitespace differences never cause a false unclassified result. The live form's option text is the
+configured value (e.g. `Pre-Trip (Before Vehicle Pickup)` / `Post-Trip (After Vehicle Return)`),
+so this is the same text `buildInspectUrl()` uses to pre-fill the dropdown:
 - A submission normalizing to `pre` sets column **W** (Pre-Inspection Form Completed) to `Yes`.
 - A submission normalizing to `post` sets column **X** (Post-Inspection Form Completed) to `Yes`.
 
@@ -1043,13 +1179,15 @@ Entry IDs are numeric strings found by inspecting the form's pre-fill URL or via
 | `INSPECT_ENTRY_EMAIL` | Form entry ID for email field |
 | `INSPECT_ENTRY_DATE` | Form entry ID for date field |
 | `INSPECT_ENTRY_TYPE` | Form entry ID for inspection type dropdown |
-| `INSPECT_VAL_PRE` | Exact text of the pre-trip option |
-| `INSPECT_VAL_POST` | Exact text of the post-trip option |
+| `INSPECT_VAL_PRE` | Exact text of the pre-trip option (live value: `Pre-Trip (Before Vehicle Pickup)`) |
+| `INSPECT_VAL_POST` | Exact text of the post-trip option (live value: `Post-Trip (After Vehicle Return)`) |
 
-`INSPECT_VAL_PRE` and `INSPECT_VAL_POST` must exactly match the option text in the Google Form
-dropdown field — case-sensitive, whitespace-sensitive. These are used only to pre-fill the form's
-dropdown (`buildInspectUrl()`); inspection-completion classification (which normalizes the
-submitted answer to `pre`/`post`) does not depend on them — see "Vehicle Inspection Form" above.
+`INSPECT_VAL_PRE` and `INSPECT_VAL_POST` must match the option text in the Google Form dropdown
+field. They serve **two** purposes: `buildInspectUrl()` uses them to pre-fill the form's dropdown,
+and `extractInspectionSubmissionFields()` (`src/Forms.js`) compares the submitted answer against
+them (both sides normalized with `String(value).trim().toLowerCase()`) to classify a response as
+pre- or post-inspection — see "Vehicle Inspection Form" above. Because both uses read the same two
+properties, they can never drift out of sync with each other.
 No Script Property identifies a separate inspection response spreadsheet: its responses are a tab
 in the same spreadsheet as Bookings, identified by the existing `SHEET_ID`.
 
@@ -1320,14 +1458,20 @@ not block the confirmation email or the DocuSeal lease send.
 
 ### Manager notifications
 
-| Trigger | Channel | Content |
-|---|---|---|
-| New booking detected | Email + SMS | Customer name, date, location, vehicle, contact info |
-| Approval needed | Email only | Customer details; instructions to set column O |
-| Approval reminder #n | Email only | Customer details; reminder number |
-| Approval escalation | Email only | Sent to ADMIN_EMAIL when cap reached |
-| 24hr before pickup | Email + SMS | Customer name, date, deposit status, lease status, inspection link |
-| After rental ends | Email only | Customer name, date, post-trip inspection form link |
+| Trigger | Channel | Content | Greeting |
+|---|---|---|---|
+| New booking detected | Email + SMS | Customer name, date, location, vehicle, contact info | `Hi {Location} Manager,` |
+| Approval needed | Email only | Customer details; instructions to set column O | `Hi {Location} Manager,` |
+| Approval reminder #n | Email only | Customer details; reminder number | `Hi {Location} Manager,` |
+| Approval escalation | Email only | Sent to `ADMIN_EMAIL` when cap reached | none (addressed to admin, not a location manager) |
+| 24hr before pickup | Email + SMS | Customer name, date, deposit status, lease status, inspection link | `Hi {Location} Manager,` |
+| After rental ends | Email only | Customer name, date, post-trip inspection form link | `Hi {Location} Manager,` |
+
+Each of the five manager-addressed templates opens with a greeting using that booking's location
+(column S) — e.g. `Hi Bainbridge Manager,`, `Hi Poulsbo Manager,`, `Hi Port Orchard Manager,`,
+`Hi Fairgrounds Manager,` — reusing the same `location` value already read for the rest of the
+message body. The admin escalation email is unaffected since it is addressed to `ADMIN_EMAIL`, not
+a location manager.
 
 ### Error alerts
 
@@ -1679,9 +1823,11 @@ triggers.
 
 ### End-to-end flow tests
 
-For a complete flow test (new booking → deposit webhook → lease → reminder → post-rental), follow
-the checklist in [`docs/testing-plan.md`](docs/testing-plan.md). The testing plan covers 8
-distinct scenarios including two-driver flow, webhook robustness, and edge cases.
+For a complete flow test (new booking → intake → deposit → lease → signing → approval → 24-hour
+reminder → pre-inspection → post-rental → post-inspection), follow the checklist in
+[`docs/testing-plan.md`](docs/testing-plan.md), which also tracks exactly which scenarios have
+been confirmed working end-to-end versus still awaiting validation — see
+[Repository status](#repository-status).
 
 ---
 
@@ -1722,11 +1868,32 @@ git push
 
 ### When changes take effect
 
-| Change type | Deployment needed |
-|---|---|
-| Trigger-path functions (`syncCalendarBookings`, `checkRentalEligibility`, `sendLeaseToNewBookings`, `processReminders`) | **No.** Changes are live after saving in the Apps Script editor. |
-| `doPost` (webhook endpoint) | **Yes.** The web app endpoint uses the last deployed version. Create a new versioned deployment after editing `Webhooks.js`. |
-| Script Properties | **No.** `PROPS` is loaded at each execution start; updated property values are picked up immediately. |
+There are three distinct mechanisms in play, and they are easy to conflate:
+
+- **`git commit` / `git push`** only affects this repository's history. It has no effect on the
+  live Apps Script project whatsoever until the code is separately deployed there (by pasting
+  files or by `clasp push`).
+- **`clasp push`** (or pasting files manually) updates the Apps Script **project's source code**.
+  This alone is what both time-driven triggers (`syncCalendarBookings`, `checkRentalEligibility`,
+  `sendLeaseToNewBookings`, `processReminders`) and the spreadsheet-bound `onFormSubmit` trigger
+  run — every trigger always executes the current saved project code on its next firing. No
+  redeployment and no trigger reinstallation is needed for ordinary source-only changes.
+- **A new Apps Script web app deployment** (Deploy → Manage deployments → New version) is a
+  separate, additional step required **only** when the code reachable through `doGet`/`doPost`
+  must change — the deployed web app serves whichever version was active at the time of its last
+  deployment, not automatically the latest saved source.
+
+| Change type | `clasp push` / paste sufficient? | New web app deployment needed? | Re-run `setupTriggers()`? |
+|---|---|---|---|
+| Trigger-path functions (`syncCalendarBookings`, `checkRentalEligibility`, `sendLeaseToNewBookings`, `processReminders`) | Yes — live on next scheduled firing | No | No |
+| `onFormSubmit` / `Forms.js` processing logic | Yes — live on next form submission | No | No |
+| `doPost` / `doGet` (`Webhooks.js`) | Source is updated, but the **live web app endpoint** still runs the old version | **Yes** | No |
+| Script Properties | Immediate — `PROPS` is read fresh at the start of every execution | No | No |
+| Trigger architecture itself (adding/removing/rescheduling a trigger, e.g. what `Setup.js` registers) | Yes | No | **Yes** — `setupTriggers()` must be re-run to actually install the new trigger set |
+
+In short: **re-running `setupTriggers()` is not part of the normal edit cycle.** It is only needed
+the first time, or after a change to which triggers exist or how they're scheduled — not after
+every `clasp push`.
 
 ### Viewing logs
 
@@ -1765,7 +1932,7 @@ projects.
 [ ] 5. Run validateConfig() from the editor — confirm no errors
 [ ] 6. Run testSheetConnection() — confirm Bookings tab is accessible
 [ ] 7. Run testCalendarConfigs() — confirm each active calendar is reachable
-[ ] 8. Run setupTriggers() — creates all 4 triggers and applies sheet schema
+[ ] 8. Run setupTriggers() — creates all 5 triggers and applies sheet schema
 [ ] 9. Confirm column R (Vehicle Type) and S (Location) have dropdown validation
 [ ] 10. Set up column O dropdown validation manually:
          Approved - Free | Approved - Paid | Denied
@@ -1907,6 +2074,9 @@ Script Properties.
 
 ## 20. Troubleshooting
 
+> See also [docs/operations-runbook.md](docs/operations-runbook.md) for a shorter,
+> question-oriented quick-reference covering the same ground for day-to-day operation.
+
 ### No new rows from a calendar
 
 1. Run `testCalendarConfigs()` — reports whether each calendar Script Property is set and whether
@@ -2031,12 +2201,36 @@ run could, in theory, see the same new booking event (before column A is updated
 duplicate welcome message. In practice, `appendRow` is atomic from the sheet's perspective, but
 the race window exists.
 
-**`setupSheetSchema` only manages columns R and S:** Column headers A–Q and T must be set up
-manually. If a column is accidentally deleted or renamed, the script will silently read the wrong
-data.
+**`setupSheetSchema` manages columns R, S, U, V, W, and X only:** Column headers A–Q and T must be
+set up manually. If a column is accidentally deleted or renamed, the script will silently read the
+wrong data.
 
 **Lease email not BCC'd to manager:** DocuSeal sends lease emails directly — they do not pass
 through `sendEmailHtml`. The manager receives a DocuSeal co-signer request instead of a BCC copy.
+
+**No lock on any of the three lease-sending call sites:** `markDepositPaid` (`Webhooks.js`),
+`processIntakeFormSubmission_` (`Forms.js`), and `sendLeaseToNewBookings` (`Leases.js`) can each
+independently send a DocuSeal lease, and none acquires `LockService`. Column J (Lease Sent) is
+only written *after* the DocuSeal API call succeeds, not before. If a deposit clears and the
+intake form is submitted within moments of each other, two of these paths can both pass their own
+eligibility check before either writes J, producing two DocuSeal submissions for the same booking.
+Confirmed by code tracing; not yet observed in sandbox testing.
+
+**First-match-wins email fallback in the two webhook handlers:** `markDepositPaid` and
+`markLeaseSigned` (`Webhooks.js`) fall back to a simple loop that stops at the first row matching
+the customer's email, with no ambiguity check — unlike the deliberately ambiguity-safe matcher
+(`findBookingMatchRow_`) used by the intake and inspection form handlers. A repeat customer with
+two simultaneous eligible bookings under the same email could have a Stripe payment or DocuSeal
+signature silently applied to the wrong row. Confirmed by code tracing; not yet observed in
+sandbox testing.
+
+**Pre-inspection link can be permanently skipped for a booking:** The 24-hour reminder branch in
+`processReminders` only sends the pre-trip inspection link when the deposit is already paid; if
+the deposit is still unpaid when the reminder window is reached, column K is still marked `Yes` on
+the "deposit due" branch (which contains no inspection link), so the pre-trip inspection link is
+never sent for that booking even if the deposit is paid afterward. Separately, if manager approval
+lands after the 24-hour reminder window has already closed, the reminder (and its inspection link)
+never fires at all, with no retry. Confirmed by code tracing; not yet observed in sandbox testing.
 
 ### Stripe Checkout Session migration (complete)
 
@@ -2137,6 +2331,10 @@ Column mapping:
 17       18       R       Vehicle Type
 18       19       S       Location
 19       20       T       DocuSeal Submission ID
+20       21       U       Customer Approval Notified
+21       22       V       Intake Form Completed
+22       23       W       Pre-Inspection Form Completed
+23       24       X       Post-Inspection Form Completed
 ```
 
 There is no helper that converts column names to indices. All column accesses use hardcoded

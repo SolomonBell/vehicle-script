@@ -7,7 +7,7 @@ The Apps Script source is split across multiple files in `src/`. Each file holds
 | File | Contents |
 |---|---|
 | `Config.js` | `PROPS`, `CONFIG`, `CALENDAR_CONFIGS` — all configuration and Script Property bindings |
-| `Forms.js` | `buildIntakeUrl`, `buildInspectUrl` |
+| `Forms.js` | `buildIntakeUrl`, `buildInspectUrl`, `onFormSubmit` (dispatcher), `processIntakeFormSubmission_`, `processInspectionFormSubmission_`, matching/extraction helpers |
 | `DocuSeal.js` | `sendLeaseViaDocuSeal` |
 | `Webhooks.js` | `doPost`, `doGet`, `markDepositPaid`, `markLeaseSigned` |
 | `CalendarSync.js` | `syncCalendarBookings` |
@@ -307,14 +307,16 @@ two form handlers can never drift into inconsistent matching rules. Matching is 
 which the matcher does not even read.
 
 Because the pre-trip and post-trip inspections share one Google Form, `processInspectionFormSubmission_()`
-first reads back the submission's `Inspection Type` answer and classifies it by normalizing with
-`String(value).trim().toLowerCase()`: exactly `'pre'` or `'post'` classify normally; anything else
-is left `null`. This classification is **deliberately independent** of `CONFIG.INSPECT_VAL_PRE` /
-`CONFIG.INSPECT_VAL_POST` — those are the longer display strings `buildInspectUrl()` uses only to
-pre-fill the form's dropdown (e.g. "Pre-trip Inspection"), not what the response sheet necessarily
-records. A `null` classification is refused outright — no matching is attempted and no row is
-touched — and alerts `ADMIN_EMAIL` with the submission's email and the raw (unrecognized) answer
-so the type-question configuration can be checked.
+first reads back the submission's `Inspection Type` answer and compares it against
+`CONFIG.INSPECT_VAL_PRE` / `CONFIG.INSPECT_VAL_POST` — the submitted answer and both configured
+values are independently normalized with `String(value).trim().toLowerCase()` before comparing.
+The live form's dropdown option text (e.g. `Pre-Trip (Before Vehicle Pickup)` /
+`Post-Trip (After Vehicle Return)`) is the same text `buildInspectUrl()` uses to pre-fill the
+dropdown — the two are the same two Script Properties, read for two different purposes, so they
+can never drift out of sync with each other. Anything that doesn't normalize-match either
+configured value is left `null` rather than guessed. A `null` classification is refused outright —
+no matching is attempted and no row is touched — and alerts `ADMIN_EMAIL` with the submission's
+email and the raw (unrecognized) answer so the type-question configuration can be checked.
 
 `findInspectionMatchRow()` returns one of four outcomes (one more than `findIntakeMatchRow()`):
 `matched`, `ambiguous`, `not_found`, and `already_done` — the last one specifically for a
