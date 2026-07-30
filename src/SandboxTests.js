@@ -1596,6 +1596,179 @@ function testFormSubmitDispatcher() {
 }
 
 // ---------------------------------------------------------------------------
+// TEST 28: Pre-trip reminder eligibility (isPreTripReminderEligible) [CONFIG]
+// Pure test against the eligibility helper used by processReminders() to
+// decide whether a booking's 24-hour/pre-trip reminder should be attempted.
+// No sheet reads, no external calls, no writes. Covers: normal-window
+// eligibility, deposit-unpaid exclusion, late eligibility once deposit or
+// approval arrive (as long as the booking is still inside the window),
+// permanent exclusion once the rental has started, and the K-already-Yes
+// no-duplicate case.
+// ---------------------------------------------------------------------------
+function testPreTripReminderEligibility() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, hoursUntilStart, sent24hr, approved, depositPaid, expected) {
+    const actual = isPreTripReminderEligible(hoursUntilStart, sent24hr, approved, depositPaid);
+    if (actual === expected) {
+      Logger.log('OK (' + label + '): isPreTripReminderEligible(' + hoursUntilStart + ', ' +
+                 JSON.stringify(sent24hr) + ', ' + JSON.stringify(approved) + ', ' +
+                 JSON.stringify(depositPaid) + ') = ' + actual);
+      passed++;
+    } else {
+      Logger.log('FAIL (' + label + '): expected ' + expected + ', got ' + actual +
+                 ' for hoursUntilStart=' + hoursUntilStart + ', sent24hr=' + JSON.stringify(sent24hr) +
+                 ', approved=' + JSON.stringify(approved) + ', depositPaid=' + JSON.stringify(depositPaid));
+      failed++;
+    }
+  }
+
+  // 1. Eligible booking inside the normal reminder window
+  check('eligible inside normal window', 20, '', 'Approved - Paid', 'Yes', true);
+  check('eligible inside normal window (Approved - Free)', 15, '', 'Approved - Free', 'Yes', true);
+
+  // 2. Deposit unpaid inside the normal window -- not eligible
+  check('deposit unpaid inside window -- not eligible', 20, '', 'Approved - Paid', '', false);
+  check('deposit unpaid (blank) inside window -- not eligible', 20, '', 'Approved - Paid', undefined, false);
+
+  // 3. Deposit becomes paid later (still inside the window, closer to start) -- eligible
+  check('deposit paid later in window -- eligible', 5, '', 'Approved - Paid', 'Yes', true);
+
+  // 4. Approval missing inside the normal window -- not eligible
+  check('approval missing (blank) inside window -- not eligible', 20, '', '', 'Yes', false);
+  check('approval Denied inside window -- not eligible', 20, '', 'Denied', 'Yes', false);
+
+  // 5. Approval becomes valid after the normal window opened but before rental start -- eligible
+  check('approval granted late, still before start -- eligible', 3, '', 'Approved - Free', 'Yes', true);
+  check('approval granted right at the window edge -- eligible', 26, '', 'Approved - Paid', 'Yes', true);
+
+  // 6. Rental has already started -- pre-trip reminder never eligible
+  check('rental already started -- not eligible', -0.5, '', 'Approved - Paid', 'Yes', false);
+  check('rental started, even with everything else true -- not eligible', -5, '', 'Approved - Paid', 'Yes', false);
+
+  // Too early (outside the 26-hour window) -- not eligible yet
+  check('too early, outside window -- not eligible', 40, '', 'Approved - Paid', 'Yes', false);
+
+  // 7. K already Yes -- never re-eligible (no duplicate reminder)
+  check('K already Yes -- not eligible', 20, 'Yes', 'Approved - Paid', 'Yes', false);
+  check('K already Yes even with everything else true -- not eligible', 0, 'Yes', 'Approved - Free', 'Yes', false);
+
+  // Exact boundary: hoursUntilStart = 0 (the moment the rental starts) is still eligible
+  check('exactly at hoursUntilStart = 0 -- eligible', 0, '', 'Approved - Paid', 'Yes', true);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' pre-trip reminder eligibility checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+}
+
+// ---------------------------------------------------------------------------
+// TEST 29: Pre-trip reminder send-and-flag behavior (sendPreTripReminder_) [CONFIG]
+// Verifies that src/Reminders.js's sendPreTripReminder_() only writes column K
+// (24hr Sent) when the customer was actually reached, matching the same
+// "delivered if reached by either channel" pattern as notifyCustomerOfApproval()
+// (Approval.js). Uses a fake sheet object (no live Sheets API calls -- setValue
+// calls are recorded, not applied) and temporarily stubs the global sendSms /
+// sendEmailHtml functions so no real Twilio or SendGrid call is made. Both
+// stubbed functions are restored in a finally block even if an assertion fails.
+// ---------------------------------------------------------------------------
+function testSendPreTripReminderFlagBehavior() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) {
+      Logger.log('OK: ' + label);
+      passed++;
+    } else {
+      Logger.log('FAIL: ' + label);
+      failed++;
+    }
+  }
+
+  function fakeSheet() {
+    const writes = [];
+    return {
+      writes: writes,
+      getRange: function(row, col) {
+        return {
+          setValue: function(value) {
+            writes.push({ row: row, col: col, value: value });
+          }
+        };
+      }
+    };
+  }
+
+  const fakeLocCfg = { email: 'sender@example.com', phone: '+12065550100' };
+
+  const realSendSms       = sendSms;
+  const realSendEmailHtml = sendEmailHtml;
+
+  try {
+    // ---- 8. Both channels fail -- K is NOT marked Yes, no false "done" state ----
+    (function bothChannelsFail() {
+      sendSms       = function() { throw new Error('simulated Twilio outage'); };
+      sendEmailHtml = function() { throw new Error('simulated SendGrid outage'); };
+
+      const sheet = fakeSheet();
+      const result = sendPreTripReminder_(
+        sheet, 4, 'Test Customer', 'customer@example.com', '+12065551234',
+        fakeLocCfg, 'August 1, 2026 at 9:00 AM', 'Cargo Van', 'Bainbridge',
+        'https://example.com/pre-inspect', 'Yes'
+      );
+
+      check('both channels failing returns false (not delivered)', result === false);
+      check('both channels failing writes nothing to column K', sheet.writes.length === 0);
+    })();
+
+    // ---- Email succeeds even though SMS fails -- still delivered, K written ----
+    (function emailSucceedsSmsFails() {
+      sendSms       = function() { throw new Error('simulated Twilio outage'); };
+      sendEmailHtml = function() { /* succeeds */ };
+
+      const sheet = fakeSheet();
+      const result = sendPreTripReminder_(
+        sheet, 4, 'Test Customer', 'customer@example.com', '+12065551234',
+        fakeLocCfg, 'August 1, 2026 at 9:00 AM', 'Cargo Van', 'Bainbridge',
+        'https://example.com/pre-inspect', 'Yes'
+      );
+
+      check('email success alone counts as delivered', result === true);
+      check('column K (row 5, col 11) written exactly once', sheet.writes.length === 1 &&
+            sheet.writes[0].row === 5 && sheet.writes[0].col === 11 && sheet.writes[0].value === 'Yes');
+    })();
+
+    // ---- No phone and no email on file -- treated as delivered (avoid endless retry) ----
+    (function noContactInfoAtAll() {
+      sendSms       = function() { throw new Error('should not be called -- no phone on file'); };
+      sendEmailHtml = function() { throw new Error('should not be called -- no email on file'); };
+
+      const sheet = fakeSheet();
+      const result = sendPreTripReminder_(
+        sheet, 4, 'Test Customer', 'No Email', 'No Phone',
+        fakeLocCfg, 'August 1, 2026 at 9:00 AM', 'Cargo Van', 'Bainbridge',
+        'https://example.com/pre-inspect', 'Yes'
+      );
+
+      check('no contact info at all is treated as delivered (matches notifyCustomerOfApproval precedent)', result === true);
+      check('column K still written when there is no way to reach the customer', sheet.writes.length === 1);
+    })();
+  } finally {
+    // Always restore the real functions, even if an assertion above failed.
+    sendSms       = realSendSms;
+    sendEmailHtml = realSendEmailHtml;
+  }
+
+  check('sendSms restored to the original function', sendSms === realSendSms);
+  check('sendEmailHtml restored to the original function', sendEmailHtml === realSendEmailHtml);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' pre-trip reminder send/flag checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+}
+
+// ---------------------------------------------------------------------------
 // TEST 27: Trigger registration functions are defined and safe to reference [CONFIG]
 // This is a narrow, deliberately static check -- it does NOT invoke
 // ScriptApp, does NOT create a real trigger, and does NOT run setupTriggers()
@@ -2038,13 +2211,14 @@ function testLocationSenderConfig() {
 // failure. Does not include sync or response-parsing tests that require a
 // live sheet row (see testMarkDepositPaidRowLookup, testMarkLeaseSignedRowLookup).
 // testIntakeFormSubmitRowMatching, testInspectionFormSubmitRowMatching, the
-// two extraction tests, and testFormSubmitDispatcher are included because
-// they are pure tests against synthetic data (testFormSubmitDispatcher
-// temporarily stubs the two processing functions and always restores them,
-// even on failure), with no sheet or form dependency.
+// two extraction tests, testFormSubmitDispatcher, testPreTripReminderEligibility,
+// and testSendPreTripReminderFlagBehavior are included because they are pure
+// tests against synthetic data (the latter two temporarily stub global
+// functions and always restore them, even on failure), with no sheet or form
+// dependency.
 // ---------------------------------------------------------------------------
 function runAllSandboxConfigurationTests() {
-  Logger.log('===== Running Sandbox Configuration Tests (18 tests) =====');
+  Logger.log('===== Running Sandbox Configuration Tests (20 tests) =====');
 
   const tests = [
     validateConfig,
@@ -2064,6 +2238,8 @@ function runAllSandboxConfigurationTests() {
     testInspectionFormSubmitRowMatching,
     testExtractInspectionSubmissionFields,
     testFormSubmitDispatcher,
+    testPreTripReminderEligibility,
+    testSendPreTripReminderFlagBehavior,
     testTriggerRegistrationIsWellFormed,
   ];
 

@@ -162,6 +162,25 @@ function shouldNotifyCustomerOfApproval(approved, leaseSigned, customerNotified)
          customerNotified !== 'Yes';
 }
 
+// Returns true only when a booking is currently eligible for its one-time
+// 24-hour/pre-trip reminder: inside the reminder window (0 <= hoursUntilStart
+// <= 26), not already sent (sent24hr !== 'Yes'), approved (paid or free), and
+// with the deposit cleared. Deposit and approval are both real eligibility
+// gates here -- neither is merely a content choice -- so a booking that is
+// missing either one when it first enters the window is safely re-evaluated
+// on every later run (the caller re-checks this on each processReminders()
+// pass) for as long as it stays inside the window, right up until the rental
+// actually starts (hoursUntilStart going negative permanently excludes it,
+// matching "never send the pre-trip reminder after the rental has begun").
+// Used by processReminders() (Reminders.js) to decide whether to attempt the
+// customer's pre-trip reminder for a given row.
+function isPreTripReminderEligible(hoursUntilStart, sent24hr, approved, depositPaid) {
+  return hoursUntilStart <= 26 && hoursUntilStart >= 0 &&
+         sent24hr !== 'Yes' &&
+         (approved === 'Approved - Free' || approved === 'Approved - Paid') &&
+         depositPaid === 'Yes';
+}
+
 // Returns { email, phone } for the given booking location — the from-address and
 // from-number to use for all emails and SMS related to that booking.
 // Throws if the location is not one of the four active locations so the caller's
