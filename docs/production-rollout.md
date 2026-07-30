@@ -156,3 +156,13 @@ test) booking through the entire flow, watching the Executions log at each step:
   and post-rental reminders under production Script Property values).
 - Review [docs/operations-runbook.md](operations-runbook.md) with whoever will be operating the
   system day-to-day.
+
+### Manager training / handoff
+
+Before location managers start relying on the production system, walk them through
+[docs/manager-guide.md](manager-guide.md) — the nontechnical guide covering what managers need to
+do, what the system does automatically, what every Bookings sheet column means, and when to
+escalate to the system administrator. It intentionally contains no source code, Apps Script,
+Git/clasp, or Pipedream detail, so it's safe to hand to non-technical staff on its own. Its
+[Current Rollout Status](manager-guide.md#17-current-rollout-status) section should be updated in
+step with [docs/testing-plan.md](testing-plan.md) as validation progresses.

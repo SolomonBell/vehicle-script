@@ -7,6 +7,10 @@
 > below and [docs/production-rollout.md](docs/production-rollout.md) for exactly what has and has
 > not been verified yet.
 
+> **Not a developer?** If you're a Reliable Storage manager or supervisor looking for a
+> plain-language explanation of how to use this system day to day, see the
+> **[Manager Guide](docs/manager-guide.md)** instead of this technical README.
+
 ---
 
 ## Table of Contents
@@ -517,6 +521,8 @@ src/                          ← working copy — paste each file into Apps Scr
   SandboxTests.js             ← manual test functions — never wire to triggers
 
 docs/
+  manager-guide.md            ← nontechnical guide for location managers (start here if
+                                 you are not a developer)
   setup-notes.md              ← Script Properties reference, sheet schema,
                                  trigger setup, Pipedream workflow config
   testing-plan.md             ← acceptance-test checklist + current validation status

@@ -23,6 +23,7 @@ src/                   ← working copy — paste each file into Apps Script
   Helpers.js           ← getSheet(), extraction helpers, formatters, shouldNotifyCustomerOfApproval()
   Setup.js             ← setupTriggers(), setupSheetSchema()
   SandboxTests.js      ← manual test functions (never trigger these)
+docs/manager-guide.md       ← nontechnical guide for location managers
 docs/setup-notes.md         ← Script Properties, trigger setup, sheet columns
 docs/testing-plan.md        ← acceptance-test checklist + current validation status
 docs/operations-runbook.md  ← day-to-day operational quick-reference

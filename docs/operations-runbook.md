@@ -5,6 +5,10 @@ companion to [README.md §20 Troubleshooting](../README.md#20-troubleshooting), 
 technical diagnostic steps — this runbook is the shorter "what do I check, and in what order"
 guide for someone operating the system rather than developing it.
 
+**Looking for the nontechnical manager guide instead?** This runbook assumes familiarity with
+Apps Script execution logs and source-file names. Location managers should use
+[docs/manager-guide.md](manager-guide.md), which covers the same ground in plain language.
+
 **Environment:** as of this writing, only a sandbox deployment exists — see
 [README.md "Repository status"](../README.md#repository-status) and
 [docs/production-rollout.md](production-rollout.md). Everything below applies equally to sandbox
