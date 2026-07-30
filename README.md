@@ -377,27 +377,27 @@ system of record.
 
 ┌─────────────────────────────────────────────────────┐
 │                FORM SUBMISSION PATH                 │
-│  (event-driven, fires on Google Form submit)         │
+│  (event-driven, fires on Google Form submit)        │
 │                                                     │
-│  Customer submits intake or inspection form          │
+│  Customer submits intake or inspection form         │
 │       │                                             │
 │       ▼                                             │
-│  Single spreadsheet-bound onFormSubmit trigger       │
-│  (fires for ANY form linked to the Bookings          │
-│   spreadsheet — both response tabs live there)       │
+│  Single spreadsheet-bound onFormSubmit trigger      │
+│  (fires for ANY form linked to the Bookings         │
+│   spreadsheet — both response tabs live there)      │
 │       │                                             │
 │       ▼                                             │
-│  onFormSubmit(e) dispatcher (Forms.js)               │
-│  routes by e.range.getSheet().getName():             │
+│  onFormSubmit(e) dispatcher (Forms.js)              │
+│  routes by e.range.getSheet().getName():            │
 │  ├─ "Rental Intake Form" →                          │
-│  │    processIntakeFormSubmission_()                 │
-│  └─ "Rental Vehicle Condition Inspection Form" →     │
-│       processInspectionFormSubmission_()             │
+│  │    processIntakeFormSubmission_()                │
+│  └─ "Rental Vehicle Condition Inspection Form" →    │
+│       processInspectionFormSubmission_()            │
 │       │                                             │
 │       ▼                                             │
 │  Google Sheets ◄──────────────── reads / writes     │
-│       (Col V, W, or X; may trigger DocuSeal lease    │
-│        send from the intake path)                    │
+│       (Col V, W, or X; may trigger DocuSeal lease   │
+│        send from the intake path)                   │
 └─────────────────────────────────────────────────────┘
 ```
 
