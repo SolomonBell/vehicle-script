@@ -188,7 +188,7 @@ function sendPreTripReminder_(sheet, rowIndex, name, email, phone, locCfg, dateS
     'Vehicle: ' + vehicleType + '<br>' +
     'Location: ' + location + '<br>' +
     'Date/time: ' + dateStr + '<br>' +
-    'Lease signed: ' + (leaseSigned === 'Yes' ? '✅ Yes' : '❌ Not yet') + '<br>' +
+    'Lease signed: ' + (leaseSigned === 'Yes' ? 'Yes' : 'Not yet') + '<br>' +
     'Pre-trip inspection form: <a href="' + preUrl + '">Inspection form link</a>' +
     '</p>';
 
