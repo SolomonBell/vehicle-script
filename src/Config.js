@@ -118,6 +118,14 @@ const CONFIG = {
   HOURS_BETWEEN_APPROVAL_REMINDERS: Number(PROPS.HOURS_BETWEEN_APPROVAL_REMINDERS), // Hours between approval reminder messages.
   MAX_APPROVAL_REMINDERS:           Number(PROPS.MAX_APPROVAL_REMINDERS),           // Reminders sent before escalating to admin; 1 initial + (MAX-1) follow-ups, then escalation.
 
+  // Minutes: if the post-trip inspection is completed less than this many
+  // minutes after the pre-trip inspection, processReminders() warns the
+  // manager (see isSuspiciousInspectionTiming() in Helpers.js). Default 15 --
+  // long enough that a genuine rental (even a short one) plausibly involves
+  // driving somewhere and back between the two forms, short enough to only
+  // flag submissions that are implausibly close together.
+  SUSPICIOUS_INSPECTION_WINDOW_MINUTES: Number(PROPS.SUSPICIOUS_INSPECTION_WINDOW_MINUTES),
+
   // ---- Deposit amounts (customer-facing messages) ---------------
   DEPOSIT_AMOUNT:              PROPS.DEPOSIT_AMOUNT,
   DEPOSIT_AMOUNT_CARGO_VAN:    PROPS.DEPOSIT_AMOUNT_CARGO_VAN,

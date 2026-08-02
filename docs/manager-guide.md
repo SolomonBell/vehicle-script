@@ -194,10 +194,16 @@ not a routing decision.
 | **Approval escalation** | **Administrator**, not the manager | If reminders go unanswered past a set number of attempts | Notes that the manager hasn't responded and to follow up directly | Administrator-facing; if you see this was sent, follow up on the approval yourself |
 | **24-hour rental summary** | Manager (email + text) | About a day before the scheduled pickup, once the customer's reminder was actually delivered | Customer, vehicle, location, date/time, whether the lease is signed — does **not** include the pre-trip inspection link, since the blank form is only ever sent to the customer | Review and prepare the vehicle |
 | **Post-trip inspection notice** | Manager (email) | About an hour after the customer completes the pre-trip inspection form, once the post-trip customer message was sent | Customer, vehicle, location, date, and the post-trip inspection link | Review; follow up if the form isn't submitted within a day |
+| **Inspection timing review notice** ("Review recommended: inspection timing for...") | Manager (email) | Only if both inspection forms for a booking were submitted unusually close together (see [Section 9](#9-inspection-forms)) | Customer, booking ID, vehicle, location, scheduled start/end, both inspection times, and how far apart they were | **Recommended — review both inspection responses and contact the customer if something looks off** |
 
 A note on the approval escalation: it is the one manager-related message that does **not** go to
 a location manager — it goes to the system administrator, because at that point the system has
 already tried to reach the manager multiple times without a response.
+
+A note on the inspection timing review notice: this is purely informational. It does not mean
+anything is wrong, it does not block or delay anything else in the workflow, and it is not an
+accusation against the customer — it only means the two forms came in closer together than usual
+and might be worth a look. You will see this at most once per booking.
 
 ---
 
@@ -219,7 +225,7 @@ a customer asks "did I miss something?"
 
 ## 7. The Bookings Sheet Explained
 
-The Bookings sheet has one row per booking and columns A through X. This table documents the
+The Bookings sheet has one row per booking and columns A through Y. This table documents the
 exact current columns, in order.
 
 | Col | Header | Who/what updates it | What it means | Should a manager edit it? |
@@ -248,6 +254,7 @@ exact current columns, in order.
 | V | Intake Form Completed | System, when the customer actually submits the intake form | `Yes` once the customer has submitted the intake form (not just been sent the link). | No |
 | W | Pre-Inspection Form Completed | System, when the customer actually submits the pre-trip inspection form | `Yes` followed by the date and time it was submitted (e.g. `Yes 8/2/2026 9:15 AM`) once the pre-trip inspection form has been submitted. This timestamp is also what the system uses to time the post-trip message (see [Section 9](#9-inspection-forms)). | No — see [Section 9](#9-inspection-forms) |
 | X | Post-Inspection Form Completed | System, when the customer actually submits the post-trip inspection form | `Yes` followed by the date and time it was submitted (e.g. `Yes 8/2/2026 4:08 PM`) once the post-trip inspection form has been submitted. | No — see [Section 9](#9-inspection-forms) |
+| Y | Suspicious Timing Warning Sent | System, if the two inspection forms were submitted unusually close together | `Yes` once you have been sent the inspection timing review notice for this booking (see [Section 5](#5-manager-email-and-notification-guide)). Blank means either the two forms haven't both been submitted yet, or the timing wasn't unusual. | No |
 
 **In every column except O, W, and X, "blank" means "hasn't happened yet" and "Yes" means "done."
 There is no other accepted value in these Yes/blank columns. Columns W and X are the two
@@ -369,6 +376,20 @@ so if a customer never submits the pre-trip form, they will never automatically 
 post-trip link either. If a rental has ended and W is still blank, that's worth following up on
 for two reasons: the pre-trip inspection record is missing, and the post-trip message hasn't been
 triggered.
+
+**Once both forms are in, the system checks how far apart they were submitted.** If they came in
+unusually close together, you will receive a one-time review notice (see [Section
+5](#5-manager-email-and-notification-guide)) — this is purely informational, does not block or
+delay anything, and is not an accusation. It just means the timing might be worth a look; you
+decide whether to review the two responses or reach out to the customer.
+
+### If a customer needs a form resent, or the post-trip form is needed right away
+
+If a customer needs a pre-trip or post-trip form resent, or a vehicle is returned unusually early
+and the post-trip inspection needs to go out before the usual timing would send it, contact the
+system administrator — sending either message immediately, for a specific booking, is something
+they can do without waiting on the automated schedule. This is not something managers do directly
+in the sheet.
 
 ### If a customer says they submitted the form but the sheet still shows blank
 
@@ -586,6 +607,7 @@ For each issue: check the listed items, avoid the listed edits, and escalate whe
 | P, Q (approval timing/count) | These exist only to control the manager reminder schedule. Editing them can cause reminders to stop or restart unexpectedly. |
 | T (DocuSeal Submission ID) | This is the internal reference number the system uses to match a signing confirmation to the right booking. Changing it can cause a real signature to be matched to the wrong row, or to no row at all. |
 | U, V, W, X (approval/intake/inspection completion) | These record that the customer actually completed a specific step. Marking one `Yes` by hand tells the system (and anyone reading the sheet) something happened that may not have — see [Section 9](#9-inspection-forms) for why this matters especially for the inspection columns. |
+| Y (Suspicious Timing Warning Sent) | Records that you've already received the one-time inspection timing review notice for this booking. Marking it `Yes` by hand would suppress that notice even if it hasn't actually been sent. |
 
 **Rule of thumb:** if a column records something the *customer* did (submitted a form, paid, signed) or something the *system* did (sent a message), leave it alone. If it records something *you* decide, it's yours to set.
 
@@ -664,7 +686,15 @@ both drivers.
 
 **Does the manager need to send the inspection forms?**
 No. Both the pre-trip and post-trip inspection form links are sent automatically, bundled with
-the 24-hour reminder and the post-rental message.
+the 24-hour reminder and the post-rental message. If one needs to be resent, or the post-trip form
+needs to go out immediately (e.g. an early vehicle return), contact the system administrator — see
+[Section 9](#9-inspection-forms).
+
+**What does the "inspection timing review notice" email mean?**
+It means the pre-trip and post-trip inspection forms for that booking were submitted unusually
+close together, and it's worth a look. It does not mean the customer did anything wrong, and it
+doesn't change anything else about the booking — see [Section 9](#9-inspection-forms) and [Section
+5](#5-manager-email-and-notification-guide).
 
 **Why is Pre-Inspection still blank?**
 Either the customer hasn't submitted the form yet, or the 24-hour reminder that contains the link
@@ -725,6 +755,7 @@ The following are implemented but still awaiting final operational validation:
 - The post-trip reminder actually firing about an hour after pre-trip completion
 - The manager post-trip greeting and notice
 - Post-trip inspection completion tracking with the actual submission time (column X)
+- The inspection timing review notice actually firing when two inspections are unusually close together (column Y)
 
 If you notice any of the "still awaiting validation" items behaving unexpectedly, that is
 valuable information — please report it to the system administrator rather than assuming it's a

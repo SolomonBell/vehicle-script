@@ -113,7 +113,7 @@ validated — see [docs/testing-plan.md](docs/testing-plan.md).
 |---|---|
 | Automation runtime | Google Apps Script (V8) |
 | Booking source | Google Calendar (Appointment Schedules) |
-| System of record | Google Sheets (Bookings tab, columns A–X) |
+| System of record | Google Sheets (Bookings tab, columns A–Y) |
 | E-mail | SendGrid REST API |
 | SMS | Twilio REST API |
 | E-signature | DocuSeal REST API |
@@ -144,7 +144,7 @@ Customer books vehicle via Google Booking
   syncCalendarBookings detects event (every 5 min)
             │
             ▼
-  Row appended to Bookings sheet (columns A–S initialized; T–X populate later)
+  Row appended to Bookings sheet (columns A–S initialized; T–Y populate later)
             │
             ├──▶  Welcome SMS + email sent to customer
             │       • Stripe Checkout Session URL (unique per booking;
@@ -436,7 +436,7 @@ graph TB
     end
 
     subgraph RECORD["System of Record"]
-        SHEETS[(Google Sheets — Bookings tab\nColumns A-X)]
+        SHEETS[(Google Sheets — Bookings tab\nColumns A-Y)]
     end
 
     subgraph BRIDGE["Pipedream — Webhook Bridge"]
@@ -640,6 +640,14 @@ is not yet signed, the row is skipped and re-checked on the next run until the D
 webhook (`markLeaseSigned`) updates column N. Tracked in column U so it is never sent twice. See
 [Approval State Machine](#12-approval-state-machine).
 
+**Approval Reminder Count (column Q) — audited, no bug found.** Q is read with
+`Number(data[i][16]) || 0` (blank, numeric, and numeric-string values are all interpreted
+correctly), every write targets the same row it was read from, and Q is written only after the
+manager email actually succeeds, so a failed send is retried rather than silently counted. No SMS
+is sent for approval reminders, so email/SMS "double counting" is not possible. See
+`testApprovalReminderCountBehavior()` in `SandboxTests.js` for the regression coverage, and
+`docs/setup-notes.md`'s "Approval reminder behavior" section for the full trace.
+
 ---
 
 ### Reminders.js — Engine 3
@@ -648,7 +656,7 @@ webhook (`markLeaseSigned`) updates column N. Tracked in column U so it is never
 **Trigger:** Every 30 minutes
 
 Acquires a `LockService.getScriptLock()` with a 10-second timeout to prevent overlapping
-executions. Scans all rows and sends two types of messages:
+executions. Scans all rows and sends up to three types of messages:
 
 - **Pre-trip reminder** — when `hoursUntilStart` is between 0 and 26 and column K is blank and
   the booking is approved (`isPreTripReminderEligible()` in `Helpers.js`). Sent to the customer
@@ -657,6 +665,7 @@ executions. Scans all rows and sends two types of messages:
   done. Column K is written only after a successful send (see below) — a row missing approval or
   deposit is safely re-evaluated on every later run for as long as it stays inside the window. The
   manager's 24-hour summary email does not include the (blank, unsigned) inspection form link.
+  Content is built by `buildPreTripReminderContent_()`.
 
 - **Post-trip reminder** — when the customer has completed the pre-trip inspection form (column
   W holds a parseable `"Yes <timestamp>"` value, written by `processInspectionFormSubmission_()`
@@ -665,18 +674,40 @@ executions. Scans all rows and sends two types of messages:
   run, so the message goes out on the first run where the one-hour delay has actually elapsed —
   this is what makes the delay durable across separate Apps Script executions without any timer or
   sleep call. It never fires from the booking's End Time and never fires before the pre-trip
-  inspection is completed.
+  inspection is completed. Content is built by `buildPostTripReminderContent_()`.
 
-Both reminders follow the same "delivered if reached by either channel" pattern as
-`notifyCustomerOfApproval()` (`Approval.js`): the flag column is written only after a successful
-SMS or email send, and a row with neither phone nor email on file is treated as delivered to avoid
-endless retry. Rows older than 48 hours past end time with both K and L set are skipped to limit
-the scan window — this check is independent of how L's timing is computed, so it is unaffected by
-the post-trip timing change described above.
+- **Suspicious inspection timing warning** — once both W and X hold a parseable completion
+  timestamp and column Y is blank, computes the elapsed time between them
+  (`getInspectionElapsedMinutes()`) and, if it is less than
+  `CONFIG.SUSPICIOUS_INSPECTION_WINDOW_MINUTES` (`isSuspiciousInspectionTiming()`), sends a
+  neutral, manager-only warning (`sendSuspiciousInspectionTimingWarning_()`) and writes column Y.
+  Purely informational — never blocks or alters the workflow, never sent to the customer, and
+  never contains a customer-facing form link. See [Suspicious inspection
+  timing](#suspicious-inspection-timing-warning) below.
+
+All three follow the same "delivered/sent only after success" pattern as `notifyCustomerOfApproval()`
+(`Approval.js`): the flag column is written only after a successful send, and — for the two
+customer-facing reminders — a row with neither phone nor email on file is treated as delivered to
+avoid endless retry. Rows older than 48 hours past end time with both K and L set are skipped to
+limit the scan window, **except** when column Y is still blank and column X already holds a
+completion timestamp — that combination is kept in the scan so a late-arriving post-trip
+submission on an old booking still gets its suspicious-timing check.
 
 The old `POST_RENTAL_HOURS`-after-end-time timing has been replaced by the pre-trip-completion-based
 timing above. The `POST_RENTAL_HOURS` Script Property still exists (and `validateConfig()` still
 checks it is numeric) but is no longer read by any active code path.
+
+### Immediate inspection sends (Reminders.js)
+
+`sendPreTripInspectionNowForRow(rowNumber)` and `sendPostTripInspectionNowForRow(rowNumber)` call
+`sendPreTripReminder_()` / `sendPostTripReminder_()` directly for one booking (by 1-based sheet
+row), bypassing `isPreTripReminderEligible()` / `isPostTripReminderEligible()` entirely. These are
+real sends: on success they write K/L and notify the manager exactly like the automated path, just
+triggered immediately. Intended for a legitimate resend, or for sending the post-trip inspection
+right away when a vehicle is returned unusually early. Manually run only, from the Apps Script
+editor — not wired to any trigger, not reachable from any customer-facing surface. See [Manual
+immediate inspection sends](setup-notes.md#manual-immediate-inspection-sends) in
+`docs/setup-notes.md` for the corresponding pure-test entry points in `SandboxTests.js`.
 
 ---
 
@@ -884,10 +915,11 @@ name — see [Google Forms](#7-google-forms).
 `setupSheetSchema()` writes `Vehicle Type` to the R1 cell (if blank) and applies dropdown
 validation to column R from the unique vehicle types in `CALENDAR_CONFIGS`. Same for `Location`
 in column S. It also fills in the header text (if blank) for columns U (`Customer Approval
-Notified`), V (`Intake Form Completed`), W (`Pre-Inspection Form Completed`), and X
-(`Post-Inspection Form Completed`) — no dropdown validation on these, same Yes/blank pattern as
-G/I/J/K/L/N. Safe to re-run — it only writes headers if the cell is currently blank, and always
-re-applies R/S validation. **Does not touch columns A–Q or T** — those must be set up manually.
+Notified`), V (`Intake Form Completed`), W (`Pre-Inspection Form Completed`), X
+(`Post-Inspection Form Completed`), and Y (`Suspicious Timing Warning Sent`) — no dropdown
+validation on these, same Yes/blank pattern as G/I/J/K/L/N. Safe to re-run — it only writes
+headers if the cell is currently blank, and always re-applies R/S validation. **Does not touch
+columns A–Q or T** — those must be set up manually.
 
 ---
 
@@ -932,6 +964,7 @@ at row 2.
 | V | Intake Form Completed | `processIntakeFormSubmission_` (via `onFormSubmit`) | Set to `Yes` when the intake Google Form is submitted — distinct from Intake Sent (column I), which only means the link was emailed |
 | W | Pre-Inspection Form Completed | `processInspectionFormSubmission_` (via `onFormSubmit`) | Set to `"Yes <date/time>"` (e.g. `Yes 8/2/2026 9:15 AM`) using the pre-trip inspection form's own Timestamp column when a submission is matched to this row; also the value `processReminders` reads to time the post-trip reminder |
 | X | Post-Inspection Form Completed | `processInspectionFormSubmission_` (via `onFormSubmit`) | Set to `"Yes <date/time>"` (e.g. `Yes 8/2/2026 4:08 PM`) using the post-trip inspection form's own Timestamp column when a submission is matched to this row |
+| Y | Suspicious Timing Warning Sent | `processReminders` (via `sendSuspiciousInspectionTimingWarning_`) | Set to `Yes` after the manager is warned that W and X were completed `SUSPICIOUS_INSPECTION_WINDOW_MINUTES` apart or less (inclusive); blank means either not applicable yet or not suspicious |
 
 ### Flag semantics
 
@@ -940,7 +973,7 @@ at row 2.
   `Approved - Paid`, `Denied`). Any other value (including blank) leaves the row in the pending
   state.
 
-- **Columns G, I, J, K, L, N, U, V** are binary flags — the script only checks whether the value
+- **Columns G, I, J, K, L, N, U, V, Y** are binary flags — the script only checks whether the value
   is exactly `Yes`. Any other value (including blank) is treated as "not done."
 
 - **Columns W and X** combine a completion flag with the actual form-submission timestamp in one
@@ -1275,6 +1308,12 @@ These control timing and reminder behaviour. All are parsed as numbers with `Num
 | `POST_RENTAL_HOURS` | No longer read by any code path — the post-trip reminder now fires one hour after the pre-trip inspection's recorded completion time instead (see `Reminders.js — Engine 3` in [Source File Reference](#5-source-file-reference)) | `1` | Kept only because `validateConfig()` still checks it is numeric; safe to leave set |
 | `HOURS_BETWEEN_APPROVAL_REMINDERS` | Hours between manager approval reminder emails | `12` | Set to 12 for one reminder per half-day |
 | `MAX_APPROVAL_REMINDERS` | Total approval notifications before escalating to admin | `3` | 1 initial + 2 follow-ups + 1 escalation, then permanent silence |
+| `SUSPICIOUS_INSPECTION_WINDOW_MINUTES` | Minutes; if the post-trip inspection is completed less than this many minutes after the pre-trip inspection, the manager is warned (column Y) | `15` | Default chosen as long enough for a plausible short rental, short enough to only flag implausibly close submissions — see [Suspicious inspection timing warning](#suspicious-inspection-timing-warning) |
+
+**Sandbox-only (not part of `CONFIG`):** `SANDBOX_TEST_PHONE` and `SANDBOX_TEST_EMAIL` are read
+directly from `PROPS` by manual `SandboxTests.js` functions only (`testSendSingleSms()`,
+`testSendPreTripInspection()`, `testSendPostTripInspection()`) — set them to your own verified
+phone number and inbox before running those tests. Never used in any production code path.
 
 ### Webhook authentication
 
@@ -1539,12 +1578,37 @@ not block the confirmation email or the DocuSeal lease send.
 | Approval escalation | Email only | Sent to `ADMIN_EMAIL` when cap reached | none (addressed to admin, not a location manager) |
 | 24hr before pickup | Email + SMS | Customer name, date, deposit status, lease status — no inspection link (the blank pre-trip form is not sent to the manager) | `Hi {Location} Manager,` |
 | One hour after pre-trip inspection form completed | Email only | Customer name, vehicle, location, date, customer email, post-trip inspection form link | `Hi {Location} Manager,` |
+| Suspicious inspection timing (once per booking, only if triggered) | Email only | Customer name, booking ID, vehicle, location, scheduled start/end, both inspection completion times, elapsed time — no form link, no accusatory language | `Hi {Location} Manager,` |
 
-Each of the five manager-addressed templates opens with a greeting using that booking's location
+Each of the six manager-addressed templates opens with a greeting using that booking's location
 (column S) — e.g. `Hi Bainbridge Manager,`, `Hi Poulsbo Manager,`, `Hi Port Orchard Manager,`,
 `Hi Fairgrounds Manager,` — reusing the same `location` value already read for the rest of the
 message body. The admin escalation email is unaffected since it is addressed to `ADMIN_EMAIL`, not
 a location manager.
+
+### Suspicious inspection timing warning
+
+`processReminders()` compares the pre-trip and post-trip inspection completion timestamps (columns
+W and X) once both are present, and warns the manager if they were submitted
+`CONFIG.SUSPICIOUS_INSPECTION_WINDOW_MINUTES` apart **or less** — inclusive of the boundary itself,
+so a submission exactly at the threshold still triggers the warning (Script Property
+`SUSPICIOUS_INSPECTION_WINDOW_MINUTES`, default **15** — see [Operational
+parameters](#operational-parameters) below for why). This is purely informational: it never blocks
+approval, never alters the rental workflow, and is worded neutrally ("may be worth a look" / "does
+not mean anything is wrong") — it never accuses the customer of anything. It is sent at most once
+per booking, tracked in column Y (Suspicious Timing Warning Sent), and is never sent to the
+customer and never contains a customer-facing form link or instructions.
+
+Implementation: `getInspectionElapsedMinutes()`, `isSuspiciousInspectionTiming()`, and
+`formatElapsedMinutes()` (all pure, `Helpers.js`); `sendSuspiciousInspectionTimingWarning_()`
+(`Reminders.js`) builds and sends the email and writes column Y only after a successful send.
+
+**Why no new sheet column was avoided first:** the codebase's convention (see `docs/setup-notes.md`,
+"why not reuse P/Q instead of adding U") is against overloading an existing column with a second,
+unrelated meaning. Appending a marker to W or X directly was also ruled out, since it would break
+`parseInspectionCompletionTimestamp_()`'s parsing of those cells (which the post-trip reminder
+timing itself depends on). Column Y — a single `Yes`/blank flag, the same pattern already used by
+I/J/K/L/N/U/V — was the smallest safe way to add durable, unambiguous duplicate protection.
 
 ### Error alerts
 
@@ -1605,6 +1669,10 @@ silence.
 P is updated when the initial email and each reminder are sent. P is not updated at escalation.
 Rows where the manager sets column O to any decision value are excluded at the top of the loop
 and never receive another notification.
+
+This state machine was audited end-to-end (row-targeting, blank/numeric/numeric-string count
+parsing, write-only-on-success, and the stop-at-maximum behavior above) with no bug found — see
+`testApprovalReminderCountBehavior()` in `SandboxTests.js` for the resulting regression coverage.
 
 ### Customer approval notification (separate from the manager loop)
 
@@ -1892,17 +1960,43 @@ triggers.
 | `testPostTripReminderEligibility()` | Pure test of `isPostTripReminderEligible()` (`Helpers.js`): not eligible while the pre-trip completion timestamp is unknown, not eligible before an hour has elapsed since completion, eligible at/after one hour, and the already-sent (column L) no-duplicate case. |
 | `testSendPostTripReminderFlagBehavior()` | Same pattern as `testSendPreTripReminderFlagBehavior()`, against `sendPostTripReminder_()` and column L. |
 
+### Approval reminder count tests
+
+| Function | What it verifies |
+|---|---|
+| `testApprovalReminderCountBehavior()` | Stubs `getSheet` and `sendEmailHtml` (both restored in `finally`) and calls the real `checkRentalEligibility_()` directly against a fake sheet — no live sheet, no real email. Verifies: blank, numeric, and numeric-string counts are all interpreted correctly; the count increments correctly; the correct booking row is written; reminders stop at `MAX_APPROVAL_REMINDERS` (and stay stopped once past it); a failed send does not increment the count; and a two-row run never lets one booking's write affect the other's row. |
+
+### Suspicious inspection timing tests
+
+| Function | What it verifies |
+|---|---|
+| `testSuspiciousInspectionTimingCalculations()` | Pure test of `getInspectionElapsedMinutes()`, `isSuspiciousInspectionTiming()`, and `formatElapsedMinutes()` (`Helpers.js`): elapsed-time calculation, missing/malformed timestamps, the inclusive threshold boundary (outside is not suspicious; exactly at and inside are both suspicious), post-trip earlier than pre-trip, and elapsed-time formatting (including the negative-value note). |
+| `testSendSuspiciousInspectionTimingWarningFlagBehavior()` | Stubs `sendEmailHtml` (restored in `finally`) and a fake sheet to verify `sendSuspiciousInspectionTimingWarning_()` only writes column Y after a successful manager email — a failed send or a missing `MANAGER_EMAIL` writes nothing, so the row is retried on the next run and the warning is never sent twice. |
+
+### Immediate inspection send tests
+
+| Function | What it does |
+|---|---|
+| `testSendPreTripInspection()` | **[LIVE]** Sends the real pre-trip inspection email and SMS to `SANDBOX_TEST_EMAIL` / `SANDBOX_TEST_PHONE`, using content built by the real `buildPreTripReminderContent_()` from a "Test Customer" booking row. Does not write column K or notify the manager — pure system test, not an operational send. Validates the test row has an email, phone, resolvable location, and `INSPECT_FORM_BASE` before sending. Not in the runner. |
+| `testSendPostTripInspection()` | **[LIVE]** Same as above, for the post-trip inspection message (`buildPostTripReminderContent_()`); does not write column L or notify the manager. Not in the runner. |
+
+Contrast with `sendPreTripInspectionNowForRow(rowNumber)` / `sendPostTripInspectionNowForRow(rowNumber)`
+(`src/Reminders.js`, not `SandboxTests.js`) — those ARE real operational sends against a real
+booking row's real contact info, for an authorized resend or an early-return post-trip send; see
+[Immediate inspection sends](#immediate-inspection-sends-remindersjs) above.
+
 ### Test runners
 
 | Function | What it does |
 |---|---|
-| `runAllSandboxConfigurationTests()` | Runs 23 tests in sequence: `validateConfig`, `testSheetConnection`, `testCalendarConfigs`, `testVehicleTypeAndLocationMapping`, `testStripeConfiguration`, `testDepositAmounts`, `testDocuSealPropertyNames`, `testSendGridConfiguration`, `testTwilioConfiguration`, `testLocationSenderConfig`, `testApprovalNotificationEligibility`, `testDocuSealEligibility`, `testIntakeFormSubmitRowMatching`, `testExtractIntakeSubmissionFields`, `testInspectionFormSubmitRowMatching`, `testExtractInspectionSubmissionFields`, `testFormSubmitDispatcher`, `testPreTripReminderEligibility`, `testSendPreTripReminderFlagBehavior`, `testInspectionCompletionFormatting`, `testPostTripReminderEligibility`, `testSendPostTripReminderFlagBehavior`, `testTriggerRegistrationIsWellFormed`. Logs a clear header before starting and a completion banner when all pass. |
+| `runAllSandboxConfigurationTests()` | Runs 26 tests in sequence: `validateConfig`, `testSheetConnection`, `testCalendarConfigs`, `testVehicleTypeAndLocationMapping`, `testStripeConfiguration`, `testDepositAmounts`, `testDocuSealPropertyNames`, `testSendGridConfiguration`, `testTwilioConfiguration`, `testLocationSenderConfig`, `testApprovalNotificationEligibility`, `testDocuSealEligibility`, `testIntakeFormSubmitRowMatching`, `testExtractIntakeSubmissionFields`, `testInspectionFormSubmitRowMatching`, `testExtractInspectionSubmissionFields`, `testFormSubmitDispatcher`, `testPreTripReminderEligibility`, `testSendPreTripReminderFlagBehavior`, `testInspectionCompletionFormatting`, `testPostTripReminderEligibility`, `testSendPostTripReminderFlagBehavior`, `testApprovalReminderCountBehavior`, `testSuspiciousInspectionTimingCalculations`, `testSendSuspiciousInspectionTimingWarningFlagBehavior`, `testTriggerRegistrationIsWellFormed`. Logs a clear header before starting and a completion banner when all pass. |
 
 ### Standalone manual tests (not in runner)
 
 | Function | What it does |
 |---|---|
 | `testSendSingleSms()` | Sends a real Twilio SMS to the configured test number with a timestamped message. Use to verify Twilio delivery end-to-end. Run manually; never add to the runner. |
+| `testSendPreTripInspection()` / `testSendPostTripInspection()` | See [Immediate inspection send tests](#immediate-inspection-send-tests) above. Run manually; never add to the runner. |
 
 ### End-to-end flow tests
 
@@ -2251,6 +2345,24 @@ Duplicates can happen in two scenarios:
 5. `POST_RENTAL_HOURS` and the booking's End Time (column F) are **not** used for this timing —
    do not use them to predict when the post-trip reminder will fire.
 
+### The suspicious inspection timing warning did not fire (or fired unexpectedly)
+
+1. Confirm both column W and column X hold a parseable `"Yes <date/time>"` value — the check only
+   runs once both are present (`getInspectionElapsedMinutes()` returns `null`, and nothing is sent,
+   if either is missing or unparseable).
+2. Confirm column Y is blank — a `Yes` means the manager was already warned for this booking; it
+   fires at most once.
+3. Compare the two timestamps' difference against `SUSPICIOUS_INSPECTION_WINDOW_MINUTES`
+   (`isSuspiciousInspectionTiming()` in `Helpers.js` — the threshold is inclusive: a gap at or
+   below the configured number of minutes triggers the warning, including exactly at the
+   threshold).
+4. If it fired and you did not expect it to, remember the check does not use absolute value: a
+   post-trip timestamp recorded *before* the pre-trip timestamp also triggers it (see
+   `formatElapsedMinutes()`'s negative-value note in the resulting email).
+5. If a row is older than 48 hours past End Time with K and L already `Yes`, it is still scanned
+   as long as X has a value and Y is still blank — it is not skipped by the same 48-hour cutoff
+   that limits the ordinary reminder scan.
+
 ### Stripe Checkout Session not created (syncCalendarBookings alert)
 
 1. Check the Executions log for `syncCalendarBookings` — look for `Stripe API error` followed by
@@ -2437,6 +2549,7 @@ Column mapping:
 21       22       V       Intake Form Completed
 22       23       W       Pre-Inspection Form Completed
 23       24       X       Post-Inspection Form Completed
+24       25       Y       Suspicious Timing Warning Sent
 ```
 
 There is no helper that converts column names to indices. All column accesses use hardcoded

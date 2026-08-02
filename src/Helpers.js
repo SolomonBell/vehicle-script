@@ -235,6 +235,60 @@ function isPostTripReminderEligible(hoursSincePreTripCompleted, sentPost) {
          sentPost !== 'Yes';
 }
 
+// Elapsed time in minutes between the pre-trip and post-trip inspection
+// completion timestamps (post minus pre). Returns null if either timestamp
+// is missing or invalid, since there is nothing to measure yet -- callers
+// must treat null as "not applicable" and never guess. A negative result
+// means the post-trip timestamp was recorded before the pre-trip one; this
+// is passed through as-is rather than clamped, since that ordering is
+// itself worth surfacing to a manager (see formatElapsedMinutes() below).
+// Used by processReminders() (Reminders.js) to detect suspiciously close
+// inspection submissions.
+function getInspectionElapsedMinutes(preTripCompletedAt, postTripCompletedAt) {
+  if (!(preTripCompletedAt instanceof Date) || isNaN(preTripCompletedAt.getTime())) return null;
+  if (!(postTripCompletedAt instanceof Date) || isNaN(postTripCompletedAt.getTime())) return null;
+  return (postTripCompletedAt.getTime() - preTripCompletedAt.getTime()) / (1000 * 60);
+}
+
+// Returns true when the pre-trip and post-trip inspections were completed
+// thresholdMinutes apart OR LESS (inclusive of the boundary itself) --
+// including when post-trip was recorded before pre-trip (elapsedMinutes
+// negative), which is at least as worth a manager's review as a short gap.
+// Inclusive rather than strict was a deliberate choice: a submission
+// exactly at the configured threshold is exactly as close together as the
+// threshold was meant to catch, so it should not be the one case that
+// slips through. elapsedMinutes === null means there is nothing to compare
+// yet (see getInspectionElapsedMinutes()), so this always returns false in
+// that case rather than guessing. Used by processReminders() together with
+// CONFIG.SUSPICIOUS_INSPECTION_WINDOW_MINUTES to decide whether to send the
+// manager a suspicious-timing warning.
+function isSuspiciousInspectionTiming(elapsedMinutes, thresholdMinutes) {
+  return elapsedMinutes !== null && elapsedMinutes <= thresholdMinutes;
+}
+
+// Formats an elapsed-minutes value (see getInspectionElapsedMinutes()) as a
+// short human-readable duration for the manager warning email, e.g.
+// "15 minutes" or "1 hour 5 minutes". A negative value (post-trip recorded
+// before pre-trip) is formatted using its absolute value with an explanatory
+// note appended, so the manager sees a normal-looking duration plus a plain
+// explanation rather than a confusing negative number.
+function formatElapsedMinutes(minutes) {
+  const abs   = Math.round(Math.abs(minutes));
+  const hours = Math.floor(abs / 60);
+  const mins  = abs % 60;
+
+  let text;
+  if (hours > 0 && mins > 0) {
+    text = hours + ' hour' + (hours === 1 ? '' : 's') + ' ' + mins + ' minute' + (mins === 1 ? '' : 's');
+  } else if (hours > 0) {
+    text = hours + ' hour' + (hours === 1 ? '' : 's');
+  } else {
+    text = mins + ' minute' + (mins === 1 ? '' : 's');
+  }
+
+  return minutes < 0 ? text + ' (post-trip was recorded before pre-trip)' : text;
+}
+
 // Returns { email, phone } for the given booking location — the from-address and
 // from-number to use for all emails and SMS related to that booking.
 // Throws if the location is not one of the four active locations so the caller's

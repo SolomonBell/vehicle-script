@@ -87,7 +87,7 @@ Calendars with an unset property are silently skipped at sync time. You can add 
 
 **Trial account**: on a Twilio trial account, all outbound SMS are prefixed with "Sent from your Twilio trial account — " and can only be delivered to phone numbers that have been individually verified in the Twilio console. Verify `MANAGER_PHONE` and any test customer phone numbers before running end-to-end tests.
 
-**Sandbox-only**: `SANDBOX_TEST_PHONE` (optional) is a Script Property read only by the manual `testSendSingleSms()` function in `SandboxTests.js` — set it to your own verified phone number before running that test. It is not used anywhere in production code paths and is not part of `CONFIG`.
+**Sandbox-only**: `SANDBOX_TEST_PHONE` (optional) is a Script Property read by the manual `testSendSingleSms()`, `testSendPreTripInspection()`, and `testSendPostTripInspection()` functions in `SandboxTests.js` — set it to your own verified phone number before running any of those tests. `SANDBOX_TEST_EMAIL` (optional) is the email counterpart, read by `testSendPreTripInspection()` and `testSendPostTripInspection()` — set it to your own verified inbox. Neither is used anywhere in production code paths, and neither is part of `CONFIG`.
 
 ### SendGrid (email)
 
@@ -175,8 +175,8 @@ The helper function `getLocationConfig(location)` in `Helpers.js` is the single 
 
 Sheet tab must be named `Bookings` (exact, case-sensitive).
 
-Row 1 headers (columns A–X). Columns R, S, U, V, W, and X are written by `syncCalendarBookings()` /
-`setupSheetSchema()` as noted below:
+Row 1 headers (columns A–Y). Columns R, S, U, V, W, X, and Y are written by
+`syncCalendarBookings()` / `setupSheetSchema()` as noted below:
 
 | Col | Header                  | Written by         |
 |-----|--------------------------|--------------------|
@@ -204,6 +204,7 @@ Row 1 headers (columns A–X). Columns R, S, U, V, W, and X are written by `sync
 | V   | Intake Form Completed   | processIntakeFormSubmission_, called from onFormSubmit (installable trigger — see below) |
 | W   | Pre-Inspection Form Completed | processInspectionFormSubmission_, called from onFormSubmit (installable trigger — see below); value is `"Yes <date/time>"`, not a bare `Yes` |
 | X   | Post-Inspection Form Completed | processInspectionFormSubmission_, called from onFormSubmit (installable trigger — see below); value is `"Yes <date/time>"`, not a bare `Yes` |
+| Y   | Suspicious Timing Warning Sent | processReminders (via sendSuspiciousInspectionTimingWarning_) |
 
 **Column U** is a simple `Yes`/blank flag, same pattern as I/J/K/L. It tracks whether the
 customer has been sent the one-time "your rental is approved" notification, so the notification
@@ -270,9 +271,27 @@ of the timestamp text that follows it — see below).
 `parseInspectionCompletionTimestamp_()` (`src/Helpers.js`) and sends the post-trip reminder on the
 first run at least one hour after that recorded completion time (`isPostTripReminderEligible()`) —
 see the `Reminders.js — Engine 3` entry in [README.md's Source File
-Reference](../README.md#5-source-file-reference). Column X is still not read anywhere else in the
-code — it only records completion. See "Matching an inspection submission to the correct booking
-row" below for the matching details.
+Reference](../README.md#5-source-file-reference). Column X is not read anywhere else in the code
+except by the suspicious-timing check described next — it otherwise only records completion. See
+"Matching an inspection submission to the correct booking row" below for the matching details.
+
+**Column Y (Suspicious Timing Warning Sent)** is a simple `Yes`/blank flag, same pattern as
+U/V. Once both W and X hold a parseable completion timestamp, `processReminders` computes the
+elapsed time between them (`getInspectionElapsedMinutes()` in `src/Helpers.js`) and, if it is less
+than `CONFIG.SUSPICIOUS_INSPECTION_WINDOW_MINUTES` (`isSuspiciousInspectionTiming()`, also
+`Helpers.js` — see [README.md's Operational
+parameters](../README.md#operational-parameters) for the threshold and why 15 minutes was chosen),
+sends a neutral, informational warning to the manager
+(`sendSuspiciousInspectionTimingWarning_()` in `src/Reminders.js`) and writes Y = `Yes` only after
+that email succeeds, so a failed send is retried on the next run and a successful one is never
+repeated. This check does not block or alter the rental workflow in any way, is never sent to the
+customer, and never contains a customer-facing form link or instructions — it exists purely to
+give the manager a chance to review the two inspection responses. No existing column or notes
+field was reused for this: the codebase's own convention (see the "why not reuse P/Q instead of
+adding U" reasoning above) is against overloading a column with a second, unrelated meaning, and
+appending a marker into W or X directly would break `parseInspectionCompletionTimestamp_()`'s
+parsing — so a new column was the smallest safe way to add durable, unambiguous duplicate
+protection.
 
 ### Matching an intake submission to the correct booking row
 
@@ -550,6 +569,18 @@ The reminder interval and cap are Script Properties, not fixed values — see
 - Q > MAX_APPROVAL_REMINDERS: row is silently skipped forever
 - Manager sets column O to resolve; script skips all resolved rows for the reminder loop
 
+**Audited and confirmed correct.** This state machine was traced end-to-end against the actual
+`checkRentalEligibility_()` implementation: Q is read with `Number(data[i][16]) || 0` (blank,
+numeric, and numeric-string values are all interpreted correctly), every write targets
+`getRange(i + 1, 17)` using the same row index the row was read from (no cross-row writes), and Q
+is written only *after* the manager email succeeds (inside the `try`, after `sendEmailHtml`) — a
+failed send is retried on the next run rather than silently counted. No SMS is sent for approval
+reminders, so there is no "one attempt vs. two channels" ambiguity to resolve. No bug was found;
+see `testApprovalReminderCountBehavior()` in `SandboxTests.js` for the regression coverage added
+to confirm this (blank/numeric/numeric-string counts, correct increment, correct row targeting,
+stopping at the intended maximum, and one booking's row never affecting another's in the same
+run).
+
 This state machine (P/Q) governs only the manager reminder loop and stops the moment column O is
 set. It does not govern the customer notification. The customer's one-time "your rental is
 approved" email is a separate check: once column O is `Approved - Free` or `Approved - Paid`,
@@ -560,3 +591,56 @@ separate reminder loop or timeout for this wait. `checkRentalEligibility` acquir
 `LockService.getScriptLock()` before each run (same pattern as `processReminders`) so an
 overlapping execution cannot read column U before a prior run finishes writing it, which
 prevents a duplicate send of the customer email.
+
+## Manual immediate inspection sends
+
+Both inspection reminders normally wait for their eligibility window (`isPreTripReminderEligible()`
+/ `isPostTripReminderEligible()` in `src/Helpers.js`, evaluated by `processReminders()`). Two
+different manual paths exist for sending one immediately instead, for two different purposes:
+
+**Pure system testing (`SandboxTests.js`, safe by default):** `testSendPreTripInspection()` and
+`testSendPostTripInspection()` build the exact production email/SMS content
+(`buildPreTripReminderContent_()` / `buildPostTripReminderContent_()` in `src/Reminders.js` — the
+same functions `sendPreTripReminder_()` / `sendPostTripReminder_()` call internally, so there is
+only one copy of each template) using a real Bookings row (found the same way
+`testBuildIntakeUrl()` finds one: the first row whose Customer Name contains "Test Customer"), but
+send to `SANDBOX_TEST_EMAIL` / `SANDBOX_TEST_PHONE` instead of that row's real contact info. They
+do **not** call `sendPreTripReminder_()` / `sendPostTripReminder_()`, so columns K/L are never
+written and no manager notice is sent — this is a pure test of the message-building and delivery
+path, not a real operational send. Both validate the test row has an email, a phone, a resolvable
+location, and that `INSPECT_FORM_BASE` is set before sending anything, and log exactly which
+booking row and test recipient were used. Requires `SANDBOX_TEST_EMAIL` and `SANDBOX_TEST_PHONE`
+in Script Properties. Not included in `runAllSandboxConfigurationTests()` — they send real
+messages (to the test recipient, never a real customer).
+
+**Authorized real sends (`src/Reminders.js`, production helpers):**
+`sendPreTripInspectionNowForRow(rowNumber)` and `sendPostTripInspectionNowForRow(rowNumber)` take
+a 1-based sheet row number and call the real `sendPreTripReminder_()` / `sendPostTripReminder_()`
+directly against that row's actual email and phone — bypassing the eligibility window, but
+otherwise identical to the automated path: on success, K/L is written and the manager notice goes
+out normally. These are real sends and must only be run manually, from the Apps Script editor, for
+a specific authorized reason — e.g. re-sending an inspection link after confirming with the
+customer it did not arrive, or sending the post-trip link immediately because a vehicle was
+returned unusually early (rather than waiting for the customer to complete the pre-trip form and
+the usual one-hour delay, which does not apply here since this bypasses that check entirely).
+Neither function is wired to any trigger or reachable from any customer-facing surface.
+
+## Suspicious inspection timing warning
+
+`CONFIG.SUSPICIOUS_INSPECTION_WINDOW_MINUTES` (Script Property `SUSPICIOUS_INSPECTION_WINDOW_MINUTES`,
+default **15**) is the threshold `processReminders()` uses to warn the manager when a booking's
+pre-trip and post-trip inspection forms were completed that many minutes apart **or less** — the
+boundary is inclusive, so a submission exactly at the threshold still triggers the warning (see
+`isSuspiciousInspectionTiming()` in `src/Helpers.js`, and column Y in [Google Sheet
+setup](#google-sheet-setup) above). 15 minutes was chosen as a reasonable default: long enough that
+even a very short, legitimate rental plausibly involves driving somewhere and back between
+completing the two forms, short enough that it only flags submissions that are implausibly close
+together. Adjust it in Script Properties if a location's real usage pattern calls for a different
+value — no code change is required.
+
+The warning is sent at most once per booking (column Y), is manager-only, is worded neutrally
+("may be worth a look" / "does not mean anything is wrong"), never contains a customer-facing form
+link, and never blocks or alters anything else in the workflow. See
+`sendSuspiciousInspectionTimingWarning_()` in `src/Reminders.js` for the exact email content, and
+`testSuspiciousInspectionTimingCalculations()` / `testSendSuspiciousInspectionTimingWarningFlagBehavior()`
+in `SandboxTests.js` for the test coverage.

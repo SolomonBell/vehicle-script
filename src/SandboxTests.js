@@ -1848,6 +1848,115 @@ function testSendPreTripReminderFlagBehavior() {
 }
 
 // ---------------------------------------------------------------------------
+// TEST 36: Pre-trip inspection email excludes the manager from recipients
+// (buildEmailPersonalization_, sendPreTripReminder_) [CONFIG]
+// The manager must not receive the blank pre-trip inspection email in any
+// form -- not To, not CC (never used anywhere in this codebase), and not
+// BCC -- before the customer has actually submitted it. Two layers are
+// verified:
+//   1. buildEmailPersonalization_() (Notifications.js) directly -- pure,
+//      no sheet reads, no external calls -- confirms suppressManagerBcc
+//      removes the manager from the recipient data entirely, while leaving
+//      normal (non-suppressed) behavior, including the undefined-argument
+//      default, unaffected (backward compatible with every other call site).
+//   2. sendPreTripReminder_() (Reminders.js) actually passes
+//      suppressManagerBcc = true for the customer email call specifically
+//      -- stubs sendEmailHtml and a fake sheet (restored in a finally
+//      block), no real email is sent.
+// ---------------------------------------------------------------------------
+function testPreTripEmailExcludesManagerFromRecipients() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) {
+      Logger.log('OK: ' + label);
+      passed++;
+    } else {
+      Logger.log('FAIL: ' + label);
+      failed++;
+    }
+  }
+
+  // ---- Layer 1: buildEmailPersonalization_() directly ----
+  (function personalizationBuilderChecks() {
+    const realManagerEmail = CONFIG.MANAGER_EMAIL;
+    const realAdminEmail   = CONFIG.ADMIN_EMAIL;
+    CONFIG.MANAGER_EMAIL = 'manager@example.com';
+    CONFIG.ADMIN_EMAIL   = 'admin@example.com';
+
+    try {
+      const suppressed = buildEmailPersonalization_('customer@example.com', true);
+      check('suppressed: to contains only the customer', suppressed.to.length === 1 && suppressed.to[0].email === 'customer@example.com');
+      check('suppressed: no bcc field is present at all', !suppressed.bcc);
+      check('suppressed: no cc field is present at all', !suppressed.cc);
+      check('suppressed: manager email does not appear anywhere in the personalization data',
+            JSON.stringify(suppressed).indexOf('manager@example.com') === -1);
+
+      const normal = buildEmailPersonalization_('customer@example.com', false);
+      check('normal (explicit false): manager is still bcc\'d -- unrelated emails are unaffected',
+            normal.bcc && normal.bcc.length === 1 && normal.bcc[0].email === 'manager@example.com');
+
+      const normalDefault = buildEmailPersonalization_('customer@example.com');
+      check('normal (omitted arg): manager is still bcc\'d -- backward compatible with every existing call site',
+            normalDefault.bcc && normalDefault.bcc[0].email === 'manager@example.com');
+
+      const toManagerDirectly = buildEmailPersonalization_('manager@example.com', false);
+      check('email addressed directly to the manager is never also bcc\'d to her', !toManagerDirectly.bcc);
+    } finally {
+      CONFIG.MANAGER_EMAIL = realManagerEmail;
+      CONFIG.ADMIN_EMAIL   = realAdminEmail;
+    }
+  })();
+
+  // ---- Layer 2: sendPreTripReminder_() passes suppressManagerBcc = true ----
+  (function preTripReminderSuppressesManagerBcc() {
+    function fakeSheet() {
+      const writes = [];
+      return {
+        writes: writes,
+        getRange: function(row, col) {
+          return { setValue: function(value) { writes.push({ row: row, col: col, value: value }); } }
+        }
+      };
+    }
+
+    const fakeLocCfg = { email: 'sender@example.com', phone: '+12065550100' };
+    const realSendSms       = sendSms;
+    const realSendEmailHtml = sendEmailHtml;
+    const emailCalls = [];
+
+    try {
+      sendSms       = function() { /* succeeds */ };
+      sendEmailHtml = function(toEmail, subject, htmlBody, fromEmail, replyToEmail, suppressManagerBcc) {
+        emailCalls.push({ toEmail: toEmail, suppressManagerBcc: suppressManagerBcc });
+      };
+
+      const sheet = fakeSheet();
+      sendPreTripReminder_(
+        sheet, 4, 'Test Customer', 'customer@example.com', '+12065551234',
+        fakeLocCfg, 'August 1, 2026 at 9:00 AM', 'Cargo Van', 'Bainbridge',
+        'https://example.com/pre-inspect', 'Yes'
+      );
+
+      const customerCall = emailCalls.filter(function(c) { return c.toEmail === 'customer@example.com'; })[0];
+      check('sendPreTripReminder_ sent the customer email', !!customerCall);
+      check('the customer email call passed suppressManagerBcc = true', customerCall && customerCall.suppressManagerBcc === true);
+    } finally {
+      sendSms       = realSendSms;
+      sendEmailHtml = realSendEmailHtml;
+    }
+
+    check('sendSms restored to the original function', sendSms === realSendSms);
+    check('sendEmailHtml restored to the original function', sendEmailHtml === realSendEmailHtml);
+  })();
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' pre-trip email manager-exclusion checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+}
+
+// ---------------------------------------------------------------------------
 // TEST 30: Inspection completion formatting/parsing (Helpers.js) [CONFIG]
 // Pure test against formatDateTimeShort(), formatInspectionCompletionValue(),
 // parseInspectionCompletionTimestamp_(), and isInspectionCompletionValueSet_()
@@ -2070,6 +2179,361 @@ function testSendPostTripReminderFlagBehavior() {
 }
 
 // ---------------------------------------------------------------------------
+// TEST 33: Approval reminder count behavior (checkRentalEligibility_) [CONFIG]
+// Verifies the Approval Reminder Count column (Q) end-to-end by calling the
+// real production function directly against a fake sheet -- no live sheet is
+// read or written, and sendEmailHtml is stubbed so no real email is sent
+// (both restored in a finally block). Covers: blank / numeric / numeric-
+// string count values are all interpreted correctly, the count increments
+// correctly, the correct booking row is updated, reminders stop at
+// CONFIG.MAX_APPROVAL_REMINDERS, a failed send does not increment the count,
+// and one booking's row cannot affect another booking's row in the same run.
+// ---------------------------------------------------------------------------
+function testApprovalReminderCountBehavior() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) {
+      Logger.log('OK: ' + label);
+      passed++;
+    } else {
+      Logger.log('FAIL: ' + label);
+      failed++;
+    }
+  }
+
+  // Fake sheet backed by a plain in-memory array of rows (header + data).
+  // getRange(row, col).setValue() records writes instead of touching a live
+  // sheet. Row/column layout matches the real Bookings sheet up through
+  // column U (0-indexed 0-20) -- only the columns checkRentalEligibility_()
+  // actually reads are populated.
+  function fakeSheet(rows) {
+    const writes = [];
+    const header = new Array(21).fill('');
+    const data   = [header].concat(rows);
+    return {
+      writes: writes,
+      getDataRange: function() {
+        return { getValues: function() { return data; } };
+      },
+      getRange: function(row, col) {
+        return {
+          setValue: function(value) { writes.push({ row: row, col: col, value: value }); }
+        };
+      }
+    };
+  }
+
+  function fakeRow(name, email, phone, startTime, approvedValue, lastNotifiedAt, reminderCountRaw) {
+    const row = new Array(21);
+    row[1]  = name;
+    row[2]  = email;
+    row[3]  = phone;
+    row[4]  = startTime;
+    row[8]  = 'Yes';            // I: Intake Sent -- required for the row to be considered at all
+    row[13] = '';                // N: Lease Signed
+    row[14] = approvedValue;     // O: Rental Approved (blank = pending)
+    row[15] = lastNotifiedAt;    // P: Approval Notified At
+    row[16] = reminderCountRaw;  // Q: Approval Reminder Count
+    row[17] = 'Cargo Van';       // R: Vehicle Type
+    row[18] = 'Bainbridge';      // S: Location
+    row[20] = '';                // U: Customer Approval Notified
+    return row;
+  }
+
+  const soon         = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);  // outside the reminder-due window by itself; only O/P/Q matter here
+  const longAgo       = new Date(Date.now() - 100 * 60 * 60 * 1000);     // well past HOURS_BETWEEN_APPROVAL_REMINDERS
+  const recentlySent   = new Date(Date.now() - 1 * 60 * 60 * 1000);       // not yet due again under the documented default (12h)
+
+  const realGetSheet      = getSheet;
+  const realSendEmailHtml = sendEmailHtml;
+  let emailCallCount = 0;
+  let shouldFailEmail = false;
+
+  try {
+    sendEmailHtml = function() {
+      emailCallCount++;
+      if (shouldFailEmail) throw new Error('simulated SendGrid outage');
+    };
+
+    // ---- 1. Blank count -- interpreted as 0, triggers the initial send ----
+    (function blankCountSendsInitial() {
+      const sheet = fakeSheet([ fakeRow('Blank Count', 'blank@example.com', '+12065550001', soon, '', '', '') ]);
+      getSheet = function() { return sheet; };
+      emailCallCount = 0;
+      checkRentalEligibility_();
+      check('blank count -- exactly one email sent (initial)', emailCallCount === 1);
+      check('blank count -- Q written as 1 on row 2', sheet.writes.some(function(w) { return w.row === 2 && w.col === 17 && w.value === 1; }));
+      check('blank count -- P written on row 2', sheet.writes.some(function(w) { return w.row === 2 && w.col === 16; }));
+    })();
+
+    // ---- 2. Existing numeric count (1), due for its next reminder -- increments to 2 ----
+    (function numericCountIncrementsCorrectly() {
+      const sheet = fakeSheet([ fakeRow('Numeric Count', 'num@example.com', '+12065550002', soon, '', longAgo, 1) ]);
+      getSheet = function() { return sheet; };
+      emailCallCount = 0;
+      checkRentalEligibility_();
+      check('numeric count 1 -- one reminder email sent', emailCallCount === 1);
+      check('numeric count 1 -- Q written as 2', sheet.writes.some(function(w) { return w.row === 2 && w.col === 17 && w.value === 2; }));
+    })();
+
+    // ---- 3. Existing numeric-STRING count ("2"), due for its next reminder -- increments to 3 ----
+    (function numericStringCountIncrementsCorrectly() {
+      const sheet = fakeSheet([ fakeRow('String Count', 'str@example.com', '+12065550003', soon, '', longAgo, '2') ]);
+      getSheet = function() { return sheet; };
+      emailCallCount = 0;
+      checkRentalEligibility_();
+      check('numeric-string count "2" -- one reminder email sent', emailCallCount === 1);
+      check('numeric-string count "2" -- Q written as 3', sheet.writes.some(function(w) { return w.row === 2 && w.col === 17 && w.value === 3; }));
+    })();
+
+    // ---- 4. Count at MAX -- escalates instead of a normal reminder; reminders stop at the intended maximum ----
+    (function stopsAtMaximumAndEscalates() {
+      const sheet = fakeSheet([ fakeRow('At Max', 'atmax@example.com', '+12065550004', soon, '', longAgo, CONFIG.MAX_APPROVAL_REMINDERS) ]);
+      getSheet = function() { return sheet; };
+      emailCallCount = 0;
+      checkRentalEligibility_();
+      check('count at MAX -- exactly one escalation email sent', emailCallCount === 1);
+      check('count at MAX -- Q written as MAX+1 (permanent skip)',
+            sheet.writes.some(function(w) { return w.row === 2 && w.col === 17 && w.value === CONFIG.MAX_APPROVAL_REMINDERS + 1; }));
+      check('count at MAX -- P is NOT written on escalation', !sheet.writes.some(function(w) { return w.row === 2 && w.col === 16; }));
+    })();
+
+    // ---- 5. Count already past MAX -- permanently silenced: no email, no write ----
+    (function permanentlySilencedAfterMax() {
+      const sheet = fakeSheet([ fakeRow('Past Max', 'pastmax@example.com', '+12065550005', soon, '', longAgo, CONFIG.MAX_APPROVAL_REMINDERS + 1) ]);
+      getSheet = function() { return sheet; };
+      emailCallCount = 0;
+      checkRentalEligibility_();
+      check('count past MAX -- no email sent', emailCallCount === 0);
+      check('count past MAX -- no write at all', sheet.writes.length === 0);
+    })();
+
+    // ---- 6. Reminder not yet due (recently notified) -- no email, no write ----
+    (function reminderNotYetDue() {
+      const sheet = fakeSheet([ fakeRow('Not Due', 'notdue@example.com', '+12065550006', soon, '', recentlySent, 1) ]);
+      getSheet = function() { return sheet; };
+      emailCallCount = 0;
+      checkRentalEligibility_();
+      check('reminder not yet due -- no email sent', emailCallCount === 0);
+      check('reminder not yet due -- no write at all', sheet.writes.length === 0);
+    })();
+
+    // ---- 7. Failed delivery does NOT increment the count ----
+    (function failedDeliveryDoesNotIncrement() {
+      const sheet = fakeSheet([ fakeRow('Fails', 'fails@example.com', '+12065550007', soon, '', '', '') ]);
+      getSheet = function() { return sheet; };
+      shouldFailEmail = true;
+      checkRentalEligibility_();
+      shouldFailEmail = false;
+      check('failed send -- no write at all (count not incremented)', sheet.writes.length === 0);
+    })();
+
+    // ---- 8. Correct row targeting: two rows in one run, each affects only its own row ----
+    (function correctRowTargetingNoCrossContamination() {
+      const sheet = fakeSheet([
+        fakeRow('Row A Blank', 'rowa@example.com', '+12065550008', soon, '', '', ''),                                 // sheet row 2 -- initial send
+        fakeRow('Row B AtMax', 'rowb@example.com', '+12065550009', soon, '', longAgo, CONFIG.MAX_APPROVAL_REMINDERS), // sheet row 3 -- escalation
+      ]);
+      getSheet = function() { return sheet; };
+      emailCallCount = 0;
+      checkRentalEligibility_();
+
+      check('two-row run -- exactly two emails sent (one per row)', emailCallCount === 2);
+      check('row A (sheet row 2) written with value 1',
+            sheet.writes.some(function(w) { return w.row === 2 && w.col === 17 && w.value === 1; }));
+      check('row B (sheet row 3) written with value MAX+1',
+            sheet.writes.some(function(w) { return w.row === 3 && w.col === 17 && w.value === CONFIG.MAX_APPROVAL_REMINDERS + 1; }));
+      check('no write landed on any row other than 2 or 3',
+            sheet.writes.every(function(w) { return w.row === 2 || w.row === 3; }));
+    })();
+  } finally {
+    getSheet      = realGetSheet;
+    sendEmailHtml = realSendEmailHtml;
+  }
+
+  check('getSheet restored to the original function', getSheet === realGetSheet);
+  check('sendEmailHtml restored to the original function', sendEmailHtml === realSendEmailHtml);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' approval reminder count checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+}
+
+// ---------------------------------------------------------------------------
+// TEST 34: Suspicious inspection timing calculations [CONFIG]
+// Pure tests against getInspectionElapsedMinutes(), isSuspiciousInspectionTiming(),
+// and formatElapsedMinutes() (all in Helpers.js) -- no sheet reads, no
+// external calls. Covers elapsed-time calculation, missing/malformed
+// timestamps, the suspicious-timing threshold (outside / exactly at / inside),
+// post-trip earlier than pre-trip, and elapsed-time formatting.
+// ---------------------------------------------------------------------------
+function testSuspiciousInspectionTimingCalculations() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) {
+      Logger.log('OK: ' + label);
+      passed++;
+    } else {
+      Logger.log('FAIL: ' + label);
+      failed++;
+    }
+  }
+
+  const THRESHOLD = 15; // matches the documented default for SUSPICIOUS_INSPECTION_WINDOW_MINUTES
+
+  // ---- getInspectionElapsedMinutes() ----
+  (function elapsedMinutesCalculation() {
+    const pre  = new Date('2026-08-02T09:00:00');
+    const post = new Date('2026-08-02T09:10:00');
+    check('10 minutes apart -- elapsed = 10', getInspectionElapsedMinutes(pre, post) === 10);
+
+    const postEarlier = new Date('2026-08-02T08:55:00');
+    check('post-trip earlier than pre-trip -- elapsed is negative', getInspectionElapsedMinutes(pre, postEarlier) === -5);
+
+    check('missing pre-trip timestamp -- null', getInspectionElapsedMinutes(null, post) === null);
+    check('missing post-trip timestamp -- null', getInspectionElapsedMinutes(pre, null) === null);
+    check('malformed pre-trip timestamp -- null', getInspectionElapsedMinutes(new Date('not a date'), post) === null);
+    check('malformed post-trip timestamp -- null', getInspectionElapsedMinutes(pre, new Date('not a date')) === null);
+  })();
+
+  // ---- isSuspiciousInspectionTiming() ----
+  // Boundary rule: elapsed time LESS THAN OR EQUAL TO the threshold is
+  // suspicious (inclusive) -- a submission exactly at the configured
+  // threshold is exactly as close together as the threshold was meant to
+  // catch, so it must not be the one case that slips through.
+  (function suspiciousThresholdChecks() {
+    check('well outside threshold (60 min) -- not suspicious', isSuspiciousInspectionTiming(60, THRESHOLD) === false);
+    check('just outside threshold (16 min) -- not suspicious', isSuspiciousInspectionTiming(16, THRESHOLD) === false);
+    check('exactly at threshold (15 min) -- suspicious (inclusive boundary)', isSuspiciousInspectionTiming(15, THRESHOLD) === true);
+    check('just inside threshold (14 min) -- suspicious', isSuspiciousInspectionTiming(14, THRESHOLD) === true);
+    check('well inside threshold (1 min) -- suspicious', isSuspiciousInspectionTiming(1, THRESHOLD) === true);
+    check('zero minutes apart -- suspicious', isSuspiciousInspectionTiming(0, THRESHOLD) === true);
+    check('post-trip earlier than pre-trip (negative) -- suspicious', isSuspiciousInspectionTiming(-5, THRESHOLD) === true);
+    check('null elapsed (nothing to compare yet) -- not suspicious', isSuspiciousInspectionTiming(null, THRESHOLD) === false);
+  })();
+
+  // ---- formatElapsedMinutes() ----
+  (function elapsedFormatting() {
+    check('0 minutes formats as "0 minutes"', formatElapsedMinutes(0) === '0 minutes');
+    check('1 minute formats singular', formatElapsedMinutes(1) === '1 minute');
+    check('45 minutes formats as "45 minutes"', formatElapsedMinutes(45) === '45 minutes');
+    check('60 minutes formats as "1 hour"', formatElapsedMinutes(60) === '1 hour');
+    check('65 minutes formats as "1 hour 5 minutes"', formatElapsedMinutes(65) === '1 hour 5 minutes');
+    check('120 minutes formats as "2 hours"', formatElapsedMinutes(120) === '2 hours');
+    check('negative value includes an explanatory note',
+          formatElapsedMinutes(-10).indexOf('post-trip was recorded before pre-trip') !== -1);
+    check('negative value still shows a positive-looking duration',
+          formatElapsedMinutes(-10).indexOf('10 minute') === 0);
+  })();
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' suspicious inspection timing calculation checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+}
+
+// ---------------------------------------------------------------------------
+// TEST 35: Suspicious inspection timing warning send/flag behavior
+// (sendSuspiciousInspectionTimingWarning_) [CONFIG]
+// Verifies src/Reminders.js's sendSuspiciousInspectionTimingWarning_() only
+// writes column Y (Suspicious Timing Warning Sent) after a successful
+// manager email, matching the same write-after-success pattern used
+// throughout Reminders.js -- this is what makes the warning durably
+// send-once-per-booking. Uses a fake sheet (no live Sheets API calls) and
+// temporarily stubs the global sendEmailHtml function so no real SendGrid
+// call is made (restored in a finally block even if an assertion fails).
+// ---------------------------------------------------------------------------
+function testSendSuspiciousInspectionTimingWarningFlagBehavior() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) {
+      Logger.log('OK: ' + label);
+      passed++;
+    } else {
+      Logger.log('FAIL: ' + label);
+      failed++;
+    }
+  }
+
+  function fakeSheet() {
+    const writes = [];
+    return {
+      writes: writes,
+      getRange: function(row, col) {
+        return {
+          setValue: function(value) { writes.push({ row: row, col: col, value: value }); }
+        };
+      }
+    };
+  }
+
+  const fakeLocCfg = { email: 'sender@example.com', phone: '+12065550100' };
+  const pre  = new Date('2026-08-02T09:00:00');
+  const post = new Date('2026-08-02T09:10:00');
+
+  const realSendEmailHtml = sendEmailHtml;
+
+  try {
+    // ---- Successful send writes column Y = Yes (duplicate-prevention flag) ----
+    (function successWritesFlag() {
+      sendEmailHtml = function() { /* succeeds */ };
+      const sheet = fakeSheet();
+      const result = sendSuspiciousInspectionTimingWarning_(
+        sheet, 4, 'EVT123', 'Test Customer', 'Cargo Van', 'Bainbridge',
+        'August 1, 2026 at 9:00 AM', 'August 1, 2026 at 1:00 PM',
+        pre, post, 10, fakeLocCfg
+      );
+      check('successful send returns true', result === true);
+      check('column Y (row 5, col 25) written exactly once', sheet.writes.length === 1 &&
+            sheet.writes[0].row === 5 && sheet.writes[0].col === 25 && sheet.writes[0].value === 'Yes');
+    })();
+
+    // ---- Failed send does not write column Y -- retried on the next run ----
+    (function failureDoesNotWriteFlag() {
+      sendEmailHtml = function() { throw new Error('simulated SendGrid outage'); };
+      const sheet = fakeSheet();
+      const result = sendSuspiciousInspectionTimingWarning_(
+        sheet, 4, 'EVT124', 'Test Customer', 'Cargo Van', 'Bainbridge',
+        'August 1, 2026 at 9:00 AM', 'August 1, 2026 at 1:00 PM',
+        pre, post, 10, fakeLocCfg
+      );
+      check('failed send returns false', result === false);
+      check('failed send writes nothing (so the next run retries)', sheet.writes.length === 0);
+    })();
+
+    // ---- No manager email configured -- no send attempted, no write ----
+    (function noManagerEmailConfigured() {
+      sendEmailHtml = function() { throw new Error('should not be called -- no manager email configured'); };
+      const realManagerEmail = CONFIG.MANAGER_EMAIL;
+      CONFIG.MANAGER_EMAIL = '';
+      const sheet = fakeSheet();
+      const result = sendSuspiciousInspectionTimingWarning_(
+        sheet, 4, 'EVT125', 'Test Customer', 'Cargo Van', 'Bainbridge',
+        'August 1, 2026 at 9:00 AM', 'August 1, 2026 at 1:00 PM',
+        pre, post, 10, fakeLocCfg
+      );
+      CONFIG.MANAGER_EMAIL = realManagerEmail;
+      check('no MANAGER_EMAIL configured -- returns false', result === false);
+      check('no MANAGER_EMAIL configured -- writes nothing', sheet.writes.length === 0);
+      check('CONFIG.MANAGER_EMAIL restored', CONFIG.MANAGER_EMAIL === realManagerEmail);
+    })();
+  } finally {
+    sendEmailHtml = realSendEmailHtml;
+  }
+
+  check('sendEmailHtml restored to the original function', sendEmailHtml === realSendEmailHtml);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' suspicious inspection timing warning send/flag checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+}
+
+// ---------------------------------------------------------------------------
 // TEST 27: Trigger registration functions are defined and safe to reference [CONFIG]
 // This is a narrow, deliberately static check -- it does NOT invoke
 // ScriptApp, does NOT create a real trigger, and does NOT run setupTriggers()
@@ -2144,6 +2608,7 @@ function validateConfig() {
     'POST_RENTAL_HOURS',
     'HOURS_BETWEEN_APPROVAL_REMINDERS',
     'MAX_APPROVAL_REMINDERS',
+    'SUSPICIOUS_INSPECTION_WINDOW_MINUTES',
     'DEPOSIT_AMOUNT',
     'DEPOSIT_AMOUNT_CARGO_VAN',
     'DEPOSIT_AMOUNT_MOVING_TRUCK',
@@ -2513,14 +2978,19 @@ function testLocationSenderConfig() {
 // live sheet row (see testMarkDepositPaidRowLookup, testMarkLeaseSignedRowLookup).
 // testIntakeFormSubmitRowMatching, testInspectionFormSubmitRowMatching, the
 // two extraction tests, testFormSubmitDispatcher, testPreTripReminderEligibility,
-// testSendPreTripReminderFlagBehavior, testInspectionCompletionFormatting,
-// testPostTripReminderEligibility, and testSendPostTripReminderFlagBehavior are
-// included because they are pure tests against synthetic data (the send/flag
-// tests temporarily stub global functions and always restore them, even on
-// failure), with no sheet or form dependency.
+// testSendPreTripReminderFlagBehavior, testPreTripEmailExcludesManagerFromRecipients,
+// testInspectionCompletionFormatting, testPostTripReminderEligibility,
+// testSendPostTripReminderFlagBehavior, testApprovalReminderCountBehavior,
+// testSuspiciousInspectionTimingCalculations, and
+// testSendSuspiciousInspectionTimingWarningFlagBehavior are included
+// because they are pure tests against synthetic data (the send/flag tests
+// temporarily stub global functions -- including, for
+// testApprovalReminderCountBehavior, getSheet itself -- and always restore
+// them, even on failure), with no live sheet or form dependency and no real
+// email/SMS ever sent.
 // ---------------------------------------------------------------------------
 function runAllSandboxConfigurationTests() {
-  Logger.log('===== Running Sandbox Configuration Tests (23 tests) =====');
+  Logger.log('===== Running Sandbox Configuration Tests (27 tests) =====');
 
   const tests = [
     validateConfig,
@@ -2542,9 +3012,13 @@ function runAllSandboxConfigurationTests() {
     testFormSubmitDispatcher,
     testPreTripReminderEligibility,
     testSendPreTripReminderFlagBehavior,
+    testPreTripEmailExcludesManagerFromRecipients,
     testInspectionCompletionFormatting,
     testPostTripReminderEligibility,
     testSendPostTripReminderFlagBehavior,
+    testApprovalReminderCountBehavior,
+    testSuspiciousInspectionTimingCalculations,
+    testSendSuspiciousInspectionTimingWarningFlagBehavior,
     testTriggerRegistrationIsWellFormed,
   ];
 
@@ -2591,4 +3065,204 @@ function testSendSingleSms() {
   } catch(e) {
     Logger.log('Sandbox SMS test FAILED: ' + e);
   }
+}
+
+// ---------------------------------------------------------------------------
+// MANUAL STANDALONE TEST: Immediate pre-trip inspection send [LIVE]
+// ------------------------------------------------------------
+// Sends the REAL production pre-trip inspection email and SMS immediately,
+// without waiting for isPreTripReminderEligible()'s window, so the full
+// message-building and delivery path can be exercised end-to-end at any
+// time -- e.g. after changing the template, or to confirm SendGrid/Twilio
+// are working. Reuses buildPreTripReminderContent_() (Reminders.js), so the
+// exact production template is sent -- never a separate copy.
+//
+// SAFE BY DEFAULT: looks up the same "Test Customer" row used by
+// testBuildIntakeUrl() for realistic content (name, vehicle, location,
+// date), but sends to PROPS.SANDBOX_TEST_EMAIL / PROPS.SANDBOX_TEST_PHONE
+// instead of that row's real contact info, and does NOT call
+// sendPreTripReminder_() -- so column K is never written and the manager's
+// 24-hour summary is never sent. This is a pure system test, not a real
+// operational send. Contrast with sendPreTripInspectionNowForRow()
+// (Reminders.js), which IS a real send for an authorized resend or an
+// early-return scenario, and does update the normal sent flags.
+//
+// Requires SANDBOX_TEST_EMAIL and SANDBOX_TEST_PHONE in Script Properties,
+// and a Bookings row with a name containing "Test Customer". Validates the
+// test booking has an email, a phone, a recognized location, and that a
+// form link can be built before sending anything.
+//
+// Do NOT add to runAllSandboxConfigurationTests() -- this sends real messages.
+// ---------------------------------------------------------------------------
+function testSendPreTripInspection() {
+  Logger.log('Starting immediate pre-trip inspection test send...');
+
+  const testEmail = PROPS.SANDBOX_TEST_EMAIL;
+  const testPhone = PROPS.SANDBOX_TEST_PHONE;
+  if (!testEmail || !testPhone) {
+    throw new Error('testSendPreTripInspection: SANDBOX_TEST_EMAIL and SANDBOX_TEST_PHONE must both ' +
+      'be set in Script Properties before running this test.');
+  }
+
+  const sheet = getSheet();
+  const data  = sheet.getDataRange().getValues();
+
+  let row = null;
+  let rowNumber = null;
+  for (let i = 1; i < data.length; i++) {
+    if ((data[i][1] || '').toString().toLowerCase().includes('test customer')) {
+      row = data[i];
+      rowNumber = i + 1;
+      break;
+    }
+  }
+
+  if (!row) {
+    Logger.log('testSendPreTripInspection: no row found with name containing "Test Customer". Add one to the sheet first.');
+    return;
+  }
+
+  const name        = row[1];
+  const email       = row[2];
+  const phone       = (row[3] || '').toString().replace(/^'/, '');
+  const rentalDate  = new Date(row[4]);
+  const dateStr     = formatDateTime(rentalDate);
+  const vehicleType = row[17] || '';
+  const location    = row[18] || '';
+  const leaseSigned = row[13];
+
+  // Validate the test booking has what it needs before building or sending anything.
+  const problems = [];
+  if (!email || email === 'No Email') problems.push('email');
+  if (!phone || phone === 'No Phone') problems.push('phone number');
+  let locCfg = null;
+  try { locCfg = getLocationConfig(location); }
+  catch(e) { problems.push('a recognized location'); }
+  if (!CONFIG.INSPECT_FORM_BASE) problems.push('INSPECT_FORM_BASE (form link cannot be built)');
+
+  if (problems.length) {
+    Logger.log('testSendPreTripInspection: test booking row ' + rowNumber + ' is missing: ' +
+               problems.join(', ') + '. Aborting -- nothing sent.');
+    return;
+  }
+
+  const preUrl  = buildInspectUrl(name, email, rentalDate, 'pre');
+  const content = buildPreTripReminderContent_(name, vehicleType, location, dateStr, preUrl, leaseSigned);
+
+  Logger.log('testSendPreTripInspection: using booking row ' + rowNumber + ' (' + name + ', ' +
+             vehicleType + ' at ' + location + ') for content; sending to TEST recipient ' +
+             testEmail + ' / ' + testPhone + ' (not the booking\'s real contact info).');
+
+  try {
+    sendSms(testPhone, content.sms, locCfg.phone);
+    Logger.log('testSendPreTripInspection: SMS sent to ' + testPhone);
+  } catch(e) {
+    Logger.log('testSendPreTripInspection: SMS FAILED: ' + e);
+  }
+
+  try {
+    // suppressManagerBcc = true, matching sendPreTripReminder_()'s real
+    // behavior: the manager must not receive the blank pre-trip form, not
+    // even as a BCC copy, so this test never sends her one either.
+    sendEmailHtml(testEmail, content.subject, content.html, locCfg.email, locCfg.email, true);
+    Logger.log('testSendPreTripInspection: email sent to ' + testEmail +
+               ' (manager BCC suppressed, matching production pre-trip email behavior).');
+  } catch(e) {
+    Logger.log('testSendPreTripInspection: email FAILED: ' + e);
+  }
+
+  Logger.log('testSendPreTripInspection: complete. This was a pure system test -- ' +
+             'column K was not written and no manager summary was sent.');
+}
+
+// ---------------------------------------------------------------------------
+// MANUAL STANDALONE TEST: Immediate post-trip inspection send [LIVE]
+// ------------------------------------------------------------
+// Same pattern as testSendPreTripInspection() above, for the post-trip
+// inspection message. Reuses buildPostTripReminderContent_() (Reminders.js)
+// for the exact production template, sends to the safe test recipient, and
+// does NOT call sendPostTripReminder_() -- column L is never written and no
+// manager notice is sent. Contrast with sendPostTripInspectionNowForRow()
+// (Reminders.js), which IS a real send -- e.g. for a vehicle returned
+// unusually early -- and does update the normal sent flags.
+//
+// Requires SANDBOX_TEST_EMAIL and SANDBOX_TEST_PHONE in Script Properties,
+// and a Bookings row with a name containing "Test Customer".
+//
+// Do NOT add to runAllSandboxConfigurationTests() -- this sends real messages.
+// ---------------------------------------------------------------------------
+function testSendPostTripInspection() {
+  Logger.log('Starting immediate post-trip inspection test send...');
+
+  const testEmail = PROPS.SANDBOX_TEST_EMAIL;
+  const testPhone = PROPS.SANDBOX_TEST_PHONE;
+  if (!testEmail || !testPhone) {
+    throw new Error('testSendPostTripInspection: SANDBOX_TEST_EMAIL and SANDBOX_TEST_PHONE must both ' +
+      'be set in Script Properties before running this test.');
+  }
+
+  const sheet = getSheet();
+  const data  = sheet.getDataRange().getValues();
+
+  let row = null;
+  let rowNumber = null;
+  for (let i = 1; i < data.length; i++) {
+    if ((data[i][1] || '').toString().toLowerCase().includes('test customer')) {
+      row = data[i];
+      rowNumber = i + 1;
+      break;
+    }
+  }
+
+  if (!row) {
+    Logger.log('testSendPostTripInspection: no row found with name containing "Test Customer". Add one to the sheet first.');
+    return;
+  }
+
+  const name        = row[1];
+  const email       = row[2];
+  const phone       = (row[3] || '').toString().replace(/^'/, '');
+  const rentalDate  = new Date(row[4]);
+  const dateStr     = formatDateTime(rentalDate);
+  const vehicleType = row[17] || '';
+  const location    = row[18] || '';
+
+  const problems = [];
+  if (!email || email === 'No Email') problems.push('email');
+  if (!phone || phone === 'No Phone') problems.push('phone number');
+  let locCfg = null;
+  try { locCfg = getLocationConfig(location); }
+  catch(e) { problems.push('a recognized location'); }
+  if (!CONFIG.INSPECT_FORM_BASE) problems.push('INSPECT_FORM_BASE (form link cannot be built)');
+
+  if (problems.length) {
+    Logger.log('testSendPostTripInspection: test booking row ' + rowNumber + ' is missing: ' +
+               problems.join(', ') + '. Aborting -- nothing sent.');
+    return;
+  }
+
+  const postUrl = buildInspectUrl(name, email, rentalDate, 'post');
+  const content = buildPostTripReminderContent_(name, vehicleType, location, dateStr, postUrl);
+
+  Logger.log('testSendPostTripInspection: using booking row ' + rowNumber + ' (' + name + ', ' +
+             vehicleType + ' at ' + location + ') for content; sending to TEST recipient ' +
+             testEmail + ' / ' + testPhone + ' (not the booking\'s real contact info).');
+
+  try {
+    sendSms(testPhone, content.sms, locCfg.phone);
+    Logger.log('testSendPostTripInspection: SMS sent to ' + testPhone);
+  } catch(e) {
+    Logger.log('testSendPostTripInspection: SMS FAILED: ' + e);
+  }
+
+  try {
+    sendEmailHtml(testEmail, content.subject, content.html, locCfg.email, locCfg.email);
+    Logger.log('testSendPostTripInspection: email sent to ' + testEmail +
+               ' (manager BCC applies per normal sendEmailHtml() behavior).');
+  } catch(e) {
+    Logger.log('testSendPostTripInspection: email FAILED: ' + e);
+  }
+
+  Logger.log('testSendPostTripInspection: complete. This was a pure system test -- ' +
+             'column L was not written and no manager notice was sent.');
 }

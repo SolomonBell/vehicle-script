@@ -26,6 +26,7 @@ the described result in the sandbox.**
 | DocuSeal lease delivery | Test 4 |
 | Lease signing | Test 5 |
 | Manager approval (request, decision, reminder stop) | Test 3 |
+| Approval Reminder Count (column Q) audited — no bug found, regression test added | Test 3 |
 | Customer approval gating and notification | Test 6 |
 | Intake completion tracking (column V) | Test 2 |
 | Trigger installation (`setupTriggers()` creates all five triggers) | Prerequisites |
@@ -41,18 +42,21 @@ confirmed by an actual sandbox run reaching these conditions:
 | Post-trip reminder firing one hour after pre-trip completion | Test 9 |
 | Manager post-trip greeting/notice (including the location-specific greeting) | Test 9 |
 | Post-trip inspection completion update with actual submission timestamp (column X) | Test 10 |
+| Suspicious inspection timing warning firing and stopping at one send per booking (column Y) | Test 13 |
+| Immediate inspection send tools (pure test and authorized real send) | Test 14 |
 
 Do not report any item in the second table as "passed" until it has actually been exercised —
 either by waiting for a real booking to reach the 24-hour window and, separately, a real hour to
 elapse after a real pre-trip inspection completion, or by manually time-shifting a test row's Start
-Time (Test 7) or column W completion timestamp (Test 9) as described in those tests.
+Time (Test 7), column W completion timestamp (Test 9), or both inspection timestamps close
+together (Test 13), as described in those tests.
 
 ---
 
 ## Prerequisites
 
 - [ ] All Script Properties set (see [`docs/setup-notes.md`](setup-notes.md))
-- [ ] Bookings sheet exists with correct headers (A–X)
+- [ ] Bookings sheet exists with correct headers (A–Y)
 - [ ] Column O has dropdown validation (`Approved - Free` / `Approved - Paid` / `Denied`)
 - [ ] `setupTriggers()` has been run and created all five triggers: `syncCalendarBookings`,
       `checkRentalEligibility`, `sendLeaseToNewBookings`, `processReminders`, `onFormSubmit`
@@ -84,7 +88,7 @@ Time (Test 7) or column W completion timestamp (Test 9) as described in those te
 
 **Check in sheet:** Columns A–I, R–S populated; G, H, J, K, L, N, O, P, Q, T, U, V, W, X all blank.
 
-**Status:** ✅ Validated.
+**Status:** PASS — Validated.
 
 ---
 
@@ -106,7 +110,7 @@ Time (Test 7) or column W completion timestamp (Test 9) as described in those te
 with different rental dates, submit intake for one, and confirm only the intended row's column V
 updates (matched by `email+date` in the log) — not the other row.
 
-**Status:** ✅ Validated.
+**Status:** PASS — Validated.
 
 ---
 
@@ -136,7 +140,13 @@ updates (matched by `email+date` in the log) — not the other row.
 - [ ] Confirm the customer does **not** receive an approval notification yet if the lease has not
       been signed — see Test 6
 
-**Status:** ✅ Validated.
+This live checklist is complemented by `testApprovalReminderCountBehavior()` in `SandboxTests.js`,
+which exercises the full increment/escalation/stop-at-maximum state machine (including blank,
+numeric, and numeric-string Q values, and that one booking's row can't affect another's) against
+synthetic data with no live sheet writes — added as part of an audit that found no bug in this
+mechanism; see README §12 Approval State Machine.
+
+**Status:** PASS — Validated.
 
 ---
 
@@ -159,7 +169,7 @@ updates (matched by `email+date` in the log) — not the other row.
 - [ ] If column V is not yet `Yes`, no lease is sent yet — confirm it sends once Test 2 is
       completed afterward
 
-**Status:** ✅ Validated.
+**Status:** PASS — Validated.
 
 ---
 
@@ -173,7 +183,7 @@ updates (matched by `email+date` in the log) — not the other row.
 **Expected results:**
 - [ ] Column N (Lease Signed) = `Yes` on the matching row
 
-**Status:** ✅ Validated.
+**Status:** PASS — Validated.
 
 ---
 
@@ -201,7 +211,7 @@ Signed) is `Yes` — regardless of which one becomes true first.
 - [ ] The approval email is never sent before both conditions are true
 - [ ] The approval email is sent exactly once (column U prevents a resend on later runs)
 
-**Status:** ✅ Validated (both orderings observed correctly gated in sandbox).
+**Status:** PASS — Validated (both orderings observed correctly gated in sandbox).
 
 ---
 
@@ -233,7 +243,7 @@ Signed) is `Yes` — regardless of which one becomes true first.
       before the window closes
 - [ ] Set G back to `Yes` and re-run — confirm the reminder now sends normally
 
-**Status:** ⏳ Not yet validated. Implemented and reviewed in code; requires either waiting for a
+**Status:** PENDING — Not yet validated. Implemented and reviewed in code; requires either waiting for a
 real booking to reach the 24-hour window or the manual time-shift above.
 
 ---
@@ -254,7 +264,7 @@ real booking to reach the 24-hour window or the manual time-shift above.
 - [ ] Resubmitting the same pre-trip inspection form again does **not** change column W's recorded
       value (idempotent — see `isInspectionCompletionValueSet_()` in `src/Forms.js`)
 
-**Status:** ⏳ Not yet validated. Depends on Test 7 having produced a real pre-trip link to submit.
+**Status:** PENDING — Not yet validated. Depends on Test 7 having produced a real pre-trip link to submit.
 
 ---
 
@@ -290,7 +300,7 @@ Note: this reminder is timed entirely from column W's recorded completion timest
 the booking's End Time and not from `POST_RENTAL_HOURS` (that Script Property is no longer read by
 any code path). It is also not gated on approval or deposit status.
 
-**Status:** ⏳ Not yet validated. Implemented and reviewed in code; requires either waiting a real
+**Status:** PENDING — Not yet validated. Implemented and reviewed in code; requires either waiting a real
 hour after a real pre-trip completion or the manual time-shift above.
 
 ---
@@ -310,7 +320,7 @@ hour after a real pre-trip completion or the manual time-shift above.
 - [ ] Resubmitting the same post-trip inspection form again does **not** change column X's
       recorded value (idempotent)
 
-**Status:** ⏳ Not yet validated. Depends on Test 9 having produced a real post-trip link to submit.
+**Status:** PENDING — Not yet validated. Depends on Test 9 having produced a real post-trip link to submit.
 
 ---
 
@@ -326,7 +336,7 @@ hour after a real pre-trip completion or the manual time-shift above.
       (`DOCUSEAL_TEMPLATE_TWO_DRIVERS`)
 - [ ] Both Driver #1 and Driver #2 receive DocuSeal signing requests
 
-**Status:** ✅ Validated.
+**Status:** PASS — Validated.
 
 ---
 
@@ -341,7 +351,83 @@ hour after a real pre-trip completion or the manual time-shift above.
 - [ ] Admin receives a "Stripe payment -- no booking match" alert email
 - [ ] `{"received":true}` returned (no crash, no retry storm)
 
-**Status:** ✅ Validated.
+**Status:** PASS — Validated.
+
+---
+
+## Test 13: Suspicious inspection timing warning
+
+**What to do:**
+1. Complete a booking's pre-trip inspection (Test 8), then complete the post-trip inspection
+   (Test 10) at most `SUSPICIOUS_INSPECTION_WINDOW_MINUTES` (default 15) after the pre-trip
+   completion time shown in column W — either by acting quickly, or by editing column W to a
+   recent-enough timestamp before submitting the post-trip form
+2. Confirm column Y (Suspicious Timing Warning Sent) is blank beforehand
+3. Wait for the `processReminders` trigger (~30 min) or run it manually
+
+**Expected results:**
+- [ ] Column Y = `Yes`
+- [ ] Manager receives a "Review recommended: inspection timing for {name} ({vehicle type})" email
+      opening with `Hi {Location} Manager,`
+- [ ] The email includes customer name, booking ID (column A), vehicle, location, scheduled
+      start/end, both inspection completion times, and the elapsed time between them
+- [ ] The email is neutral in tone — it does not accuse the customer of anything and does not say
+      the timing means something is wrong
+- [ ] The customer does **not** receive this email
+- [ ] Nothing else about the booking's state changes (no other column written, no other message
+      sent) as a result of this check
+
+**Edge case — exactly at the threshold:**
+- [ ] Repeat with the two inspections exactly `SUSPICIOUS_INSPECTION_WINDOW_MINUTES` apart (e.g.
+      column W set to exactly 15 minutes before the post-trip submission) — confirm the warning
+      **does** fire; the boundary is inclusive
+
+**Edge case — outside the threshold:**
+- [ ] Repeat with the two inspections more than `SUSPICIOUS_INSPECTION_WINDOW_MINUTES` apart —
+      confirm no warning is sent and column Y stays blank
+
+**Edge case — duplicate prevention:**
+- [ ] Run `processReminders` again after Y = `Yes` — confirm no second warning email is sent
+
+**Status:** PENDING — Not yet validated. Depends on Tests 8 and 10 having produced two real,
+closely-timed inspection completions.
+
+---
+
+## Test 14: Immediate inspection sends (manual tools)
+
+This exercises the manual "send now" capability rather than the normal automated schedule — see
+[docs/setup-notes.md "Manual immediate inspection sends"](setup-notes.md#manual-immediate-inspection-sends).
+
+**Pure system test (safe, does not touch a real customer or the automated sent flags):**
+1. Set `SANDBOX_TEST_EMAIL` and `SANDBOX_TEST_PHONE` in Script Properties to your own verified
+   inbox/phone
+2. Ensure a Bookings row exists with a name containing "Test Customer"
+3. Run `testSendPreTripInspection()` from the Apps Script editor
+
+**Expected results:**
+- [ ] The configured test email and phone receive the real pre-trip inspection content
+- [ ] Execution log names the booking row used for content and confirms the test recipient
+- [ ] Column K on the "Test Customer" row is **not** written
+- [ ] The manager does **not** receive a 24-hour summary as a result of this run
+
+4. Repeat with `testSendPostTripInspection()`, confirming column L is **not** written and no
+   manager post-trip notice is sent
+
+**Authorized real send (production helper — only run against a booking you intend to actually
+message):**
+5. Pick a real (or deliberately test) booking row number and run
+   `sendPreTripInspectionNowForRow(rowNumber)` or `sendPostTripInspectionNowForRow(rowNumber)`
+   from the Apps Script editor
+
+**Expected results:**
+- [ ] The booking's real customer contact info receives the message
+- [ ] Column K or L is written on success, exactly as the automated path would
+- [ ] The manager receives the corresponding summary/notice
+- [ ] Running it again on an already-sent row still sends (these functions do not check K/L first
+      — they are for a deliberate, authorized immediate send, not idempotent background processing)
+
+**Status:** PENDING — Not yet validated end-to-end; implemented and reviewed in code.
 
 ---
 
@@ -358,6 +444,11 @@ hour after a real pre-trip completion or the manual time-shift above.
 - [ ] P and Q column indices are still 15 and 16 (0-based) / 16 and 17 (1-based range)
 - [ ] Columns V, W, X are only ever written by `processIntakeFormSubmission_` /
       `processInspectionFormSubmission_`, never guessed when ambiguous
+- [ ] Column Y is only ever written by `sendSuspiciousInspectionTimingWarning_()`, only after a
+      successful manager email, and only once per booking
 - [ ] The customer approval email still requires both column O (approved) and column N (Lease
       Signed = `Yes`) before sending — re-run Test 6 if `Approval.js` or `Helpers.js` changed
+- [ ] `sendPreTripInspectionNowForRow()` / `sendPostTripInspectionNowForRow()` (`Reminders.js`) and
+      `testSendPreTripInspection()` / `testSendPostTripInspection()` (`SandboxTests.js`) still
+      exist, and the latter two are still absent from `runAllSandboxConfigurationTests()`
 - [ ] Run `runAllSandboxConfigurationTests()` from `SandboxTests.js` and confirm all tests pass

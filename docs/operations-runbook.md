@@ -22,7 +22,7 @@ whichever environment you are operating.
 | Question | Where to look |
 |---|---|
 | "Did trigger X run, and did it error?" | Apps Script editor → **Executions** (left sidebar) |
-| "What is the current state of a specific booking?" | The Bookings sheet, that row, columns A–X |
+| "What is the current state of a specific booking?" | The Bookings sheet, that row, columns A–Y |
 | "Is a Script Property missing or wrong?" | Apps Script editor → **Project Settings → Script Properties** |
 | "Did a webhook arrive?" | Executions log, filter for `doPost` |
 | "Did an admin alert fire?" | `ADMIN_EMAIL` inbox — subject prefixed `[Rental Script]` |
@@ -30,7 +30,7 @@ whichever environment you are operating.
 
 ---
 
-## 2. Reading a booking row (columns A–X)
+## 2. Reading a booking row (columns A–Y)
 
 Given a row, this is the order the columns are meant to fill in, and what each one means:
 
@@ -49,6 +49,7 @@ Given a row, this is the order the columns are meant to fill in, and what each o
 | W | Customer submitted the pre-trip inspection form — value is `Yes <date/time>`, and its timestamp is what times the post-trip reminder below | `processInspectionFormSubmission_` (via `onFormSubmit`) |
 | L | Post-trip reminder sent, about an hour after W's timestamp | `processReminders` |
 | X | Customer submitted the post-trip inspection form — value is `Yes <date/time>` | `processInspectionFormSubmission_` (via `onFormSubmit`) |
+| Y | Manager warned that W and X were submitted unusually close together — informational only, sent at most once | `processReminders` (via `sendSuspiciousInspectionTimingWarning_`) |
 
 If a column that "should" be filled in is blank, work backwards through this table to find the
 first blank one — that is almost always the actual blocker.
@@ -137,6 +138,23 @@ If you suspect this happened, check both rows' state manually and correct by han
    (Apps Script editor → Triggers) and that the inspection form's response tab is named exactly
    `Rental Vehicle Condition Inspection Form`.
 
+### "The inspection timing review notice didn't fire (or fired unexpectedly)"
+
+See [README §20 "The suspicious inspection timing warning did not fire"](../README.md#20-troubleshooting)
+for the full checklist. In short: both W and X need a parseable timestamp, column Y needs to be
+blank, and the gap between them needs to be `SUSPICIOUS_INSPECTION_WINDOW_MINUTES` or less
+(inclusive — exactly at the threshold still counts) — including when X's timestamp is *earlier*
+than W's, which also counts as suspicious.
+
+### "Approval Reminder Count (column Q) looks wrong"
+
+This column was audited end-to-end and no bug was found — see [README §12 Approval State
+Machine](../README.md#12-approval-state-machine) for the full trace and
+`testApprovalReminderCountBehavior()` (`SandboxTests.js`) for the regression coverage. If Q still
+looks wrong for a specific row, capture the row's full column state (especially O, P, Q) and the
+Executions log for the relevant `checkRentalEligibility` runs before assuming it's a new defect —
+manual edits to Q are the most common cause (see §4 below for the one supported manual override).
+
 ---
 
 ## 4. Manual recovery actions (things a human may need to do by hand)
@@ -150,6 +168,7 @@ These are legitimate manual interventions — none of them require a code change
 | A booking needs to be excluded from all future automation | Set column O = `Denied` |
 | A row's Location or Vehicle Type is wrong | Correct columns R/S directly — downstream lookups (deposit amount, Stripe Price ID, sender identity) re-resolve from the corrected value on the next run |
 | Ambiguous intake/inspection submission logged but not applied | Manually set the correct completion column (V/W/X) for the correct row after confirming which booking it belongs to |
+| An inspection message needs to be resent, or the post-trip inspection needs to go out immediately (e.g. early return) | Run `sendPreTripInspectionNowForRow(rowNumber)` or `sendPostTripInspectionNowForRow(rowNumber)` (`src/Reminders.js`) manually from the Apps Script editor, using the booking's 1-based sheet row number. This is a real send: it writes K/L and notifies the manager exactly like the automated path, so only do this for a specific, authorized reason. |
 
 **Never do these manually:**
 - Never write to column O programmatically or via a script — it is manager-only by design.

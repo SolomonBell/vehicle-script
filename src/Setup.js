@@ -119,7 +119,15 @@ function setupSheetSchema() {
   const xHeaderCell = sheet.getRange('X1');
   if (!xHeaderCell.getValue()) xHeaderCell.setValue('Post-Inspection Form Completed');
 
+  // Column Y header: Suspicious Timing Warning Sent — a simple Yes/blank
+  // flag set by sendSuspiciousInspectionTimingWarning_() in Reminders.js,
+  // once per booking, after the manager has been warned that the pre-trip
+  // and post-trip inspection forms were submitted unusually close together.
+  const yHeaderCell = sheet.getRange('Y1');
+  if (!yHeaderCell.getValue()) yHeaderCell.setValue('Suspicious Timing Warning Sent');
+
   Logger.log('Sheet schema applied: Column R = Vehicle Type, Column S = Location (dropdowns), ' +
              'Column U = Customer Approval Notified, Column V = Intake Form Completed, ' +
-             'Column W = Pre-Inspection Form Completed, Column X = Post-Inspection Form Completed.');
+             'Column W = Pre-Inspection Form Completed, Column X = Post-Inspection Form Completed, ' +
+             'Column Y = Suspicious Timing Warning Sent.');
 }
