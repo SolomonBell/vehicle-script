@@ -1848,23 +1848,27 @@ function testSendPreTripReminderFlagBehavior() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 36: Pre-trip inspection email excludes the manager from recipients
-// (buildEmailPersonalization_, sendPreTripReminder_) [CONFIG]
-// The manager must not receive the blank pre-trip inspection email in any
-// form -- not To, not CC (never used anywhere in this codebase), and not
-// BCC -- before the customer has actually submitted it. Two layers are
-// verified:
+// TEST 36: Pre-trip and post-trip inspection emails exclude the manager
+// from recipients (buildEmailPersonalization_, sendPreTripReminder_,
+// sendPostTripReminder_) [CONFIG]
+// The manager must not receive either blank inspection email in any form --
+// not To, not CC (never used anywhere in this codebase), and not BCC --
+// before the customer has actually submitted the corresponding form. Three
+// layers are verified:
 //   1. buildEmailPersonalization_() (Notifications.js) directly -- pure,
 //      no sheet reads, no external calls -- confirms suppressManagerBcc
 //      removes the manager from the recipient data entirely, while leaving
 //      normal (non-suppressed) behavior, including the undefined-argument
 //      default, unaffected (backward compatible with every other call site).
 //   2. sendPreTripReminder_() (Reminders.js) actually passes
-//      suppressManagerBcc = true for the customer email call specifically
-//      -- stubs sendEmailHtml and a fake sheet (restored in a finally
-//      block), no real email is sent.
+//      suppressManagerBcc = true for the customer email call specifically,
+//      and still sends the dedicated manager 24-hour summary -- stubs
+//      sendEmailHtml and a fake sheet (restored in a finally block), no
+//      real email is sent.
+//   3. Same as (2), for sendPostTripReminder_() and the dedicated manager
+//      post-trip notice.
 // ---------------------------------------------------------------------------
-function testPreTripEmailExcludesManagerFromRecipients() {
+function testInspectionEmailsExcludeManagerFromRecipients() {
   let passed = 0;
   let failed = 0;
 
@@ -1909,19 +1913,21 @@ function testPreTripEmailExcludesManagerFromRecipients() {
     }
   })();
 
-  // ---- Layer 2: sendPreTripReminder_() passes suppressManagerBcc = true ----
-  (function preTripReminderSuppressesManagerBcc() {
-    function fakeSheet() {
-      const writes = [];
-      return {
-        writes: writes,
-        getRange: function(row, col) {
-          return { setValue: function(value) { writes.push({ row: row, col: col, value: value }); } }
-        }
-      };
-    }
+  function fakeSheet() {
+    const writes = [];
+    return {
+      writes: writes,
+      getRange: function(row, col) {
+        return { setValue: function(value) { writes.push({ row: row, col: col, value: value }); } }
+      }
+    };
+  }
 
-    const fakeLocCfg = { email: 'sender@example.com', phone: '+12065550100' };
+  const fakeLocCfg = { email: 'sender@example.com', phone: '+12065550100' };
+
+  // ---- Layer 2: sendPreTripReminder_() passes suppressManagerBcc = true ----
+  // for the customer email, but still sends the dedicated manager summary.
+  (function preTripReminderSuppressesManagerBcc() {
     const realSendSms       = sendSms;
     const realSendEmailHtml = sendEmailHtml;
     const emailCalls = [];
@@ -1942,6 +1948,44 @@ function testPreTripEmailExcludesManagerFromRecipients() {
       const customerCall = emailCalls.filter(function(c) { return c.toEmail === 'customer@example.com'; })[0];
       check('sendPreTripReminder_ sent the customer email', !!customerCall);
       check('the customer email call passed suppressManagerBcc = true', customerCall && customerCall.suppressManagerBcc === true);
+
+      const managerCall = emailCalls.filter(function(c) { return c.toEmail === CONFIG.MANAGER_EMAIL; })[0];
+      check('the dedicated manager 24-hour summary email was still sent', !!managerCall);
+    } finally {
+      sendSms       = realSendSms;
+      sendEmailHtml = realSendEmailHtml;
+    }
+
+    check('sendSms restored to the original function', sendSms === realSendSms);
+    check('sendEmailHtml restored to the original function', sendEmailHtml === realSendEmailHtml);
+  })();
+
+  // ---- Layer 3: sendPostTripReminder_() passes suppressManagerBcc = true ----
+  // for the customer email, but still sends the dedicated manager notice.
+  (function postTripReminderSuppressesManagerBcc() {
+    const realSendSms       = sendSms;
+    const realSendEmailHtml = sendEmailHtml;
+    const emailCalls = [];
+
+    try {
+      sendSms       = function() { /* succeeds */ };
+      sendEmailHtml = function(toEmail, subject, htmlBody, fromEmail, replyToEmail, suppressManagerBcc) {
+        emailCalls.push({ toEmail: toEmail, suppressManagerBcc: suppressManagerBcc });
+      };
+
+      const sheet = fakeSheet();
+      sendPostTripReminder_(
+        sheet, 4, 'Test Customer', 'customer@example.com', '+12065551234',
+        fakeLocCfg, 'August 1, 2026 at 9:00 AM', 'Cargo Van', 'Bainbridge',
+        'https://example.com/post-inspect'
+      );
+
+      const customerCall = emailCalls.filter(function(c) { return c.toEmail === 'customer@example.com'; })[0];
+      check('sendPostTripReminder_ sent the customer email', !!customerCall);
+      check('the customer email call passed suppressManagerBcc = true', customerCall && customerCall.suppressManagerBcc === true);
+
+      const managerCall = emailCalls.filter(function(c) { return c.toEmail === CONFIG.MANAGER_EMAIL; })[0];
+      check('the dedicated manager post-trip notice email was still sent', !!managerCall);
     } finally {
       sendSms       = realSendSms;
       sendEmailHtml = realSendEmailHtml;
@@ -1952,7 +1996,7 @@ function testPreTripEmailExcludesManagerFromRecipients() {
   })();
 
   Logger.log(failed === 0
-    ? 'All ' + passed + ' pre-trip email manager-exclusion checks passed.'
+    ? 'All ' + passed + ' pre-trip/post-trip email manager-exclusion checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
 }
 
@@ -2978,7 +3022,7 @@ function testLocationSenderConfig() {
 // live sheet row (see testMarkDepositPaidRowLookup, testMarkLeaseSignedRowLookup).
 // testIntakeFormSubmitRowMatching, testInspectionFormSubmitRowMatching, the
 // two extraction tests, testFormSubmitDispatcher, testPreTripReminderEligibility,
-// testSendPreTripReminderFlagBehavior, testPreTripEmailExcludesManagerFromRecipients,
+// testSendPreTripReminderFlagBehavior, testInspectionEmailsExcludeManagerFromRecipients,
 // testInspectionCompletionFormatting, testPostTripReminderEligibility,
 // testSendPostTripReminderFlagBehavior, testApprovalReminderCountBehavior,
 // testSuspiciousInspectionTimingCalculations, and
@@ -3012,7 +3056,7 @@ function runAllSandboxConfigurationTests() {
     testFormSubmitDispatcher,
     testPreTripReminderEligibility,
     testSendPreTripReminderFlagBehavior,
-    testPreTripEmailExcludesManagerFromRecipients,
+    testInspectionEmailsExcludeManagerFromRecipients,
     testInspectionCompletionFormatting,
     testPostTripReminderEligibility,
     testSendPostTripReminderFlagBehavior,
@@ -3256,9 +3300,12 @@ function testSendPostTripInspection() {
   }
 
   try {
-    sendEmailHtml(testEmail, content.subject, content.html, locCfg.email, locCfg.email);
+    // suppressManagerBcc = true, matching sendPostTripReminder_()'s real
+    // behavior: the manager must not receive the blank post-trip form, not
+    // even as a BCC copy, so this test never sends her one either.
+    sendEmailHtml(testEmail, content.subject, content.html, locCfg.email, locCfg.email, true);
     Logger.log('testSendPostTripInspection: email sent to ' + testEmail +
-               ' (manager BCC applies per normal sendEmailHtml() behavior).');
+               ' (manager BCC suppressed, matching production post-trip email behavior).');
   } catch(e) {
     Logger.log('testSendPostTripInspection: email FAILED: ' + e);
   }

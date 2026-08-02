@@ -292,8 +292,11 @@ Deposit Paid, Lease Signed, or approval state.
   been completed. This replaced the older `POST_RENTAL_HOURS`-after-end-time timing; that Script
   Property is no longer read by any code path.
 
-- The manager is automatically BCC'd on every customer-facing email. Emails already addressed to
-  the manager or admin are excluded from the BCC to avoid duplicate copies.
+- The manager is automatically BCC'd on customer-facing emails by default. Emails already addressed
+  to the manager or admin are excluded from the BCC to avoid duplicate copies. The pre-trip and
+  post-trip inspection customer emails are the exception: both are sent with
+  `suppressManagerBcc = true` (see [Notifications.js](#notificationsjs) below), since the manager
+  must not receive either blank inspection form, not even by BCC, before the customer submits it.
 
 ### Full workflow diagram
 
@@ -713,14 +716,19 @@ immediate inspection sends](setup-notes.md#manual-immediate-inspection-sends) in
 
 ### Notifications.js
 
-**Functions:** `sendSms(toPhone, message, fromPhone)`, `sendEmailHtml(toEmail, subject, htmlBody, fromEmail, replyToEmail)`,
-`alertAdmin(subject, body)`
+**Functions:** `sendSms(toPhone, message, fromPhone)`, `sendEmailHtml(toEmail, subject, htmlBody, fromEmail, replyToEmail, suppressManagerBcc)`,
+`buildEmailPersonalization_(toEmail, suppressManagerBcc)`, `alertAdmin(subject, body)`
 
 `sendEmailHtml` builds a SendGrid v3 `/mail/send` payload. The optional `fromEmail` and
 `replyToEmail` parameters set the sending address for this message; both default to the global
-`CONFIG.FROM_EMAIL` / `CONFIG.REPLY_TO_EMAIL` values when not provided. It automatically BCC's
-`CONFIG.MANAGER_EMAIL` on every customer-facing email, but suppresses the BCC when `toEmail` is
-the manager or admin (to avoid duplicate copies on emails already addressed to them).
+`CONFIG.FROM_EMAIL` / `CONFIG.REPLY_TO_EMAIL` values when not provided. The recipient block is
+built by `buildEmailPersonalization_()`, a pure helper pulled out so this logic is directly
+testable: it automatically BCC's `CONFIG.MANAGER_EMAIL` on every customer-facing email, suppresses
+the BCC when `toEmail` is the manager or admin (to avoid duplicate copies on emails already
+addressed to them), and also suppresses it whenever the optional 6th argument
+`suppressManagerBcc` is `true` — every call site omits this argument except the pre-trip and
+post-trip inspection customer emails (`Reminders.js`), which pass `true` because the manager must
+never receive either blank inspection form, not even by BCC.
 
 `sendSms` posts to the Twilio Messages REST API using Basic Auth with TWILIO_SID:TWILIO_TOKEN.
 The optional `fromPhone` parameter sets the Twilio sender number; all production call sites pass

@@ -44,7 +44,7 @@ None of these values belong in source code.
 | `SHEET_NAME`     | Name of the booking tab in the spreadsheet — normally `Bookings` |
 | `COMPANY_NAME`   | Business name used in all customer-facing emails and SMS      |
 | `ADMIN_EMAIL`    | Escalation address for approval reminders and script errors   |
-| `MANAGER_EMAIL`  | Site manager — BCC'd on all customer emails, receives booking and approval notices |
+| `MANAGER_EMAIL`  | Site manager — BCC'd on customer emails by default (except the pre-trip/post-trip inspection emails — see below), receives booking and approval notices |
 | `MANAGER_PHONE`  | Site manager phone number in E.164 format (e.g. +12065551234) |
 
 ### Google Calendar (one per site/vehicle)
@@ -98,7 +98,7 @@ Calendars with an unset property are silently skipped at sync time. You can add 
 | `FROM_NAME`      | Display name shown in the From field of every outbound email                     |
 | `REPLY_TO_EMAIL` | Reply-to address on all customer emails (typically the site manager's address)   |
 
-`ADMIN_EMAIL` and `MANAGER_EMAIL` (listed under Identity and routing above) are also consumed by the email system: `MANAGER_EMAIL` is automatically BCC'd on all customer-facing emails; `ADMIN_EMAIL` receives script error alerts and approval escalations.
+`ADMIN_EMAIL` and `MANAGER_EMAIL` (listed under Identity and routing above) are also consumed by the email system: `MANAGER_EMAIL` is automatically BCC'd on customer-facing emails by default, except the pre-trip and post-trip inspection emails, which are sent with `suppressManagerBcc = true` (see `sendEmailHtml()` in `src/Notifications.js`) so the manager never receives either blank inspection form, not even by BCC; `ADMIN_EMAIL` receives script error alerts and approval escalations.
 
 **SendGrid sender verification**: `FROM_EMAIL` must be either a verified single sender or belong to an authenticated domain in your SendGrid account. A valid API key alone is not sufficient — unverified senders produce HTTP 403 errors that are logged and trigger an admin alert.
 

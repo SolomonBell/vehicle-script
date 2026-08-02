@@ -30,7 +30,7 @@ function sendSms(toPhone, message, fromPhone) {
 // this can be verified directly -- e.g. that the manager appears nowhere in
 // the recipient data (not even BCC) for a specific message -- without
 // needing to intercept the SendGrid API call itself. See
-// testPreTripEmailExcludesManagerFromRecipients() in SandboxTests.js.
+// testInspectionEmailsExcludeManagerFromRecipients() in SandboxTests.js.
 function buildEmailPersonalization_(toEmail, suppressManagerBcc) {
   const personalization = { to: [{ email: toEmail }] };
   if (!suppressManagerBcc &&

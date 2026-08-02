@@ -272,11 +272,11 @@ function buildPostTripReminderContent_(name, vehicleType, location, dateStr, pos
 // customer reminder was delivered so column L still fully represents one
 // successful send operation and neither message is ever duplicated.
 //
-// Unlike the pre-trip customer email, this one does NOT suppress the
-// manager BCC -- the manager currently still receives a BCC copy of the
-// post-trip customer email (on top of her separate post-trip notice below,
-// which already includes the same form link). This was flagged during
-// review as a decision to make separately, not changed here.
+// Same as sendPreTripReminder_() above: the customer email is sent with
+// suppressManagerBcc = true, so the manager does not receive a BCC copy of
+// the blank post-trip inspection form either. She still gets her own
+// dedicated post-trip notice below (which already includes the form link),
+// unaffected by this -- only the customer-addressed copy loses the BCC.
 //
 // Returns true if the reminder was delivered and L was written, false
 // otherwise -- used by tests; processReminders() does not use the
@@ -295,7 +295,11 @@ function sendPostTripReminder_(sheet, rowIndex, name, email, phone, locCfg, date
     catch(e) { Logger.log('Post-trip SMS failed for ' + name + ': ' + e); }
   }
   if (email && email !== 'No Email') {
-    try { sendEmailHtml(email, emailSubject, emailHtml, locCfg.email, locCfg.email); delivered = true; }
+    // suppressManagerBcc = true: same reasoning as sendPreTripReminder_()
+    // above -- the manager must not receive the blank post-trip inspection
+    // form, not even as a BCC copy. She gets her own post-trip notice below
+    // instead.
+    try { sendEmailHtml(email, emailSubject, emailHtml, locCfg.email, locCfg.email, true); delivered = true; }
     catch(e) { Logger.log('Post-trip email failed for ' + name + ': ' + e); }
   }
   if ((!phone || phone === 'No Phone') && (!email || email === 'No Email')) {
