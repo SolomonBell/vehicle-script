@@ -33,6 +33,12 @@ function testSheetConnection() {
 function testCalendarConfigs() {
   Logger.log('Checking ' + CALENDAR_CONFIGS.length + ' calendar configuration(s)...');
 
+  // A missing calendarId is expected and informational, not a failure -- see
+  // README "Properties for inactive locations ... can be omitted." Only a
+  // calendarId that IS set but does not resolve to a real calendar (FAIL) is
+  // counted as a genuine failure, so the runner can trust this test's result.
+  let failed = 0;
+
   CALENDAR_CONFIGS.forEach(function(calCfg) {
     if (!calCfg.calendarId) {
       Logger.log('MISSING: ' + calCfg.propKey + ' is not set in Script Properties');
@@ -42,6 +48,7 @@ function testCalendarConfigs() {
     const calendar = CalendarApp.getCalendarById(calCfg.calendarId);
     if (!calendar) {
       Logger.log('FAIL: Calendar not found for ' + calCfg.propKey + ' (' + calCfg.calendarId + ')');
+      failed++;
       return;
     }
 
@@ -52,6 +59,8 @@ function testCalendarConfigs() {
     Logger.log('OK: ' + calCfg.location + ' / ' + calCfg.vehicleType +
                ' → "' + calendar.getName() + '" (' + count + ' events in next 30 days)');
   });
+
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +163,7 @@ function testVehicleTypeAndLocationMapping() {
   Logger.log(failed === 0
     ? 'All ' + passed + ' mapping checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -164,10 +174,15 @@ function testVehicleTypeAndLocationMapping() {
 function testMissingCalendarConfig() {
   Logger.log('Testing missing/invalid calendar ID handling...');
 
+  let failed = 0;
+
   // Case A: calendarId is null (Script Property not set)
   const nullCfg = { propKey: 'FAKE_MISSING_PROP', calendarId: null, location: 'Nowhere', vehicleType: 'Cargo Van' };
   if (!nullCfg.calendarId) {
     Logger.log('OK (null): missing calendarId correctly detected for ' + nullCfg.propKey);
+  } else {
+    Logger.log('FAIL (null): expected a null calendarId to be detected as missing.');
+    failed++;
   }
 
   // Case B: calendarId is set but does not correspond to a real calendar
@@ -176,8 +191,11 @@ function testMissingCalendarConfig() {
   if (!badCal) {
     Logger.log('OK (invalid ID): CalendarApp returned null for a bad calendar ID — would be skipped safely');
   } else {
-    Logger.log('UNEXPECTED: Got a calendar object for bad ID: ' + badId);
+    Logger.log('FAIL (invalid ID): got a calendar object for bad ID: ' + badId);
+    failed++;
   }
+
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -322,6 +340,7 @@ function testStripeConfiguration() {
   Logger.log(failed === 0
     ? 'All ' + passed + ' Stripe configuration checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -451,6 +470,7 @@ function testDepositAmounts() {
   Logger.log(failed === 0
     ? 'All ' + passed + ' deposit amount checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -509,6 +529,7 @@ function testApprovalNotificationEligibility() {
   Logger.log(failed === 0
     ? 'All ' + passed + ' approval notification eligibility checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -571,6 +592,7 @@ function testDocuSealEligibility() {
   Logger.log(failed === 0
     ? 'All ' + passed + ' DocuSeal eligibility checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ============================================================
@@ -614,6 +636,7 @@ function testDocuSealPropertyNames() {
   Logger.log(failed === 0
     ? 'All ' + passed + ' DocuSeal property checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -728,6 +751,7 @@ function testExtractDocuSealSubmissionId() {
   Logger.log(failed === 0
     ? 'All ' + passed + ' extractDocuSealSubmissionId checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -832,6 +856,7 @@ function testMarkDepositPaidRowLookup() {
   Logger.log(failed === 0
     ? 'All ' + passed + ' row-lookup checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -949,6 +974,7 @@ function testMarkLeaseSignedRowLookup() {
   Logger.log(failed === 0
     ? 'All ' + passed + ' lease-signed row-lookup checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -1072,6 +1098,92 @@ function testIntakeFormSubmitRowMatching() {
   Logger.log(failed === 0
     ? 'All ' + passed + ' intake form row-matching checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
+}
+
+// ---------------------------------------------------------------------------
+// TEST 37: Timezone-safe date-only parsing (parseFormDateOnly_) [CONFIG]
+// Pure test against parseFormDateOnly_() and formatDateForForm() (both
+// Helpers.js) -- no sheet reads, no external calls, no live form event.
+//
+// Root cause this guards against: `new Date('2026-08-01')` parses a bare
+// "yyyy-MM-dd" string as UTC MIDNIGHT (per the ECMA-262 spec), not local
+// midnight. Reliable Storage's script timezone (Pacific) is behind UTC, so
+// formatting that UTC instant back out with Utilities.formatDate() and
+// Session.getScriptTimeZone() lands on the PREVIOUS calendar day --
+// "2026-08-01" silently becomes "2026-07-31". This is not a rounding edge
+// case; it happens for every date-only string, every time, in any timezone
+// behind UTC. This was a real production bug, caught by
+// testExtractIntakeSubmissionFields() / testExtractInspectionSubmissionFields()
+// (both below) reporting the wrong date; parseFormDateOnly_() is the fix.
+//
+// Deliberately does NOT construct dates the timezone-unsafe way this test
+// exists to catch (e.g. new Date('2026-08-01')) to build its own "expected"
+// values -- expected values below are plain date-part integers compared
+// directly, and the one round-trip assertion compares
+// formatDateForForm(parseFormDateOnly_(x)) against the original string x,
+// so the test is correct regardless of what Session.getScriptTimeZone() is
+// actually configured to (Pacific in this deployment) -- it does not
+// hardcode or assume a specific UTC offset.
+// ---------------------------------------------------------------------------
+function testParseFormDateOnlyIsTimezoneSafe() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) {
+      Logger.log('OK: ' + label);
+      passed++;
+    } else {
+      Logger.log('FAIL: ' + label);
+      failed++;
+    }
+  }
+
+  // ---- The exact production bug: a bare "yyyy-MM-dd" answer must round-trip
+  // to the identical calendar date through formatDateForForm(), in whatever
+  // timezone this deployment's script is actually configured to use. ----
+  (function roundTripPreservesCalendarDate() {
+    ['2026-08-01', '2026-01-01', '2026-12-31', '2026-03-08', '2026-11-01'].forEach(function(dateStr) {
+      const result = formatDateForForm(parseFormDateOnly_(dateStr));
+      check('"' + dateStr + '" round-trips to itself (got "' + result + '")', result === dateStr);
+    });
+  })();
+
+  // ---- parseFormDateOnly_() builds the correct year/month/day, directly ----
+  (function dateComponentsAreCorrect() {
+    const d = parseFormDateOnly_('2026-08-01');
+    check('year is 2026', d.getFullYear() === 2026);
+    check('month is August (index 7)', d.getMonth() === 7);
+    check('day is 1', d.getDate() === 1);
+  })();
+
+  // ---- Non-date-only formats are passed through unchanged (never broken ----
+  // by this fix -- only bare "yyyy-MM-dd" strings get the special handling).
+  (function nonDateOnlyFormatsPassThrough() {
+    const withTime = parseFormDateOnly_('2026-08-01T10:00:00');
+    check('a string with a time component is not treated as date-only',
+          withTime instanceof Date && !isNaN(withTime.getTime()));
+
+    const slashFormat = parseFormDateOnly_('8/1/2026');
+    check('a non-ISO format (M/D/YYYY) still parses to a valid Date',
+          slashFormat instanceof Date && !isNaN(slashFormat.getTime()));
+  })();
+
+  // ---- Malformed input produces an Invalid Date, same as plain new Date() ----
+  // -- never guessed, never silently coerced to a real date.
+  (function malformedInputIsInvalid() {
+    const bad = parseFormDateOnly_('not a date');
+    check('malformed input is an Invalid Date', bad instanceof Date && isNaN(bad.getTime()));
+
+    const blank = parseFormDateOnly_('');
+    check('blank input is an Invalid Date', blank instanceof Date && isNaN(blank.getTime()));
+  })();
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' timezone-safe date-only parsing checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -1173,6 +1285,7 @@ function testExtractIntakeSubmissionFields() {
   Logger.log(failed === 0
     ? 'All ' + passed + ' intake submission extraction checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -1334,6 +1447,7 @@ function testInspectionFormSubmitRowMatching() {
   Logger.log(failed === 0
     ? 'All ' + passed + ' inspection form row-matching checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -1583,6 +1697,7 @@ function testExtractInspectionSubmissionFields() {
   Logger.log(failed === 0
     ? 'All ' + passed + ' inspection submission extraction checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -1672,6 +1787,7 @@ function testFormSubmitDispatcher() {
   Logger.log(failed === 0
     ? 'All ' + passed + ' form-submit dispatcher checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -1739,6 +1855,7 @@ function testPreTripReminderEligibility() {
   Logger.log(failed === 0
     ? 'All ' + passed + ' pre-trip reminder eligibility checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -1845,6 +1962,7 @@ function testSendPreTripReminderFlagBehavior() {
   Logger.log(failed === 0
     ? 'All ' + passed + ' pre-trip reminder send/flag checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -1998,6 +2116,7 @@ function testInspectionEmailsExcludeManagerFromRecipients() {
   Logger.log(failed === 0
     ? 'All ' + passed + ' pre-trip/post-trip email manager-exclusion checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -2066,6 +2185,7 @@ function testInspectionCompletionFormatting() {
   Logger.log(failed === 0
     ? 'All ' + passed + ' inspection completion formatting/parsing checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -2114,6 +2234,7 @@ function testPostTripReminderEligibility() {
   Logger.log(failed === 0
     ? 'All ' + passed + ' post-trip reminder eligibility checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -2220,6 +2341,7 @@ function testSendPostTripReminderFlagBehavior() {
   Logger.log(failed === 0
     ? 'All ' + passed + ' post-trip reminder send/flag checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -2403,6 +2525,7 @@ function testApprovalReminderCountBehavior() {
   Logger.log(failed === 0
     ? 'All ' + passed + ' approval reminder count checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -2477,6 +2600,7 @@ function testSuspiciousInspectionTimingCalculations() {
   Logger.log(failed === 0
     ? 'All ' + passed + ' suspicious inspection timing calculation checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -2575,6 +2699,7 @@ function testSendSuspiciousInspectionTimingWarningFlagBehavior() {
   Logger.log(failed === 0
     ? 'All ' + passed + ' suspicious inspection timing warning send/flag checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -2632,6 +2757,7 @@ function testTriggerRegistrationIsWellFormed() {
     ? 'All ' + passed + ' trigger registration well-formedness checks passed. ' +
       'Note: this does not create or inspect any real trigger.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ============================================================
@@ -2776,6 +2902,7 @@ function testEmailTemplateStrings() {
   Logger.log(failed === 0
     ? 'All ' + passed + ' template string checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -3009,6 +3136,7 @@ function testLocationSenderConfig() {
   Logger.log(failed === 0
     ? 'All ' + passed + ' location sender configuration checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
+  return failed;
 }
 
 // ============================================================
@@ -3017,8 +3145,15 @@ function testLocationSenderConfig() {
 
 // ---------------------------------------------------------------------------
 // RUNNER: runAllSandboxConfigurationTests [CONFIG + CALENDAR]
-// Runs configuration-only tests in sequence. Stops and re-throws on first
-// failure. Does not include sync or response-parsing tests that require a
+// Runs configuration-only tests in sequence. If a test throws (an actual
+// exception, not a failed assertion), the runner stops immediately and
+// rethrows. Otherwise every test runs to completion and its returned
+// failed-assertion count (see the contract note above the try block below)
+// is collected; if any test reported one or more failed assertions, the
+// runner throws a single summary error naming every failing test at the
+// end, rather than reaching "Completed Successfully" -- a test logging
+// "FAIL"/"N passed, M failed" internally can no longer pass silently just
+// because it didn't throw. Does not include sync or response-parsing tests that require a
 // live sheet row (see testMarkDepositPaidRowLookup, testMarkLeaseSignedRowLookup),
 // or testSyncCalendarBookingsNoNotifications [MUTATION], which appends rows
 // to the live sheet. testMissingCalendarConfig [CALENDAR] (read-only,
@@ -3040,7 +3175,7 @@ function testLocationSenderConfig() {
 // email/SMS ever sent.
 // ---------------------------------------------------------------------------
 function runAllSandboxConfigurationTests() {
-  Logger.log('===== Running Sandbox Configuration Tests (30 tests) =====');
+  Logger.log('===== Running Sandbox Configuration Tests (31 tests) =====');
 
   const tests = [
     validateConfig,
@@ -3059,6 +3194,7 @@ function runAllSandboxConfigurationTests() {
     testDocuSealEligibility,
     testEmailTemplateStrings,
     testIntakeFormSubmitRowMatching,
+    testParseFormDateOnlyIsTimezoneSafe,
     testExtractIntakeSubmissionFields,
     testInspectionFormSubmitRowMatching,
     testExtractInspectionSubmissionFields,
@@ -3075,15 +3211,34 @@ function runAllSandboxConfigurationTests() {
     testTriggerRegistrationIsWellFormed,
   ];
 
+  // Every test function above returns the number of failed assertions (0 if
+  // all passed) -- a small, additive contract added so a test that logs
+  // "FAIL"/"X passed, Y failed" internally, without throwing, can no longer
+  // pass silently just because it didn't throw. A function that only ever
+  // throws on a real problem (e.g. validateConfig(), or testSheetConnection()
+  // via getSheet()) and has no pass/fail counter of its own returns
+  // undefined, which is treated as "no failures" -- for those, a real
+  // problem already surfaces via the throw in the catch block below.
+  const failureSummary = [];
+
   try {
     tests.forEach(function(fn) {
       Logger.log('Running ' + fn.name + '...');
-      fn();
+      const result = fn();
+      if (typeof result === 'number' && result > 0) {
+        failureSummary.push(fn.name + ' (' + result + ' failed assertion' + (result === 1 ? '' : 's') + ')');
+      }
     });
   } catch (e) {
     Logger.log('Configuration test runner failed.');
     Logger.log(e.message);
     throw e;
+  }
+
+  if (failureSummary.length > 0) {
+    const message = 'Configuration test runner failed: ' + failureSummary.join('; ');
+    Logger.log(message);
+    throw new Error(message);
   }
 
   Logger.log('===== All Sandbox Configuration Tests Completed Successfully =====');

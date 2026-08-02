@@ -200,12 +200,16 @@ function extractIntakeSubmissionFields(e) {
   if (!email) return null;
 
   // Best-effort normalization to the 'yyyy-MM-dd' form findIntakeMatchRow()
-  // compares against. If the submitted date string can't be parsed, date
-  // stays null -- findIntakeMatchRow()'s email-only fallback handles that
-  // safely (matched only if it is itself unambiguous).
+  // compares against. Uses parseFormDateOnly_() (Helpers.js), not new Date()
+  // directly, so a bare "yyyy-MM-dd" answer is treated as a local calendar
+  // date rather than UTC midnight -- otherwise it silently rolls back one
+  // day when formatted in a timezone behind UTC (e.g. Pacific). If the
+  // submitted date string can't be parsed, date stays null --
+  // findIntakeMatchRow()'s email-only fallback handles that safely (matched
+  // only if it is itself unambiguous).
   let date = null;
   if (rawDate) {
-    try { date = formatDateForForm(new Date(rawDate)); }
+    try { date = formatDateForForm(parseFormDateOnly_(rawDate)); }
     catch(dateErr) { date = null; }
   }
 
@@ -303,9 +307,13 @@ function extractInspectionSubmissionFields(e) {
 
   if (!email) return null;
 
+  // See parseFormDateOnly_() (Helpers.js): a bare "yyyy-MM-dd" answer must
+  // be parsed as a local calendar date, not UTC midnight, or it silently
+  // rolls back one day when formatted in a timezone behind UTC (e.g.
+  // Pacific).
   let date = null;
   if (rawDate) {
-    try { date = formatDateForForm(new Date(rawDate)); }
+    try { date = formatDateForForm(parseFormDateOnly_(rawDate)); }
     catch(dateErr) { date = null; }
   }
 

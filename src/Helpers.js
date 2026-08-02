@@ -76,6 +76,46 @@ function formatDateForForm(date) {
   return Utilities.formatDate(toDate(date, 'formatDateForForm'), Session.getScriptTimeZone(), 'yyyy-MM-dd');
 }
 
+// Parses a bare "yyyy-MM-dd" calendar-date string (e.g. a Google Form Date
+// answer, or this codebase's own pre-fill format -- see formatDateForForm()
+// above) as a LOCAL date in the script's timezone, not as UTC midnight.
+//
+// This exists because `new Date('2026-08-01')` does NOT do what it looks
+// like it does: per the ECMA-262 spec, a bare "yyyy-MM-dd" string (no time
+// component) is parsed as UTC midnight, not local midnight. Reliable
+// Storage's script timezone is Pacific, which is behind UTC -- so
+// formatting that UTC instant back out with Utilities.formatDate(date,
+// Session.getScriptTimeZone(), 'yyyy-MM-dd') lands on the PREVIOUS calendar
+// day (e.g. "2026-08-01" round-trips to "2026-07-31"). This is not a
+// rounding edge case; it happens for every single date-only string, every
+// time, in any timezone behind UTC.
+//
+// The fix is to never let a bare date-only string reach the UTC-parsing
+// path at all: this function pulls the year/month/day out with a regex and
+// builds the Date using the multi-argument Date constructor
+// (`new Date(year, monthIndex, day)`), which -- unlike string parsing --
+// always constructs local midnight in whatever timezone the JS engine is
+// running in. Apps Script's V8 runtime uses the script's configured
+// timezone for this, the same timezone Session.getScriptTimeZone() reports,
+// so the two agree and the date round-trips exactly.
+//
+// Any string that is NOT a bare "yyyy-MM-dd" (e.g. one that already
+// includes a time component, or a different date format entirely) is
+// passed straight to `new Date(value)` unchanged -- those formats are
+// parsed as local time by the same engine already, so they were never
+// affected by this bug, and this function must not change their behavior.
+//
+// Used by extractIntakeSubmissionFields() and
+// extractInspectionSubmissionFields() (Forms.js) when normalizing the
+// submitted rental-date answer before comparing it against booking rows.
+function parseFormDateOnly_(rawDate) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(rawDate || '').trim());
+  if (m) {
+    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  }
+  return new Date(rawDate);
+}
+
 function formatDateTime(date) {
   return Utilities.formatDate(toDate(date, 'formatDateTime'), Session.getScriptTimeZone(), 'MMMM d, yyyy \'at\' h:mm a');
 }
