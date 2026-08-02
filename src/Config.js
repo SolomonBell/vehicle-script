@@ -21,6 +21,9 @@
 //   M: Second Driver Email   N: Lease Signed         O: Rental Approved
 //   P: Approval Notified At  Q: Approval Reminder Count
 //   R: Vehicle Type          S: Location             T: DocuSeal Submission ID
+//   U: Customer Approval Notified   V: Intake Form Completed
+//   W: Pre-Inspection Form Completed   X: Post-Inspection Form Completed
+//   Y: Suspicious Timing Warning Sent
 // ============================================================
 // CHANGES IN v7:
 //   - Approval reminder loop reworked. Script no longer writes
@@ -112,18 +115,18 @@ const CONFIG = {
   INSPECT_VAL_PRE:     PROPS.INSPECT_VAL_PRE,
   INSPECT_VAL_POST:    PROPS.INSPECT_VAL_POST,
 
-  DAYS_AHEAD:        Number(PROPS.DAYS_AHEAD),        // Number of days ahead to scan calendars for bookings.
-  POST_RENTAL_HOURS: Number(PROPS.POST_RENTAL_HOURS), // Number of hours after a rental ends before sending the post-rental message.
+  DAYS_AHEAD: Number(PROPS.DAYS_AHEAD), // Number of days ahead to scan calendars for bookings.
 
   HOURS_BETWEEN_APPROVAL_REMINDERS: Number(PROPS.HOURS_BETWEEN_APPROVAL_REMINDERS), // Hours between approval reminder messages.
   MAX_APPROVAL_REMINDERS:           Number(PROPS.MAX_APPROVAL_REMINDERS),           // Reminders sent before escalating to admin; 1 initial + (MAX-1) follow-ups, then escalation.
 
-  // Minutes: if the post-trip inspection is completed less than this many
-  // minutes after the pre-trip inspection, processReminders() warns the
-  // manager (see isSuspiciousInspectionTiming() in Helpers.js). Default 15 --
-  // long enough that a genuine rental (even a short one) plausibly involves
-  // driving somewhere and back between the two forms, short enough to only
-  // flag submissions that are implausibly close together.
+  // Minutes: if the post-trip inspection is completed this many minutes or
+  // less after the pre-trip inspection (inclusive of the boundary itself),
+  // processReminders() warns the manager (see isSuspiciousInspectionTiming()
+  // in Helpers.js). Default 15 -- long enough that a genuine rental (even a
+  // short one) plausibly involves driving somewhere and back between the two
+  // forms, short enough to only flag submissions that are implausibly close
+  // together.
   SUSPICIOUS_INSPECTION_WINDOW_MINUTES: Number(PROPS.SUSPICIOUS_INSPECTION_WINDOW_MINUTES),
 
   // ---- Deposit amounts (customer-facing messages) ---------------

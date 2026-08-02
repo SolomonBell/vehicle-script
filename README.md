@@ -290,7 +290,8 @@ Deposit Paid, Lease Signed, or approval state.
   completion timestamp), so in practice it fires between one hour and one hour plus the
   30-minute trigger interval after completion. It never fires if the pre-trip inspection has not
   been completed. This replaced the older `POST_RENTAL_HOURS`-after-end-time timing; that Script
-  Property is no longer read by any code path.
+  Property has been removed from `CONFIG` and is no longer required or read anywhere in the
+  codebase (safe to leave set or delete from Script Properties either way).
 
 - The manager is automatically BCC'd on customer-facing emails by default. Emails already addressed
   to the manager or admin are excluded from the BCC to avoid duplicate copies. The pre-trip and
@@ -697,8 +698,8 @@ completion timestamp — that combination is kept in the scan so a late-arriving
 submission on an old booking still gets its suspicious-timing check.
 
 The old `POST_RENTAL_HOURS`-after-end-time timing has been replaced by the pre-trip-completion-based
-timing above. The `POST_RENTAL_HOURS` Script Property still exists (and `validateConfig()` still
-checks it is numeric) but is no longer read by any active code path.
+timing above. The `POST_RENTAL_HOURS` Script Property has been removed from `CONFIG` and from
+`validateConfig()`'s required-property list, since nothing reads it anymore.
 
 ### Immediate inspection sends (Reminders.js)
 
@@ -1313,10 +1314,15 @@ These control timing and reminder behaviour. All are parsed as numbers with `Num
 | Property | Description | Example | Notes |
 |---|---|---|---|
 | `DAYS_AHEAD` | How many days ahead to scan each calendar for new bookings | `60` | Lower values reduce API calls; higher values give earlier notice |
-| `POST_RENTAL_HOURS` | No longer read by any code path — the post-trip reminder now fires one hour after the pre-trip inspection's recorded completion time instead (see `Reminders.js — Engine 3` in [Source File Reference](#5-source-file-reference)) | `1` | Kept only because `validateConfig()` still checks it is numeric; safe to leave set |
 | `HOURS_BETWEEN_APPROVAL_REMINDERS` | Hours between manager approval reminder emails | `12` | Set to 12 for one reminder per half-day |
 | `MAX_APPROVAL_REMINDERS` | Total approval notifications before escalating to admin | `3` | 1 initial + 2 follow-ups + 1 escalation, then permanent silence |
-| `SUSPICIOUS_INSPECTION_WINDOW_MINUTES` | Minutes; if the post-trip inspection is completed less than this many minutes after the pre-trip inspection, the manager is warned (column Y) | `15` | Default chosen as long enough for a plausible short rental, short enough to only flag implausibly close submissions — see [Suspicious inspection timing warning](#suspicious-inspection-timing-warning) |
+| `SUSPICIOUS_INSPECTION_WINDOW_MINUTES` | Minutes; if the post-trip inspection is completed this many minutes or less after the pre-trip inspection (inclusive), the manager is warned (column Y) | `15` | Default chosen as long enough for a plausible short rental, short enough to only flag implausibly close submissions — see [Suspicious inspection timing warning](#suspicious-inspection-timing-warning) |
+
+**Removed:** `POST_RENTAL_HOURS` (formerly: hours after rental end time before the post-trip
+message) is no longer part of `CONFIG` and no longer required by `validateConfig()` — the post-trip
+reminder is timed from the pre-trip inspection's recorded completion instead (see `Reminders.js —
+Engine 3` in [Source File Reference](#5-source-file-reference)). If it is still set in Script
+Properties from an earlier deployment, it is simply ignored; it does not need to be removed.
 
 **Sandbox-only (not part of `CONFIG`):** `SANDBOX_TEST_PHONE` and `SANDBOX_TEST_EMAIL` are read
 directly from `PROPS` by manual `SandboxTests.js` functions only (`testSendSingleSms()`,
@@ -1837,9 +1843,9 @@ INSPECT_VAL_PRE                   = Pre-trip Inspection
 INSPECT_VAL_POST                  = Post-trip Inspection
 WEBHOOK_SHARED_SECRET             = (generate: openssl rand -hex 32)
 DAYS_AHEAD                        = 60
-POST_RENTAL_HOURS                 = 1
 HOURS_BETWEEN_APPROVAL_REMINDERS  = 12
 MAX_APPROVAL_REMINDERS            = 3
+SUSPICIOUS_INSPECTION_WINDOW_MINUTES = 15
 ```
 
 Properties for inactive locations (Poulsbo, Port Orchard, Fairgrounds) can be omitted. The script
@@ -1892,7 +1898,7 @@ triggers.
 ### Quick start
 
 ```
-1. runAllSandboxConfigurationTests()           — run first; validates entire config (15 tests)
+1. runAllSandboxConfigurationTests()           — run first; validates entire config (30 tests)
 2. testCalendarConfigs()                       — confirm calendar connectivity
 3. testSyncCalendarBookingsNoNotifications()   — add rows without sending messages
 4. Then test the full webhook flow with curl (see Sandbox section)
@@ -1997,7 +2003,7 @@ booking row's real contact info, for an authorized resend or an early-return pos
 
 | Function | What it does |
 |---|---|
-| `runAllSandboxConfigurationTests()` | Runs 26 tests in sequence: `validateConfig`, `testSheetConnection`, `testCalendarConfigs`, `testVehicleTypeAndLocationMapping`, `testStripeConfiguration`, `testDepositAmounts`, `testDocuSealPropertyNames`, `testSendGridConfiguration`, `testTwilioConfiguration`, `testLocationSenderConfig`, `testApprovalNotificationEligibility`, `testDocuSealEligibility`, `testIntakeFormSubmitRowMatching`, `testExtractIntakeSubmissionFields`, `testInspectionFormSubmitRowMatching`, `testExtractInspectionSubmissionFields`, `testFormSubmitDispatcher`, `testPreTripReminderEligibility`, `testSendPreTripReminderFlagBehavior`, `testInspectionCompletionFormatting`, `testPostTripReminderEligibility`, `testSendPostTripReminderFlagBehavior`, `testApprovalReminderCountBehavior`, `testSuspiciousInspectionTimingCalculations`, `testSendSuspiciousInspectionTimingWarningFlagBehavior`, `testTriggerRegistrationIsWellFormed`. Logs a clear header before starting and a completion banner when all pass. |
+| `runAllSandboxConfigurationTests()` | Runs 30 tests in sequence: `validateConfig`, `testSheetConnection`, `testCalendarConfigs`, `testMissingCalendarConfig`, `testVehicleTypeAndLocationMapping`, `testStripeConfiguration`, `testDepositAmounts`, `testDocuSealPropertyNames`, `testExtractDocuSealSubmissionId`, `testSendGridConfiguration`, `testTwilioConfiguration`, `testLocationSenderConfig`, `testApprovalNotificationEligibility`, `testDocuSealEligibility`, `testEmailTemplateStrings`, `testIntakeFormSubmitRowMatching`, `testExtractIntakeSubmissionFields`, `testInspectionFormSubmitRowMatching`, `testExtractInspectionSubmissionFields`, `testFormSubmitDispatcher`, `testPreTripReminderEligibility`, `testSendPreTripReminderFlagBehavior`, `testInspectionEmailsExcludeManagerFromRecipients`, `testInspectionCompletionFormatting`, `testPostTripReminderEligibility`, `testSendPostTripReminderFlagBehavior`, `testApprovalReminderCountBehavior`, `testSuspiciousInspectionTimingCalculations`, `testSendSuspiciousInspectionTimingWarningFlagBehavior`, `testTriggerRegistrationIsWellFormed`. Logs a clear header before starting and a completion banner when all pass. |
 
 ### Standalone manual tests (not in runner)
 
@@ -2350,8 +2356,9 @@ Duplicates can happen in two scenarios:
 3. Confirm column L (Post-Rental Sent) is blank — a `Yes` means it already fired.
 4. The reminder fires on the first `processReminders` run where at least one hour has elapsed
    since W's timestamp — check the Executions log for `processReminders` runs after that point.
-5. `POST_RENTAL_HOURS` and the booking's End Time (column F) are **not** used for this timing —
-   do not use them to predict when the post-trip reminder will fire.
+5. The booking's End Time (column F) is **not** used for this timing — do not use it to predict
+   when the post-trip reminder will fire. (`POST_RENTAL_HOURS`, the old timing basis, has been
+   removed entirely.)
 
 ### The suspicious inspection timing warning did not fire (or fired unexpectedly)
 

@@ -2649,7 +2649,6 @@ function validateConfig() {
 
   var NUMERIC_PROPS = [
     'DAYS_AHEAD',
-    'POST_RENTAL_HOURS',
     'HOURS_BETWEEN_APPROVAL_REMINDERS',
     'MAX_APPROVAL_REMINDERS',
     'SUSPICIOUS_INSPECTION_WINDOW_MINUTES',
@@ -2746,6 +2745,7 @@ function testEmailTemplateStrings() {
     'Deposit confirmed: ' + cargoVanType + ' rental on ' + dateStr,
     'Your rental is approved',
     'Action needed: approve rental for ' + name,
+    "Tomorrow's rental: " + name + ', ' + cargoVanType + ' at ' + location + ' on ' + dateStr + '.',
   ];
   let dashOrBoldFound = false;
   sampleOutgoingStrings.forEach(function(s) {
@@ -3019,7 +3019,13 @@ function testLocationSenderConfig() {
 // RUNNER: runAllSandboxConfigurationTests [CONFIG + CALENDAR]
 // Runs configuration-only tests in sequence. Stops and re-throws on first
 // failure. Does not include sync or response-parsing tests that require a
-// live sheet row (see testMarkDepositPaidRowLookup, testMarkLeaseSignedRowLookup).
+// live sheet row (see testMarkDepositPaidRowLookup, testMarkLeaseSignedRowLookup),
+// or testSyncCalendarBookingsNoNotifications [MUTATION], which appends rows
+// to the live sheet. testMissingCalendarConfig [CALENDAR] (read-only,
+// CalendarApp.getCalendarById on a bad ID) and testExtractDocuSealSubmissionId
+// / testEmailTemplateStrings [CONFIG] (both pure, no external calls) are
+// included per their category contracts above -- previously defined but not
+// wired in here, a gap closed during a cleanup pass.
 // testIntakeFormSubmitRowMatching, testInspectionFormSubmitRowMatching, the
 // two extraction tests, testFormSubmitDispatcher, testPreTripReminderEligibility,
 // testSendPreTripReminderFlagBehavior, testInspectionEmailsExcludeManagerFromRecipients,
@@ -3034,21 +3040,24 @@ function testLocationSenderConfig() {
 // email/SMS ever sent.
 // ---------------------------------------------------------------------------
 function runAllSandboxConfigurationTests() {
-  Logger.log('===== Running Sandbox Configuration Tests (27 tests) =====');
+  Logger.log('===== Running Sandbox Configuration Tests (30 tests) =====');
 
   const tests = [
     validateConfig,
     testSheetConnection,
     testCalendarConfigs,
+    testMissingCalendarConfig,
     testVehicleTypeAndLocationMapping,
     testStripeConfiguration,
     testDepositAmounts,
     testDocuSealPropertyNames,
+    testExtractDocuSealSubmissionId,
     testSendGridConfiguration,
     testTwilioConfiguration,
     testLocationSenderConfig,
     testApprovalNotificationEligibility,
     testDocuSealEligibility,
+    testEmailTemplateStrings,
     testIntakeFormSubmitRowMatching,
     testExtractIntakeSubmissionFields,
     testInspectionFormSubmitRowMatching,

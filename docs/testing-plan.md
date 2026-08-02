@@ -297,8 +297,8 @@ real booking to reach the 24-hour window or the manual time-shift above.
       post-trip reminder does not fire yet
 
 Note: this reminder is timed entirely from column W's recorded completion timestamp — not from
-the booking's End Time and not from `POST_RENTAL_HOURS` (that Script Property is no longer read by
-any code path). It is also not gated on approval or deposit status.
+the booking's End Time. (`POST_RENTAL_HOURS`, the old timing basis, has been removed from `CONFIG`
+entirely.) It is also not gated on approval or deposit status.
 
 **Status:** PENDING — Not yet validated. Implemented and reviewed in code; requires either waiting a real
 hour after a real pre-trip completion or the manual time-shift above.

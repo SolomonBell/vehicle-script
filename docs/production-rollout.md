@@ -119,8 +119,8 @@ test) booking through the entire flow, watching the Executions log at each step:
    post-trip delay to confirm Tests 7–10 also succeed in production, not just sandbox — these are
    the items still marked "not yet validated" as of this writing, and passing them in sandbox does
    not guarantee an identical production `HOURS_BETWEEN_APPROVAL_REMINDERS` value produces the same
-   approval-reminder timing. (`POST_RENTAL_HOURS` no longer affects post-trip reminder timing —
-   see [docs/testing-plan.md](testing-plan.md) Test 9.)
+   approval-reminder timing. (`POST_RENTAL_HOURS` has been removed entirely and no longer affects
+   post-trip reminder timing — see [docs/testing-plan.md](testing-plan.md) Test 9.)
 8. Only after this full pass succeeds should real customer bookings be allowed to flow through
    unattended.
 

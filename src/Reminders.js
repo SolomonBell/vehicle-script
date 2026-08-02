@@ -223,7 +223,7 @@ function sendPreTripReminder_(sheet, rowIndex, name, email, phone, locCfg, dateS
     catch(e) { Logger.log('Manager email failed: ' + e); }
   }
   if (CONFIG.MANAGER_PHONE) {
-    try { sendSms(CONFIG.MANAGER_PHONE, "Tomorrow's rental: " + name + ' — ' + vehicleType + ' at ' + location + ' on ' + dateStr + '.', locCfg.phone); }
+    try { sendSms(CONFIG.MANAGER_PHONE, "Tomorrow's rental: " + name + ', ' + vehicleType + ' at ' + location + ' on ' + dateStr + '.', locCfg.phone); }
     catch(e) { Logger.log('Manager SMS failed: ' + e); }
   }
 

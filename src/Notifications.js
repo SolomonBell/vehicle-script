@@ -48,11 +48,11 @@ function buildEmailPersonalization_(toEmail, suppressManagerBcc) {
 //
 // suppressManagerBcc (optional, default false/undefined): when true, the
 // manager is not added as To, CC, or BCC on this email, no matter what
-// toEmail is. Every existing call site omits this argument, so the manager
+// toEmail is. Every other call site omits this argument, so the manager
 // BCC behavior is unchanged everywhere except where a caller explicitly
-// opts in -- currently only the pre-trip inspection customer email
-// (Reminders.js), because the blank pre-trip inspection form must never
-// reach the manager, including by BCC, before the customer submits it.
+// opts in -- currently the pre-trip and post-trip inspection customer
+// emails (Reminders.js), because neither blank inspection form may reach
+// the manager, including by BCC, before the customer submits it.
 function sendEmailHtml(toEmail, subject, htmlBody, fromEmail, replyToEmail, suppressManagerBcc) {
   const from    = fromEmail    || CONFIG.FROM_EMAIL;
   const replyTo = replyToEmail || CONFIG.REPLY_TO_EMAIL;
