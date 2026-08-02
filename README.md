@@ -70,10 +70,10 @@ and [docs/testing-plan.md](docs/testing-plan.md) for the acceptance-test checkli
 review, but not yet confirmed by a live sandbox run):
 - Automatic 24-hour reminder firing on schedule
 - Manager 24-hour greeting/summary (including the new location-specific greeting)
-- Pre-trip inspection completion update (column W)
-- Post-rental reminder firing on schedule
-- Manager post-rental greeting/notice (including the new location-specific greeting)
-- Post-trip inspection completion update (column X)
+- Pre-trip inspection completion update (column W, with actual form-submission timestamp)
+- Post-trip reminder firing exactly one hour after pre-trip inspection completion
+- Manager post-trip notice
+- Post-trip inspection completion update (column X, with actual form-submission timestamp)
 
 Do not treat the items in the second list as passed. They require a booking to actually reach the
 24-hour and post-rental windows (or a manually time-shifted test row) before they can be marked
@@ -98,9 +98,12 @@ validated — see [docs/testing-plan.md](docs/testing-plan.md).
   clears; writes the DocuSeal submission ID to the sheet
 - Monitors for manager approval and sends escalating reminders until the manager responds or the
   escalation cap is reached
-- Sends a 24-hour pickup reminder with a pre-filled pre-trip inspection form link; includes a
-  deposit urgency notice if payment has not yet cleared
-- Sends a post-rental inspection prompt after the rental ends
+- Sends a 24-hour pickup reminder (customer only, not the blank form to the manager) with a
+  pre-filled pre-trip inspection form link, by both email and SMS; includes a deposit urgency
+  notice if payment has not yet cleared
+- Records the pre-trip inspection completion time when the customer submits the form, then sends
+  the post-trip inspection prompt (email + SMS) exactly one hour after that recorded completion
+  time — not from the booking's end time
 - Routes all Stripe deposit and DocuSeal signing events through Pipedream into the Apps Script
   web app endpoint with shared-secret authentication
 
@@ -209,40 +212,45 @@ Customer books vehicle via Google Booking
                          ▼
                   processReminders — 24-hour window before pickup
                     • Col K (24hr Sent) = Yes (written BEFORE sending)
-                    • 24-hr reminder SMS + email to customer
-                    • Pre-filled pre-trip inspection form link
-                    • Manager notified with 24hr rental summary (location greeting)
+                    • Pre-trip reminder SMS + email to customer (same form
+                      link sent by both channels; NOT sent to the manager)
+                    • Manager notified with 24hr rental summary (location
+                      greeting; no inspection link)
                          │
                          ▼
                   Customer submits pre-trip inspection form
                     • onFormSubmit dispatcher routes to
                       processInspectionFormSubmission_()
-                    • Col W (Pre-Inspection Form Completed) = Yes
+                    • Col W (Pre-Inspection Form Completed) =
+                      "Yes <actual form-submission time>"
                          │
                          ▼
-                  Rental day
-                         │
-                         ▼
-                  processReminders — POST_RENTAL_HOURS after end time
+                  processReminders — fires on the first run at least one
+                  hour after the Col W completion timestamp (not from
+                  booking End Time, not from when the pre-trip reminder
+                  was sent)
                     • Col L (Post-Rental Sent) = Yes (written BEFORE sending)
-                    • Post-rental SMS + email to customer
-                    • Pre-filled post-trip inspection form link
+                    • Post-trip reminder SMS + email to customer (same form
+                      link sent by both channels)
                     • Manager notified (location greeting)
                          │
                          ▼
                   Customer submits post-trip inspection form
                     • onFormSubmit dispatcher routes to
                       processInspectionFormSubmission_()
-                    • Col X (Post-Inspection Form Completed) = Yes
+                    • Col X (Post-Inspection Form Completed) =
+                      "Yes <actual form-submission time>"
                          │
                          ▼
                   Workflow complete
 ```
 
-Neither W nor X currently gates any further step — they record completion only. Sending the
-pre-trip and post-trip inspection links themselves is driven by time and the K/L flag columns
-(see the `Reminders.js — Engine 3` entry in [Source File Reference](#5-source-file-reference)),
-not by Deposit Paid, Lease Signed, or approval state.
+Neither W nor X currently gates any further step — they record completion only (Col W's
+completion timestamp is also what the post-trip send timing above is measured from). Sending the
+pre-trip inspection link is driven by time and the K flag column; sending the post-trip inspection
+link is driven by the Col W completion timestamp and the L flag column (see the `Reminders.js —
+Engine 3` entry in [Source File Reference](#5-source-file-reference)) — none of this is gated by
+Deposit Paid, Lease Signed, or approval state.
 
 ### Implementation notes
 
@@ -277,8 +285,12 @@ not by Deposit Paid, Lease Signed, or approval state.
 - If the deposit has not cleared when the 24-hour reminder fires, the reminder becomes an urgency
   notice directing the customer to check their original welcome email for the payment link.
 
-- The post-rental prompt fires `POST_RENTAL_HOURS` after the event end time. If the Calendar
-  event has no end time, the script defaults to start time + 4 hours.
+- The post-trip inspection prompt fires on the first `processReminders` run where at least one
+  hour has elapsed since the customer completed the pre-trip inspection form (column W's recorded
+  completion timestamp), so in practice it fires between one hour and one hour plus the
+  30-minute trigger interval after completion. It never fires if the pre-trip inspection has not
+  been completed. This replaced the older `POST_RENTAL_HOURS`-after-end-time timing; that Script
+  Property is no longer read by any code path.
 
 - The manager is automatically BCC'd on every customer-facing email. Emails already addressed to
   the manager or admin are excluded from the BCC to avoid duplicate copies.
@@ -309,14 +321,14 @@ flowchart TD
     P --> P2[checkRentalEligibility sees Col N = Yes\nand Col O already approved\nCustomer approval email/SMS sent — Col U = Yes]
 
     P2 --> Q[processReminders fires within\n24-26 hours of pickup — Col K = Yes]
-    Q --> R[24-hour reminder SMS and email\nPre-trip inspection form link]
+    Q --> R[Pre-trip reminder SMS and email\nsame form link on both channels]
     R --> R2([Customer submits pre-trip inspection form])
-    R2 --> R3[onFormSubmit dispatcher routes to\nprocessInspectionFormSubmission_\nCol W = Yes]
-    R3 --> S([Rental day])
-    S --> T[processReminders fires POST_RENTAL_HOURS\nafter end time — Col L = Yes]
-    T --> U[Post-rental prompt SMS and email\nPost-trip inspection form link]
-    U --> U2([Customer submits post-trip inspection form])
-    U2 --> U3[onFormSubmit dispatcher routes to\nprocessInspectionFormSubmission_\nCol X = Yes]
+    R2 --> R3[onFormSubmit dispatcher routes to\nprocessInspectionFormSubmission_\nCol W = Yes + submission timestamp]
+    R3 --> S{processReminders: has 1 hour\nelapsed since Col W timestamp?}
+    S -->|not yet| S
+    S -->|yes — Col L = Yes| T[Post-trip reminder SMS and email\nsame form link on both channels]
+    T --> U2([Customer submits post-trip inspection form])
+    U2 --> U3[onFormSubmit dispatcher routes to\nprocessInspectionFormSubmission_\nCol X = Yes + submission timestamp]
     U3 --> V([Workflow complete])
 ```
 
@@ -638,15 +650,33 @@ webhook (`markLeaseSigned`) updates column N. Tracked in column U so it is never
 Acquires a `LockService.getScriptLock()` with a 10-second timeout to prevent overlapping
 executions. Scans all rows and sends two types of messages:
 
-- **24-hour reminder** — when `hoursUntilStart` is between 0 and 26 and column K is blank and
-  the booking is approved. **Writes column K = Yes and flushes before sending** — the
-  flag-before-send pattern prevents duplicate reminders if the trigger fires again mid-send.
+- **Pre-trip reminder** — when `hoursUntilStart` is between 0 and 26 and column K is blank and
+  the booking is approved (`isPreTripReminderEligible()` in `Helpers.js`). Sent to the customer
+  by both SMS and email, with the pre-filled pre-trip inspection form link; states the form must
+  be completed before driving the vehicle and that the post-trip form follows once pre-trip is
+  done. Column K is written only after a successful send (see below) — a row missing approval or
+  deposit is safely re-evaluated on every later run for as long as it stays inside the window. The
+  manager's 24-hour summary email does not include the (blank, unsigned) inspection form link.
 
-- **Post-rental prompt** — when hours since end time ≥ `POST_RENTAL_HOURS` and column L is blank.
-  **Writes column L = Yes and flushes before sending** — same pattern.
+- **Post-trip reminder** — when the customer has completed the pre-trip inspection form (column
+  W holds a parseable `"Yes <timestamp>"` value, written by `processInspectionFormSubmission_()`
+  in `Forms.js`) and at least one hour has elapsed since that recorded completion time, and column
+  L is blank (`isPostTripReminderEligible()` in `Helpers.js`). This is evaluated fresh on every
+  run, so the message goes out on the first run where the one-hour delay has actually elapsed —
+  this is what makes the delay durable across separate Apps Script executions without any timer or
+  sleep call. It never fires from the booking's End Time and never fires before the pre-trip
+  inspection is completed.
 
-Rows older than 48 hours past end time with both K and L set are skipped to limit the scan
-window.
+Both reminders follow the same "delivered if reached by either channel" pattern as
+`notifyCustomerOfApproval()` (`Approval.js`): the flag column is written only after a successful
+SMS or email send, and a row with neither phone nor email on file is treated as delivered to avoid
+endless retry. Rows older than 48 hours past end time with both K and L set are skipped to limit
+the scan window — this check is independent of how L's timing is computed, so it is unaffected by
+the post-trip timing change described above.
+
+The old `POST_RENTAL_HOURS`-after-end-time timing has been replaced by the pre-trip-completion-based
+timing above. The `POST_RENTAL_HOURS` Script Property still exists (and `validateConfig()` still
+checks it is numeric) but is no longer read by any active code path.
 
 ---
 
@@ -758,19 +788,27 @@ tab the submission came from; ignores anything else.
 
 Called only from `onFormSubmit()` (each also independently re-checks its own response-sheet name,
 so both remain safe if ever called directly, e.g. from a test). `processIntakeFormSubmission_`
-matches the submission to a booking row and sets column V; if the deposit was already paid, it
-also sends the DocuSeal lease. `processInspectionFormSubmission_` matches the submission, classifies
-it as pre- or post-inspection by comparing the `Inspection Type` answer against
-`CONFIG.INSPECT_VAL_PRE`/`INSPECT_VAL_POST` (both sides normalized with
-`String(value).trim().toLowerCase()`), and sets column W or X accordingly. Neither ever guesses —
-see [Google Forms](#7-google-forms) for the full matching and classification rules.
+matches the submission to a booking row and sets column V to the plain flag `Yes`; if the deposit
+was already paid, it also sends the DocuSeal lease. `processInspectionFormSubmission_` matches the
+submission, classifies it as pre- or post-inspection by comparing the `Inspection Type` answer
+against `CONFIG.INSPECT_VAL_PRE`/`INSPECT_VAL_POST` (both sides normalized with
+`String(value).trim().toLowerCase()`), and sets column W or X to `"Yes " + formatDateTimeShort(...)`
+(`formatInspectionCompletionValue()` in `Helpers.js`) using the response sheet's own `Timestamp`
+column (the actual moment the customer submitted the form) rather than the time the trigger
+happens to run. Neither handler ever guesses — see [Google Forms](#7-google-forms) for the full
+matching and classification rules.
 
 **Matching helpers:** `findBookingMatchRow_(data, email, dateStr, completionColIndex)`,
-`findIntakeMatchRow(data, email, dateStr)`, `findInspectionMatchRow(data, email, dateStr, inspectionType)`
+`findIntakeMatchRow(data, email, dateStr)`, `findInspectionMatchRow(data, email, dateStr, inspectionType)`,
+`isInspectionCompletionValueSet_(cellValue)`
 
 `findBookingMatchRow_` is the shared, ambiguity-safe matcher (email plus rental date when
 available, never customer name) used by both form handlers, parameterized by which completion
 column to check. `findIntakeMatchRow` and `findInspectionMatchRow` are thin wrappers around it.
+"Already completed" is determined by `isInspectionCompletionValueSet_()`, which treats any value
+starting with `Yes` — the plain flag used by column V or the `"Yes <timestamp>"` value used by
+columns W/X — as done, so a resubmission for an already-completed inspection is correctly ignored
+instead of overwriting the recorded completion time.
 
 **Extraction helpers:** `extractIntakeSubmissionFields(e)`, `extractInspectionSubmissionFields(e)`
 
@@ -786,9 +824,19 @@ events — see `testExtractIntakeSubmissionFields` / `testExtractInspectionSubmi
 
 **Functions:** `getSheet()`, `getExistingEventIds(sheet)`, `extractBookedByName(text)`,
 `extractPrimaryEmail(text)`, `extractSecondDriverEmail(text)`, `extractPhone(text)`, `toDate()`,
-`formatDate()`, `formatDateForForm()`, `formatDateTime()`, `getDepositAmount(vehicleType)`,
-`getStripePriceId(vehicleType)`, `createStripeCheckoutSession(vehicleType, clientReferenceId, customerEmail)`,
+`formatDate()`, `formatDateForForm()`, `formatDateTime()`, `formatDateTimeShort()`,
+`formatInspectionCompletionValue(date)`, `parseInspectionCompletionTimestamp_(cellValue)`,
+`getDepositAmount(vehicleType)`, `getStripePriceId(vehicleType)`,
+`createStripeCheckoutSession(vehicleType, clientReferenceId, customerEmail)`,
 `getLocationConfig(location)`
+
+`formatDateTimeShort()` formats a Date as `M/d/yyyy h:mm a` (e.g. `8/2/2026 9:15 AM`) — the same
+compact style already used for the booking Start/End Time cells, but with a four-digit year so it
+stays unambiguous when combined with a flag in one cell. `formatInspectionCompletionValue(date)`
+builds the exact `"Yes " + formatDateTimeShort(date)` value written to columns W and X.
+`parseInspectionCompletionTimestamp_(cellValue)` reverses it, returning the recorded completion
+Date or `null` if the cell is blank, not prefixed with `Yes`, or unparseable — used by
+`processReminders()` to measure elapsed time since the pre-trip inspection completed.
 
 `getSheet()` reads `SHEET_ID` directly via
 `PropertiesService.getScriptProperties().getProperty('SHEET_ID')` — it does NOT go through the
@@ -870,8 +918,8 @@ at row 2.
 | H | Stripe Amount | `markDepositPaid` (webhook) | Dollar amount received; informational only |
 | I | Intake Sent | `syncCalendarBookings` | Set to `Yes` after welcome message sent; gates the approval loop |
 | J | Lease Sent | `markDepositPaid`, `sendLeaseToNewBookings` | Set to `Yes` after DocuSeal submission succeeds |
-| K | 24hr Sent | `processReminders` | Set to `Yes` **before** the reminder is sent (flag-before-send) |
-| L | Post-Rental Sent | `processReminders` | Set to `Yes` **before** the post-rental message is sent |
+| K | 24hr Sent | `processReminders` | Set to `Yes` after the pre-trip reminder is successfully delivered by SMS or email (or immediately if the customer has neither on file) |
+| L | Post-Rental Sent | `processReminders` | Set to `Yes` after the post-trip reminder is successfully delivered by SMS or email (or immediately if the customer has neither on file); send is timed from the column W completion timestamp, not from End Time |
 | M | Second Driver Email | `syncCalendarBookings` | Second driver's email if provided; `No Second Email` if absent |
 | N | Lease Signed | `markLeaseSigned` (webhook) | Set to `Yes` when DocuSeal signing event received |
 | O | Rental Approved | **Manager only** | **Script never writes this column.** Dropdown: `Approved - Free`, `Approved - Paid`, `Denied` |
@@ -882,8 +930,8 @@ at row 2.
 | T | DocuSeal Submission ID | `markDepositPaid`, `sendLeaseToNewBookings` | Submission ID returned by DocuSeal API; written only if `extractDocuSealSubmissionId` returns a non-null value |
 | U | Customer Approval Notified | `checkRentalEligibility` (via `notifyCustomerOfApproval`) | Set to `Yes` after the customer's one-time "your rental is approved" email/SMS is sent |
 | V | Intake Form Completed | `processIntakeFormSubmission_` (via `onFormSubmit`) | Set to `Yes` when the intake Google Form is submitted — distinct from Intake Sent (column I), which only means the link was emailed |
-| W | Pre-Inspection Form Completed | `processInspectionFormSubmission_` (via `onFormSubmit`) | Set to `Yes` when a pre-trip inspection submission is matched to this row |
-| X | Post-Inspection Form Completed | `processInspectionFormSubmission_` (via `onFormSubmit`) | Set to `Yes` when a post-trip inspection submission is matched to this row |
+| W | Pre-Inspection Form Completed | `processInspectionFormSubmission_` (via `onFormSubmit`) | Set to `"Yes <date/time>"` (e.g. `Yes 8/2/2026 9:15 AM`) using the pre-trip inspection form's own Timestamp column when a submission is matched to this row; also the value `processReminders` reads to time the post-trip reminder |
+| X | Post-Inspection Form Completed | `processInspectionFormSubmission_` (via `onFormSubmit`) | Set to `"Yes <date/time>"` (e.g. `Yes 8/2/2026 4:08 PM`) using the post-trip inspection form's own Timestamp column when a submission is matched to this row |
 
 ### Flag semantics
 
@@ -892,8 +940,16 @@ at row 2.
   `Approved - Paid`, `Denied`). Any other value (including blank) leaves the row in the pending
   state.
 
-- **Columns G, I, J, K, L, N, U, V, W, X** are all binary flags — the script only checks whether
-  the value is exactly `Yes`. Any other value (including blank) is treated as "not done."
+- **Columns G, I, J, K, L, N, U, V** are binary flags — the script only checks whether the value
+  is exactly `Yes`. Any other value (including blank) is treated as "not done."
+
+- **Columns W and X** combine a completion flag with the actual form-submission timestamp in one
+  cell (`"Yes " + date/time`, written by `formatInspectionCompletionValue()` in `Helpers.js`).
+  "Already completed" is recognized by a `Yes` prefix (`isInspectionCompletionValueSet_()` in
+  `Forms.js`), not by exact equality to `Yes` — this is what lets `processReminders` also parse
+  out the completion time from column W (`parseInspectionCompletionTimestamp_()` in `Helpers.js`)
+  to time the post-trip reminder. Column V (Intake Form Completed) still uses the plain `Yes`
+  flag; it does not carry a timestamp.
 
 - **Column Q** is numeric. The script reads it with `Number(data[i][16]) || 0`, so a blank or
   non-numeric value is treated as 0 (no notifications sent).
@@ -987,8 +1043,13 @@ settings. The script does not interact with this folder.
 **Purpose:** Documents vehicle condition with timestamped photos before and after every rental.
 
 **When sent:**
-- Pre-trip link in the 24-hour reminder email/SMS (`processReminders`)
-- Post-trip link in the post-rental email/SMS (`processReminders`)
+- Pre-trip link in the 24-hour reminder email and SMS (`sendPreTripReminder_()` in
+  `processReminders`) — same link, same form, sent by both channels; the customer only needs to
+  complete it once. Not sent to the manager.
+- Post-trip link in the post-trip reminder email and SMS (`sendPostTripReminder_()` in
+  `processReminders`), sent once the customer has completed the pre-trip inspection and at least
+  one hour has elapsed since that recorded completion — see [Column reference](#column-reference)
+  and the `Reminders.js — Engine 3` entry in [Source File Reference](#5-source-file-reference).
 
 **Pre-filled fields (from Script Properties):**
 
@@ -1017,16 +1078,23 @@ normalized with `String(value).trim().toLowerCase()` before comparing, so case a
 whitespace differences never cause a false unclassified result. The live form's option text is the
 configured value (e.g. `Pre-Trip (Before Vehicle Pickup)` / `Post-Trip (After Vehicle Return)`),
 so this is the same text `buildInspectUrl()` uses to pre-fill the dropdown:
-- A submission normalizing to `pre` sets column **W** (Pre-Inspection Form Completed) to `Yes`.
-- A submission normalizing to `post` sets column **X** (Post-Inspection Form Completed) to `Yes`.
+- A submission normalizing to `pre` sets column **W** (Pre-Inspection Form Completed) to
+  `"Yes <date/time>"`, using the response sheet's own `Timestamp` column as the completion time
+  (falling back to the time the handler runs only if that column is missing or unparseable).
+- A submission normalizing to `post` sets column **X** (Post-Inspection Form Completed) the same
+  way.
 
 Each column is tracked independently — a pre-trip submission never touches X and a post-trip
 submission never touches W. A submission whose type answer normalizes to neither `pre` nor `post`,
 or that cannot be matched to exactly one eligible booking, updates nothing and alerts
 `ADMIN_EMAIL` with context; a resubmission of an already-completed inspection is a silent no-op
-(not an error, not an alert). This task does not add gating on pre/post-inspection completion —
-the pre-inspection link still goes out unconditionally in the 24-hour reminder and the post-trip
-link in the post-rental message, exactly as before; only completion is now recorded.
+(not an error, not an alert, and does not overwrite the recorded completion time) — recognized via
+`isInspectionCompletionValueSet_()`. The pre-trip inspection link still goes out unconditionally in
+the 24-hour reminder. The post-trip inspection link, however, is now driven directly by column W's
+completion timestamp: `processReminders` sends it on the first run at least one hour after that
+timestamp (see [Column reference](#column-reference) and the `Reminders.js — Engine 3` entry in
+[Source File Reference](#5-source-file-reference)) — it is never sent before the pre-trip
+inspection has been completed.
 
 **Response tab:** like the intake form, this form's responses are a tab (`Rental Vehicle Condition
 Inspection Form`) in the same spreadsheet as Bookings, identified by the existing `SHEET_ID`
@@ -1204,7 +1272,7 @@ These control timing and reminder behaviour. All are parsed as numbers with `Num
 | Property | Description | Example | Notes |
 |---|---|---|---|
 | `DAYS_AHEAD` | How many days ahead to scan each calendar for new bookings | `60` | Lower values reduce API calls; higher values give earlier notice |
-| `POST_RENTAL_HOURS` | Hours after rental end time before sending post-rental prompt | `1` | Set to `1` = prompt fires ~1 hour after end |
+| `POST_RENTAL_HOURS` | No longer read by any code path — the post-trip reminder now fires one hour after the pre-trip inspection's recorded completion time instead (see `Reminders.js — Engine 3` in [Source File Reference](#5-source-file-reference)) | `1` | Kept only because `validateConfig()` still checks it is numeric; safe to leave set |
 | `HOURS_BETWEEN_APPROVAL_REMINDERS` | Hours between manager approval reminder emails | `12` | Set to 12 for one reminder per half-day |
 | `MAX_APPROVAL_REMINDERS` | Total approval notifications before escalating to admin | `3` | 1 initial + 2 follow-ups + 1 escalation, then permanent silence |
 
@@ -1458,9 +1526,8 @@ not block the confirmation email or the DocuSeal lease send.
 | New booking detected | Email + SMS | Welcome message; Stripe Checkout Session URL; pre-filled intake form URL |
 | Deposit confirmed | Email + SMS | Deposit confirmation; rental agreement coming by email |
 | Rental approved (only once lease is signed — Col N = Yes) | Email + SMS | "Your rental is approved" notice; sent once, tracked in Col U |
-| 24hr before pickup (deposit paid) | Email + SMS | Pickup reminder; pre-trip inspection form link |
-| 24hr before pickup (deposit NOT paid) | Email + SMS | Urgency notice; direct customer to original welcome email for payment link |
-| After rental ends | Email + SMS | Thank-you; post-trip inspection form link |
+| 24hr before pickup (approved and deposit paid) | Email + SMS | Pickup reminder; pre-trip inspection form link (same link/form on both channels, complete once); states the form must be completed before driving the vehicle and that the post-trip form follows once pre-trip is done |
+| One hour after pre-trip inspection form completed | Email + SMS | Post-trip inspection form link (same link/form on both channels, complete once); states the form should be completed now that the vehicle has been returned |
 
 ### Manager notifications
 
@@ -1470,8 +1537,8 @@ not block the confirmation email or the DocuSeal lease send.
 | Approval needed | Email only | Customer details; instructions to set column O | `Hi {Location} Manager,` |
 | Approval reminder #n | Email only | Customer details; reminder number | `Hi {Location} Manager,` |
 | Approval escalation | Email only | Sent to `ADMIN_EMAIL` when cap reached | none (addressed to admin, not a location manager) |
-| 24hr before pickup | Email + SMS | Customer name, date, deposit status, lease status, inspection link | `Hi {Location} Manager,` |
-| After rental ends | Email only | Customer name, date, post-trip inspection form link | `Hi {Location} Manager,` |
+| 24hr before pickup | Email + SMS | Customer name, date, deposit status, lease status — no inspection link (the blank pre-trip form is not sent to the manager) | `Hi {Location} Manager,` |
+| One hour after pre-trip inspection form completed | Email only | Customer name, vehicle, location, date, customer email, post-trip inspection form link | `Hi {Location} Manager,` |
 
 Each of the five manager-addressed templates opens with a greeting using that booking's location
 (column S) — e.g. `Hi Bainbridge Manager,`, `Hi Poulsbo Manager,`, `Hi Port Orchard Manager,`,
@@ -1815,11 +1882,21 @@ triggers.
 | `testLogStripeUrlForExistingBooking()` | Reads the first booking row with an event ID (col A) and vehicle type (col R). Logs the encoded `client_reference_id`, the vehicle type, and the Stripe Price ID that would be used. Includes a round-trip base64 decode check. No API call, no messages, no sheet writes. |
 | `testCreateStripeCheckoutSession()` | **MAKES A LIVE STRIPE API CALL** — creates a real Checkout Session. Reads the first booking row with an event ID (col A) and vehicle type (col R), generates `clientReferenceId` using the same encoding as `CalendarSync.js`, calls `createStripeCheckoutSession()`, and logs the returned session URL. Run only when intentionally testing the live Stripe integration. Never logged: secret key, full API response. Not in the runner. |
 
+### Reminder eligibility and send tests
+
+| Function | What it verifies |
+|---|---|
+| `testPreTripReminderEligibility()` | Pure test of `isPreTripReminderEligible()` (`Helpers.js`): normal-window eligibility, deposit-unpaid exclusion, late eligibility once deposit/approval arrive, permanent exclusion once the rental has started, and the already-sent (column K) no-duplicate case. |
+| `testSendPreTripReminderFlagBehavior()` | Stubs `sendSms`/`sendEmailHtml` (restored in `finally`) and a fake sheet to verify `sendPreTripReminder_()` only writes column K when the customer was actually reached — both channels failing writes nothing, either channel succeeding writes `Yes`, and no contact info on file is treated as delivered. |
+| `testInspectionCompletionFormatting()` | Pure test of `formatDateTimeShort()`, `formatInspectionCompletionValue()`, `parseInspectionCompletionTimestamp_()` (`Helpers.js`), and `isInspectionCompletionValueSet_()` (`Forms.js`): the `"Yes " + formatDateTimeShort(...)` format, a format-then-parse round trip, and that the parser/detector never guess on blank or malformed input. |
+| `testPostTripReminderEligibility()` | Pure test of `isPostTripReminderEligible()` (`Helpers.js`): not eligible while the pre-trip completion timestamp is unknown, not eligible before an hour has elapsed since completion, eligible at/after one hour, and the already-sent (column L) no-duplicate case. |
+| `testSendPostTripReminderFlagBehavior()` | Same pattern as `testSendPreTripReminderFlagBehavior()`, against `sendPostTripReminder_()` and column L. |
+
 ### Test runners
 
 | Function | What it does |
 |---|---|
-| `runAllSandboxConfigurationTests()` | Runs 18 tests in sequence: `validateConfig`, `testSheetConnection`, `testCalendarConfigs`, `testVehicleTypeAndLocationMapping`, `testStripeConfiguration`, `testDepositAmounts`, `testDocuSealPropertyNames`, `testSendGridConfiguration`, `testTwilioConfiguration`, `testLocationSenderConfig`, `testApprovalNotificationEligibility`, `testDocuSealEligibility`, `testIntakeFormSubmitRowMatching`, `testExtractIntakeSubmissionFields`, `testInspectionFormSubmitRowMatching`, `testExtractInspectionSubmissionFields`, `testFormSubmitDispatcher`, `testTriggerRegistrationIsWellFormed`. Logs a clear header before starting and a completion banner when all pass. |
+| `runAllSandboxConfigurationTests()` | Runs 23 tests in sequence: `validateConfig`, `testSheetConnection`, `testCalendarConfigs`, `testVehicleTypeAndLocationMapping`, `testStripeConfiguration`, `testDepositAmounts`, `testDocuSealPropertyNames`, `testSendGridConfiguration`, `testTwilioConfiguration`, `testLocationSenderConfig`, `testApprovalNotificationEligibility`, `testDocuSealEligibility`, `testIntakeFormSubmitRowMatching`, `testExtractIntakeSubmissionFields`, `testInspectionFormSubmitRowMatching`, `testExtractInspectionSubmissionFields`, `testFormSubmitDispatcher`, `testPreTripReminderEligibility`, `testSendPreTripReminderFlagBehavior`, `testInspectionCompletionFormatting`, `testPostTripReminderEligibility`, `testSendPostTripReminderFlagBehavior`, `testTriggerRegistrationIsWellFormed`. Logs a clear header before starting and a completion banner when all pass. |
 
 ### Standalone manual tests (not in runner)
 
@@ -2159,6 +2236,21 @@ Duplicates can happen in two scenarios:
    `hoursUntilStart` was exactly 0 or exactly 26, verify the actual timestamp difference.
 4. Check the Executions log for `processReminders` runs during the expected window.
 
+### The post-trip reminder did not fire
+
+1. Confirm column W (Pre-Inspection Form Completed) holds a `"Yes <date/time>"` value, not blank
+   and not a bare `Yes` — the post-trip reminder is timed from this recorded completion timestamp,
+   parsed by `parseInspectionCompletionTimestamp_()` in `Helpers.js`. If W is blank, the pre-trip
+   inspection form has not been submitted (or matched) yet.
+2. If W's timestamp portion is not a parseable date, `parseInspectionCompletionTimestamp_()`
+   returns `null` and the post-trip reminder can never fire for that row until W is corrected by
+   hand — this is a defensive "never guess" behavior, not a bug to route around.
+3. Confirm column L (Post-Rental Sent) is blank — a `Yes` means it already fired.
+4. The reminder fires on the first `processReminders` run where at least one hour has elapsed
+   since W's timestamp — check the Executions log for `processReminders` runs after that point.
+5. `POST_RENTAL_HOURS` and the booking's End Time (column F) are **not** used for this timing —
+   do not use them to predict when the post-trip reminder will fire.
+
 ### Stripe Checkout Session not created (syncCalendarBookings alert)
 
 1. Check the Executions log for `syncCalendarBookings` — look for `Stripe API error` followed by
@@ -2230,13 +2322,17 @@ two simultaneous eligible bookings under the same email could have a Stripe paym
 signature silently applied to the wrong row. Confirmed by code tracing; not yet observed in
 sandbox testing.
 
-**Pre-inspection link can be permanently skipped for a booking:** The 24-hour reminder branch in
-`processReminders` only sends the pre-trip inspection link when the deposit is already paid; if
-the deposit is still unpaid when the reminder window is reached, column K is still marked `Yes` on
-the "deposit due" branch (which contains no inspection link), so the pre-trip inspection link is
-never sent for that booking even if the deposit is paid afterward. Separately, if manager approval
-lands after the 24-hour reminder window has already closed, the reminder (and its inspection link)
-never fires at all, with no retry. Confirmed by code tracing; not yet observed in sandbox testing.
+**Pre-trip reminder can be permanently skipped for a booking:** `isPreTripReminderEligible()`
+(`Helpers.js`) requires the booking to be approved and the deposit paid before the pre-trip
+reminder (and its inspection link) is sent; a booking missing either one is safely re-evaluated on
+every `processReminders` run for as long as it remains inside the 26-hour window, so it is not
+permanently skipped as long as approval and payment both land before the window closes. If either
+one lands only after `hoursUntilStart` has already gone negative (the window closed), the pre-trip
+reminder never fires for that booking, with no retry — and because the post-trip reminder is timed
+from the pre-trip inspection's own completion timestamp (column W), a booking that never received
+its pre-trip reminder also never receives a post-trip reminder, even if the customer completes the
+inspection form some other way (e.g., a manually shared link). Confirmed by code tracing; not yet
+observed in sandbox testing.
 
 ### Stripe Checkout Session migration (complete)
 

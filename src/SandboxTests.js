@@ -1263,6 +1263,29 @@ function testInspectionFormSubmitRowMatching() {
     check('pre already Yes -- already_done, not an error', data, 'finished@example.com', null, 'pre', 'already_done', -1);
   })();
 
+  // ---- Regression test: a completion cell holding "Yes <timestamp>" (the
+  // format written by formatInspectionCompletionValue() in Helpers.js, e.g.
+  // "Yes 8/2/2026 9:15 AM") must be recognized as already done, exactly like
+  // a bare "Yes". Before isInspectionCompletionValueSet_() was introduced,
+  // this matcher used strict equality against 'Yes', which would have let a
+  // resubmission match and overwrite an already-recorded completion
+  // timestamp -- this proves that regression cannot reoccur.
+  (function alreadyDoneWithTimestampIsIdempotent() {
+    const data = [
+      [],
+      fakeRow('finished-ts@example.com', new Date('2026-08-01T10:00:00'), 'Yes 8/1/2026 9:15 AM', ''),
+    ];
+    check('pre already "Yes <timestamp>" -- still already_done, not re-matched',
+          data, 'finished-ts@example.com', null, 'pre', 'already_done', -1);
+
+    const dataPost = [
+      [],
+      fakeRow('finished-ts-post@example.com', new Date('2026-08-01T10:00:00'), '', 'Yes 8/1/2026 4:08 PM'),
+    ];
+    check('post already "Yes <timestamp>" -- still already_done, not re-matched',
+          dataPost, 'finished-ts-post@example.com', null, 'post', 'already_done', -1);
+  })();
+
   // ---- No matching booking -- no update ----
   (function noMatch() {
     const data = [
@@ -1453,6 +1476,62 @@ function testExtractInspectionSubmissionFields() {
       namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE]  = [LIVE_VAL_PRE];
       const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
       check('extraction succeeds with no date answer', event, 'customer@example.com', null, 'pre');
+    })();
+
+    // ---- submittedAt: a valid Timestamp answer is parsed into a real Date ----
+    // -- this is the value processInspectionFormSubmission_() (Forms.js) writes
+    // into columns W/X via formatInspectionCompletionValue(), and what
+    // isPostTripReminderEligible() (Helpers.js) measures the one-hour post-trip
+    // delay from, so it must reflect the actual submission time, not just any
+    // truthy value.
+    (function submittedAtValidTimestamp() {
+      const namedValues = {};
+      namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE]     = ['customer@example.com'];
+      namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE]      = [LIVE_VAL_PRE];
+      namedValues[INSPECT_RESPONSE_TIMESTAMP_QUESTION_TITLE] = ['8/1/2026 9:15:00'];
+      const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
+      const actual = extractInspectionSubmissionFields(event);
+      if (actual && actual.submittedAt instanceof Date && !isNaN(actual.submittedAt.getTime())) {
+        Logger.log('OK (valid Timestamp answer parses to a Date): submittedAt=' + actual.submittedAt);
+        passed++;
+      } else {
+        Logger.log('FAIL (valid Timestamp answer parses to a Date): got ' + JSON.stringify(actual));
+        failed++;
+      }
+    })();
+
+    // ---- submittedAt: a missing Timestamp answer -- never guess a time ----
+    (function submittedAtMissing() {
+      const namedValues = {};
+      namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE] = ['customer@example.com'];
+      namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE]  = [LIVE_VAL_PRE];
+      // no Timestamp key at all
+      const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
+      const actual = extractInspectionSubmissionFields(event);
+      if (actual && actual.submittedAt === null) {
+        Logger.log('OK (missing Timestamp answer -- submittedAt is null)');
+        passed++;
+      } else {
+        Logger.log('FAIL (missing Timestamp answer -- submittedAt is null): got ' + JSON.stringify(actual));
+        failed++;
+      }
+    })();
+
+    // ---- submittedAt: a malformed Timestamp answer -- never guess a time ----
+    (function submittedAtMalformed() {
+      const namedValues = {};
+      namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE]     = ['customer@example.com'];
+      namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE]      = [LIVE_VAL_PRE];
+      namedValues[INSPECT_RESPONSE_TIMESTAMP_QUESTION_TITLE] = ['not a real date'];
+      const event = fakeEvent(INSPECT_RESPONSE_SHEET_NAME, namedValues);
+      const actual = extractInspectionSubmissionFields(event);
+      if (actual && actual.submittedAt === null) {
+        Logger.log('OK (malformed Timestamp answer -- submittedAt is null, not a guess)');
+        passed++;
+      } else {
+        Logger.log('FAIL (malformed Timestamp answer -- submittedAt is null): got ' + JSON.stringify(actual));
+        failed++;
+      }
     })();
 
     // ---- Unrelated response-sheet submission is ignored (e.g. the intake form) ----
@@ -1765,6 +1844,228 @@ function testSendPreTripReminderFlagBehavior() {
 
   Logger.log(failed === 0
     ? 'All ' + passed + ' pre-trip reminder send/flag checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+}
+
+// ---------------------------------------------------------------------------
+// TEST 30: Inspection completion formatting/parsing (Helpers.js) [CONFIG]
+// Pure test against formatDateTimeShort(), formatInspectionCompletionValue(),
+// parseInspectionCompletionTimestamp_(), and isInspectionCompletionValueSet_()
+// (Forms.js) -- no sheet reads, no external calls. Confirms the round trip
+// (format then parse recovers the same moment) and that the parser/detector
+// never guess a time or a "done" state from ambiguous input.
+// ---------------------------------------------------------------------------
+function testInspectionCompletionFormatting() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) {
+      Logger.log('OK: ' + label);
+      passed++;
+    } else {
+      Logger.log('FAIL: ' + label);
+      failed++;
+    }
+  }
+
+  // ---- formatInspectionCompletionValue() produces "Yes <formatDateTimeShort>" ----
+  (function formatProducesYesPrefix() {
+    const date = new Date('2026-08-02T09:15:00');
+    const formatted = formatInspectionCompletionValue(date);
+    check('formatInspectionCompletionValue starts with "Yes "', formatted.indexOf('Yes ') === 0);
+    check('formatInspectionCompletionValue includes formatDateTimeShort output',
+          formatted === 'Yes ' + formatDateTimeShort(date));
+  })();
+
+  // ---- Round trip: parse(format(date)) recovers the same moment (to the minute) ----
+  (function roundTrip() {
+    const date = new Date('2026-08-02T16:08:00');
+    const formatted = formatInspectionCompletionValue(date);
+    const parsed = parseInspectionCompletionTimestamp_(formatted);
+    check('round trip recovers a non-null Date', parsed instanceof Date && !isNaN(parsed.getTime()));
+    check('round trip recovers the same minute', parsed && parsed.getFullYear() === date.getFullYear() &&
+          parsed.getMonth() === date.getMonth() && parsed.getDate() === date.getDate() &&
+          parsed.getHours() === date.getHours() && parsed.getMinutes() === date.getMinutes());
+  })();
+
+  // ---- parseInspectionCompletionTimestamp_() never guesses on bad input ----
+  (function parserRejectsBadInput() {
+    check('blank value -- null', parseInspectionCompletionTimestamp_('') === null);
+    check('undefined value -- null', parseInspectionCompletionTimestamp_(undefined) === null);
+    check('plain "Yes" with no timestamp -- null', parseInspectionCompletionTimestamp_('Yes') === null);
+    check('value not starting with Yes -- null', parseInspectionCompletionTimestamp_('8/2/2026 9:15 AM') === null);
+    check('"Yes" followed by unparseable text -- null', parseInspectionCompletionTimestamp_('Yes not a date') === null);
+  })();
+
+  // ---- isInspectionCompletionValueSet_() recognizes both the plain 'Yes' ----
+  // (column V) and 'Yes <timestamp>' (columns W/X) formats, and only those.
+  (function completionValueSetDetection() {
+    check('bare "Yes" is set', isInspectionCompletionValueSet_('Yes') === true);
+    check('"Yes <timestamp>" is set', isInspectionCompletionValueSet_('Yes 8/2/2026 9:15 AM') === true);
+    check('blank is not set', isInspectionCompletionValueSet_('') === false);
+    check('undefined is not set', isInspectionCompletionValueSet_(undefined) === false);
+    check('"No" is not set', isInspectionCompletionValueSet_('No') === false);
+    check('a value merely containing Yes later is not set (must start with Yes)',
+          isInspectionCompletionValueSet_('Not Yes') === false);
+  })();
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' inspection completion formatting/parsing checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+}
+
+// ---------------------------------------------------------------------------
+// TEST 31: Post-trip reminder eligibility (isPostTripReminderEligible) [CONFIG]
+// Pure test against the eligibility helper used by processReminders() to
+// decide whether a booking's post-trip reminder should be attempted. No
+// sheet reads, no external calls. Covers: not eligible before pre-trip
+// completion is known, not eligible before an hour has elapsed, eligible
+// once an hour has elapsed, and the already-sent no-duplicate case. Mirrors
+// testPreTripReminderEligibility's structure above.
+// ---------------------------------------------------------------------------
+function testPostTripReminderEligibility() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, hoursSincePreTripCompleted, sentPost, expected) {
+    const actual = isPostTripReminderEligible(hoursSincePreTripCompleted, sentPost);
+    if (actual === expected) {
+      Logger.log('OK (' + label + '): isPostTripReminderEligible(' + hoursSincePreTripCompleted + ', ' +
+                 JSON.stringify(sentPost) + ') = ' + actual);
+      passed++;
+    } else {
+      Logger.log('FAIL (' + label + '): expected ' + expected + ', got ' + actual +
+                 ' for hoursSincePreTripCompleted=' + hoursSincePreTripCompleted +
+                 ', sentPost=' + JSON.stringify(sentPost));
+      failed++;
+    }
+  }
+
+  // 1. Pre-trip inspection not yet completed (null -- unknown/unparseable) -- never eligible
+  check('pre-trip completion unknown -- not eligible', null, '', false);
+  check('pre-trip completion unknown, even with everything else true -- not eligible', null, '', false);
+
+  // 2. Less than one hour since pre-trip completion -- not yet eligible
+  check('30 minutes since pre-trip completion -- not eligible', 0.5, '', false);
+  check('just under an hour -- not eligible', 0.98, '', false);
+
+  // 3. Exactly one hour or more since pre-trip completion -- eligible
+  check('exactly one hour since pre-trip completion -- eligible', 1, '', true);
+  check('well over an hour since pre-trip completion -- eligible', 5, '', true);
+
+  // 4. L already Yes -- never re-eligible (no duplicate reminder)
+  check('L already Yes -- not eligible', 5, 'Yes', false);
+  check('L already Yes even with hours well past one -- not eligible', 100, 'Yes', false);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' post-trip reminder eligibility checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+}
+
+// ---------------------------------------------------------------------------
+// TEST 32: Post-trip reminder send-and-flag behavior (sendPostTripReminder_) [CONFIG]
+// Verifies that src/Reminders.js's sendPostTripReminder_() only writes column L
+// (Post-Rental Sent) when the customer was actually reached, matching the same
+// "delivered if reached by either channel" pattern as sendPreTripReminder_()
+// above. Uses a fake sheet object (no live Sheets API calls) and temporarily
+// stubs the global sendSms / sendEmailHtml functions so no real Twilio or
+// SendGrid call is made. Both stubbed functions are restored in a finally
+// block even if an assertion fails.
+// ---------------------------------------------------------------------------
+function testSendPostTripReminderFlagBehavior() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) {
+      Logger.log('OK: ' + label);
+      passed++;
+    } else {
+      Logger.log('FAIL: ' + label);
+      failed++;
+    }
+  }
+
+  function fakeSheet() {
+    const writes = [];
+    return {
+      writes: writes,
+      getRange: function(row, col) {
+        return {
+          setValue: function(value) {
+            writes.push({ row: row, col: col, value: value });
+          }
+        };
+      }
+    };
+  }
+
+  const fakeLocCfg = { email: 'sender@example.com', phone: '+12065550100' };
+
+  const realSendSms       = sendSms;
+  const realSendEmailHtml = sendEmailHtml;
+
+  try {
+    // ---- Both channels fail -- L is NOT marked Yes, no false "done" state ----
+    (function bothChannelsFail() {
+      sendSms       = function() { throw new Error('simulated Twilio outage'); };
+      sendEmailHtml = function() { throw new Error('simulated SendGrid outage'); };
+
+      const sheet = fakeSheet();
+      const result = sendPostTripReminder_(
+        sheet, 4, 'Test Customer', 'customer@example.com', '+12065551234',
+        fakeLocCfg, 'August 1, 2026 at 9:00 AM', 'Cargo Van', 'Bainbridge',
+        'https://example.com/post-inspect'
+      );
+
+      check('both channels failing returns false (not delivered)', result === false);
+      check('both channels failing writes nothing to column L', sheet.writes.length === 0);
+    })();
+
+    // ---- SMS succeeds even though email fails -- still delivered, L written ----
+    (function smsSucceedsEmailFails() {
+      sendSms       = function() { /* succeeds */ };
+      sendEmailHtml = function() { throw new Error('simulated SendGrid outage'); };
+
+      const sheet = fakeSheet();
+      const result = sendPostTripReminder_(
+        sheet, 4, 'Test Customer', 'customer@example.com', '+12065551234',
+        fakeLocCfg, 'August 1, 2026 at 9:00 AM', 'Cargo Van', 'Bainbridge',
+        'https://example.com/post-inspect'
+      );
+
+      check('sms success alone counts as delivered', result === true);
+      check('column L (row 5, col 12) written exactly once', sheet.writes.length === 1 &&
+            sheet.writes[0].row === 5 && sheet.writes[0].col === 12 && sheet.writes[0].value === 'Yes');
+    })();
+
+    // ---- No phone and no email on file -- treated as delivered (avoid endless retry) ----
+    (function noContactInfoAtAll() {
+      sendSms       = function() { throw new Error('should not be called -- no phone on file'); };
+      sendEmailHtml = function() { throw new Error('should not be called -- no email on file'); };
+
+      const sheet = fakeSheet();
+      const result = sendPostTripReminder_(
+        sheet, 4, 'Test Customer', 'No Email', 'No Phone',
+        fakeLocCfg, 'August 1, 2026 at 9:00 AM', 'Cargo Van', 'Bainbridge',
+        'https://example.com/post-inspect'
+      );
+
+      check('no contact info at all is treated as delivered (matches sendPreTripReminder_ precedent)', result === true);
+      check('column L still written when there is no way to reach the customer', sheet.writes.length === 1);
+    })();
+  } finally {
+    // Always restore the real functions, even if an assertion above failed.
+    sendSms       = realSendSms;
+    sendEmailHtml = realSendEmailHtml;
+  }
+
+  check('sendSms restored to the original function', sendSms === realSendSms);
+  check('sendEmailHtml restored to the original function', sendEmailHtml === realSendEmailHtml);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' post-trip reminder send/flag checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
 }
 
@@ -2212,13 +2513,14 @@ function testLocationSenderConfig() {
 // live sheet row (see testMarkDepositPaidRowLookup, testMarkLeaseSignedRowLookup).
 // testIntakeFormSubmitRowMatching, testInspectionFormSubmitRowMatching, the
 // two extraction tests, testFormSubmitDispatcher, testPreTripReminderEligibility,
-// and testSendPreTripReminderFlagBehavior are included because they are pure
-// tests against synthetic data (the latter two temporarily stub global
-// functions and always restore them, even on failure), with no sheet or form
-// dependency.
+// testSendPreTripReminderFlagBehavior, testInspectionCompletionFormatting,
+// testPostTripReminderEligibility, and testSendPostTripReminderFlagBehavior are
+// included because they are pure tests against synthetic data (the send/flag
+// tests temporarily stub global functions and always restore them, even on
+// failure), with no sheet or form dependency.
 // ---------------------------------------------------------------------------
 function runAllSandboxConfigurationTests() {
-  Logger.log('===== Running Sandbox Configuration Tests (20 tests) =====');
+  Logger.log('===== Running Sandbox Configuration Tests (23 tests) =====');
 
   const tests = [
     validateConfig,
@@ -2240,6 +2542,9 @@ function runAllSandboxConfigurationTests() {
     testFormSubmitDispatcher,
     testPreTripReminderEligibility,
     testSendPreTripReminderFlagBehavior,
+    testInspectionCompletionFormatting,
+    testPostTripReminderEligibility,
+    testSendPostTripReminderFlagBehavior,
     testTriggerRegistrationIsWellFormed,
   ];
 

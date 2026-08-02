@@ -45,10 +45,10 @@ Given a row, this is the order the columns are meant to fill in, and what each o
 | O | Manager's decision — **never written by the script** | Manager, manually |
 | P, Q | Manager reminder timestamp/count | `checkRentalEligibility` |
 | U | Customer told "you're approved" | `checkRentalEligibility` (only after O is approved **and** N = Yes) |
-| K | 24-hour reminder sent | `processReminders` |
-| W | Customer submitted the pre-trip inspection form | `processInspectionFormSubmission_` (via `onFormSubmit`) |
-| L | Post-rental reminder sent | `processReminders` |
-| X | Customer submitted the post-trip inspection form | `processInspectionFormSubmission_` (via `onFormSubmit`) |
+| K | Pre-trip reminder sent | `processReminders` |
+| W | Customer submitted the pre-trip inspection form — value is `Yes <date/time>`, and its timestamp is what times the post-trip reminder below | `processInspectionFormSubmission_` (via `onFormSubmit`) |
+| L | Post-trip reminder sent, about an hour after W's timestamp | `processReminders` |
+| X | Customer submitted the post-trip inspection form — value is `Yes <date/time>` | `processInspectionFormSubmission_` (via `onFormSubmit`) |
 
 If a column that "should" be filled in is blank, work backwards through this table to find the
 first blank one — that is almost always the actual blocker.
@@ -109,12 +109,21 @@ If you suspect this happened, check both rows' state manually and correct by han
 ### "The pre-trip or post-trip inspection link never arrived"
 
 1. Confirm the relevant reminder actually fired: column K (pre-trip) or L (post-trip) = `Yes`.
-2. For pre-trip specifically: if the deposit was unpaid when the 24-hour window was reached, the
-   reminder sent an urgency notice with **no inspection link**, and K is now `Yes` — so it will
-   not retry. See README §21 for this known limitation.
-3. If K/L is blank and it's well past the expected time, check whether `processReminders` is
-   actually running on schedule (Executions log) — the trigger may need reinstalling
-   (`setupTriggers()`), though this is rare since ordinary code changes don't require it.
+2. For pre-trip specifically: `isPreTripReminderEligible()` (`Helpers.js`) requires column G
+   (Deposit Paid) = `Yes` and column O (Rental Approved) to be an approved value. If either is
+   missing, K stays blank and the row is re-checked on every later `processReminders` run for as
+   long as it stays inside the 26-hour window — it is not permanently skipped unless the window
+   closes first. If `hoursUntilStart` has already gone negative with K still blank, that booking's
+   pre-trip reminder is permanently skipped; see README §21.
+3. For post-trip specifically: the reminder is timed from column W's recorded completion
+   timestamp, not from End Time — confirm W holds a parseable `Yes <date/time>` value and that at
+   least one hour has passed since that timestamp (`isPostTripReminderEligible()` in `Helpers.js`,
+   `parseInspectionCompletionTimestamp_()` for the parse). A blank W, or a W value the parser
+   rejects, means the post-trip reminder will never fire for that row until W is corrected.
+4. If K/L is blank, the eligibility conditions above are met, and it's well past the expected time,
+   check whether `processReminders` is actually running on schedule (Executions log) — the trigger
+   may need reinstalling (`setupTriggers()`), though this is rare since ordinary code changes don't
+   require it.
 
 ### "Inspection form was submitted but W/X never updated"
 

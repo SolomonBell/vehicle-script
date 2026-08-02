@@ -80,6 +80,41 @@ function formatDateTime(date) {
   return Utilities.formatDate(toDate(date, 'formatDateTime'), Session.getScriptTimeZone(), 'MMMM d, yyyy \'at\' h:mm a');
 }
 
+// Compact date/time format matching the style already used for the booking
+// Start Time and End Time cells (see CalendarSync.js's
+// setNumberFormat('m/d/yy h:mm AM/PM')), but with a four-digit year so the
+// value stays unambiguous when combined with a flag in one cell (see
+// formatInspectionCompletionValue() below). Same timezone mechanism
+// (Session.getScriptTimeZone()) as every other formatter in this file.
+function formatDateTimeShort(date) {
+  return Utilities.formatDate(toDate(date, 'formatDateTimeShort'), Session.getScriptTimeZone(), 'M/d/yyyy h:mm a');
+}
+
+// Builds the exact cell value written to columns W (Pre-Inspection Form
+// Completed) and X (Post-Inspection Form Completed) when the customer
+// completes the corresponding form: the literal flag 'Yes' plus the actual
+// form-submission time, combined in one cell (e.g. "Yes 8/2/2026 9:15 AM").
+// Pairs with parseInspectionCompletionTimestamp_() below, which reverses it.
+function formatInspectionCompletionValue(date) {
+  return 'Yes ' + formatDateTimeShort(date);
+}
+
+// Parses a completion-cell value written by formatInspectionCompletionValue()
+// back into a Date representing the recorded completion time. Returns null
+// if the value is blank, does not start with "Yes", or the remaining text
+// cannot be parsed as a date -- callers must treat null as "not completed"
+// or "completion time unknown" and never guess a time. Used by
+// processReminders() (Reminders.js) to measure elapsed time since the
+// pre-trip inspection was completed.
+function parseInspectionCompletionTimestamp_(cellValue) {
+  const text = String(cellValue || '').trim();
+  if (text.indexOf('Yes') !== 0) return null;
+  const remainder = text.slice(3).trim(); // strip the leading "Yes"
+  if (!remainder) return null;
+  const parsed = new Date(remainder);
+  return isNaN(parsed.getTime()) ? null : parsed;
+}
+
 function getDepositAmount(vehicleType) {
   const amounts = {
     'Cargo Van':    CONFIG.DEPOSIT_AMOUNT_CARGO_VAN,
@@ -179,6 +214,25 @@ function isPreTripReminderEligible(hoursUntilStart, sent24hr, approved, depositP
          sent24hr !== 'Yes' &&
          (approved === 'Approved - Free' || approved === 'Approved - Paid') &&
          depositPaid === 'Yes';
+}
+
+// Returns true only when the pre-trip inspection was completed at a known
+// time, at least one hour has elapsed since that completion, and the
+// post-trip reminder has not already been sent. hoursSincePreTripCompleted
+// is null when the pre-trip completion timestamp is missing or unparseable
+// (see parseInspectionCompletionTimestamp_()) -- in that case this always
+// returns false, since there is nothing to measure the one-hour delay from.
+// The one-hour delay is measured from the actual recorded completion time,
+// not from when the pre-trip reminder was sent or from the booking's Start
+// or End Time. Used by processReminders() (Reminders.js): re-checked on
+// every run, so a booking is picked up on the first run where an hour has
+// actually elapsed, with the same granularity as the processReminders()
+// trigger interval -- this is what makes the one-hour delay durable across
+// separate Apps Script executions without any timer or sleep call.
+function isPostTripReminderEligible(hoursSincePreTripCompleted, sentPost) {
+  return hoursSincePreTripCompleted !== null &&
+         hoursSincePreTripCompleted >= 1 &&
+         sentPost !== 'Yes';
 }
 
 // Returns { email, phone } for the given booking location — the from-address and

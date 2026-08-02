@@ -24,6 +24,7 @@ function processReminders() {
       const sent24hr  = row[10];
       const sentPost  = row[11];
       const approved  = row[14]; // O: Rental Approved
+      const preTripCompletionRaw = row[22]; // W: Pre-Inspection Form Completed
 
       if (isNaN(startTime)) continue;
 
@@ -49,54 +50,19 @@ function processReminders() {
           sendPreTripReminder_(sheet, i, name, email, phone, locCfg, dateStr, vehicleType, location, preUrl, row[13]);
         }
 
-        // Post-rental reminder
-        if (hoursAfterEnd >= CONFIG.POST_RENTAL_HOURS && sentPost !== 'Yes') {
-
-          // *** WRITE FLAG FIRST ***
-          sheet.getRange(i + 1, 12).setValue('Yes');
-          SpreadsheetApp.flush();
-
+        // Post-trip reminder. Fires exactly one hour after the pre-trip
+        // inspection was actually completed (see isPostTripReminderEligible
+        // in Helpers.js), not from the booking's End Time and not from when
+        // the pre-trip reminder was sent -- if the pre-trip inspection
+        // hasn't been completed yet, preTripCompletedAt is null and this
+        // never fires.
+        const preTripCompletedAt = parseInspectionCompletionTimestamp_(preTripCompletionRaw);
+        const hoursSincePreTripCompleted = preTripCompletedAt
+          ? (now - preTripCompletedAt.getTime()) / (1000 * 60 * 60)
+          : null;
+        if (isPostTripReminderEligible(hoursSincePreTripCompleted, sentPost)) {
           const postUrl = buildInspectUrl(name, email || '', rentalDate, 'post');
-
-          const sms =
-            CONFIG.COMPANY_NAME + ': Please complete the post-trip inspection for your ' +
-            vehicleType + ' rental at ' + location + ': ' + postUrl;
-
-          const emailHtml =
-            '<p>Hi ' + name + ',</p>' +
-            '<p>Thank you for completing your ' + vehicleType + ' rental ' +
-            'at our ' + location + ' location on ' + dateStr + '.</p>' +
-            '<p>Please complete the post-trip inspection form. ' +
-            'Your booking information is already filled in, just add the required photos and submit:</p>' +
-            '<p><a href="' + postUrl + '">Complete post-trip inspection</a></p>' +
-            '<p>We appreciate your business.</p>' +
-            '<p>Thank you,<br>' + CONFIG.COMPANY_NAME + '</p>';
-
-          if (phone !== 'No Phone') {
-            try { sendSms(phone, sms, locCfg.phone); }
-            catch(e) { Logger.log('Post-rental SMS failed for ' + name + ': ' + e); }
-          }
-          if (email !== 'No Email') {
-            try { sendEmailHtml(email, 'Post-trip inspection: ' + vehicleType + ' rental', emailHtml, locCfg.email, locCfg.email); }
-            catch(e) { Logger.log('Post-rental email failed for ' + name + ': ' + e); }
-          }
-
-          if (CONFIG.MANAGER_EMAIL) {
-            try {
-              const mgrPostHtml =
-                '<p>Hi ' + location + ' Manager,</p>' +
-                '<p>Post-trip inspection form sent to ' + name + '.</p>' +
-                '<p>' +
-                'Vehicle: ' + vehicleType + '<br>' +
-                'Location: ' + location + '<br>' +
-                'Rental date: ' + dateStr + '<br>' +
-                'Email: ' + email + '<br>' +
-                'Post-trip form: <a href="' + postUrl + '">View inspection form</a>' +
-                '</p>' +
-                '<p>If the form is not submitted within 24 hours, please follow up directly.</p>';
-              sendEmailHtml(CONFIG.MANAGER_EMAIL, 'Post-rental inspection: ' + name + ' (' + vehicleType + ')', mgrPostHtml, locCfg.email, locCfg.email);
-            } catch(e) { Logger.log('Post-rental manager email failed for ' + name + ': ' + e); }
-          }
+          sendPostTripReminder_(sheet, i, name, email, phone, locCfg, dateStr, vehicleType, location, postUrl);
         }
 
       } catch(e) {
@@ -143,9 +109,13 @@ function sendPreTripReminder_(sheet, rowIndex, name, email, phone, locCfg, dateS
     '<p>Hi ' + name + ',</p>' +
     '<p>This is a reminder that your ' + vehicleType + ' pickup at our ' +
     location + ' location is scheduled for ' + dateStr + '.</p>' +
-    '<p>Before using the vehicle, please complete the pre-trip inspection form. ' +
+    '<p>You must complete the pre-trip inspection form before you drive the vehicle. ' +
     'Your booking information is already filled in, just add the required photos and submit:</p>' +
-    '<p><a href="' + preUrl + '">Complete pre-trip inspection</a></p>';
+    '<p><a href="' + preUrl + '">Complete pre-trip inspection</a></p>' +
+    '<p>This same form has been sent by both email and text for your convenience. ' +
+    'You only need to complete it once.</p>' +
+    '<p>After you complete the pre-trip inspection, we will send you the post-trip inspection ' +
+    'form once the vehicle has been returned.</p>';
   if (leaseSigned !== 'Yes') {
     emailHtml +=
       '<p>Action needed: Your rental agreement has not been signed. ' +
@@ -157,7 +127,9 @@ function sendPreTripReminder_(sheet, rowIndex, name, email, phone, locCfg, dateS
 
   const sms =
     CONFIG.COMPANY_NAME + ': Your ' + vehicleType + ' pickup at ' + location +
-    ' is scheduled for ' + dateStr + '. Complete the pre-trip inspection before departure: ' + preUrl;
+    ' is scheduled for ' + dateStr + '. You must complete the pre-trip inspection before you drive ' +
+    'the vehicle: ' + preUrl + ' This same form was also emailed to you -- you only need to ' +
+    'complete it once. The post-trip form will follow once the pre-trip inspection is done.';
 
   let delivered = false;
 
@@ -188,8 +160,7 @@ function sendPreTripReminder_(sheet, rowIndex, name, email, phone, locCfg, dateS
     'Vehicle: ' + vehicleType + '<br>' +
     'Location: ' + location + '<br>' +
     'Date/time: ' + dateStr + '<br>' +
-    'Lease signed: ' + (leaseSigned === 'Yes' ? 'Yes' : 'Not yet') + '<br>' +
-    'Pre-trip inspection form: <a href="' + preUrl + '">Inspection form link</a>' +
+    'Lease signed: ' + (leaseSigned === 'Yes' ? 'Yes' : 'Not yet') +
     '</p>';
 
   if (CONFIG.MANAGER_EMAIL) {
@@ -199,6 +170,85 @@ function sendPreTripReminder_(sheet, rowIndex, name, email, phone, locCfg, dateS
   if (CONFIG.MANAGER_PHONE) {
     try { sendSms(CONFIG.MANAGER_PHONE, "Tomorrow's rental: " + name + ' — ' + vehicleType + ' at ' + location + ' on ' + dateStr + '.', locCfg.phone); }
     catch(e) { Logger.log('Manager SMS failed: ' + e); }
+  }
+
+  return true;
+}
+
+// ============================================================
+// SEND POST-TRIP REMINDER (called once per eligible row from
+// processReminders(), only after isPostTripReminderEligible() has already
+// confirmed the pre-trip inspection was completed at least one hour ago and
+// the post-trip reminder has not already been sent)
+// ------------------------------------------------------------
+// Sends the customer's post-trip reminder (SMS + email, including the
+// post-trip inspection link) and, only if at least one channel actually
+// delivers, writes column L (Post-Rental Sent) = Yes and sends the
+// manager's post-trip notice. Mirrors sendPreTripReminder_() above exactly:
+// same "delivered if reached by either channel" pattern, same
+// no-contact-info fallback, and the manager notice is sent only when the
+// customer reminder was delivered so column L still fully represents one
+// successful send operation and neither message is ever duplicated.
+//
+// Returns true if the reminder was delivered and L was written, false
+// otherwise -- used by tests; processReminders() does not use the
+// return value.
+// ============================================================
+function sendPostTripReminder_(sheet, rowIndex, name, email, phone, locCfg, dateStr, vehicleType, location, postUrl) {
+  const emailSubject = 'Post-trip inspection: ' + vehicleType + ' rental';
+  const emailHtml =
+    '<p>Hi ' + name + ',</p>' +
+    '<p>Thank you for completing your ' + vehicleType + ' rental ' +
+    'at our ' + location + ' location on ' + dateStr + '.</p>' +
+    '<p>Now that the vehicle has been returned, please complete the post-trip inspection form. ' +
+    'Your booking information is already filled in, just add the required photos and submit:</p>' +
+    '<p><a href="' + postUrl + '">Complete post-trip inspection</a></p>' +
+    '<p>This same form has been sent by both email and text for your convenience. ' +
+    'You only need to complete it once.</p>' +
+    '<p>We appreciate your business.</p>' +
+    '<p>Thank you,<br>' + CONFIG.COMPANY_NAME + '</p>';
+
+  const sms =
+    CONFIG.COMPANY_NAME + ': Please complete the post-trip inspection for your ' +
+    vehicleType + ' rental at ' + location + ' now that the vehicle has been returned: ' + postUrl +
+    ' This same form was also emailed to you -- you only need to complete it once.';
+
+  let delivered = false;
+
+  if (phone && phone !== 'No Phone') {
+    try { sendSms(phone, sms, locCfg.phone); delivered = true; }
+    catch(e) { Logger.log('Post-trip SMS failed for ' + name + ': ' + e); }
+  }
+  if (email && email !== 'No Email') {
+    try { sendEmailHtml(email, emailSubject, emailHtml, locCfg.email, locCfg.email); delivered = true; }
+    catch(e) { Logger.log('Post-trip email failed for ' + name + ': ' + e); }
+  }
+  if ((!phone || phone === 'No Phone') && (!email || email === 'No Email')) {
+    Logger.log('sendPostTripReminder_: no email or phone for ' + name + ' (row ' + (rowIndex + 1) +
+               ') — marking post-trip reminder sent to avoid endless retry');
+    delivered = true;
+  }
+
+  if (!delivered) return false;
+
+  sheet.getRange(rowIndex + 1, 12).setValue('Yes'); // L: Post-Rental Sent
+  SpreadsheetApp.flush();
+
+  const mgrPostHtml =
+    '<p>Hi ' + location + ' Manager,</p>' +
+    '<p>Post-trip inspection form sent to ' + name + '.</p>' +
+    '<p>' +
+    'Vehicle: ' + vehicleType + '<br>' +
+    'Location: ' + location + '<br>' +
+    'Rental date: ' + dateStr + '<br>' +
+    'Email: ' + email + '<br>' +
+    'Post-trip form: <a href="' + postUrl + '">View inspection form</a>' +
+    '</p>' +
+    '<p>If the form is not submitted within 24 hours, please follow up directly.</p>';
+
+  if (CONFIG.MANAGER_EMAIL) {
+    try { sendEmailHtml(CONFIG.MANAGER_EMAIL, 'Post-rental inspection: ' + name + ' (' + vehicleType + ')', mgrPostHtml, locCfg.email, locCfg.email); }
+    catch(e) { Logger.log('Post-trip manager email failed: ' + e); }
   }
 
   return true;

@@ -115,11 +115,12 @@ test) booking through the entire flow, watching the Executions log at each step:
 5. Sign the lease (Test 5).
 6. Confirm the manager approval flow and customer approval gating behave correctly (Tests 3 and 6)
    — this is the highest-value thing to watch closely, since it's the most recently changed logic.
-7. If feasible, wait for or manually time-shift through the 24-hour and post-rental windows to
-   confirm Tests 7–10 also succeed in production, not just sandbox — these are the items still
-   marked "not yet validated" as of this writing, and passing them in sandbox does not guarantee
-   identical production Script Property values (e.g. `POST_RENTAL_HOURS`,
-   `HOURS_BETWEEN_APPROVAL_REMINDERS`) produce the same timing.
+7. If feasible, wait for or manually time-shift through the pre-trip window and the one-hour
+   post-trip delay to confirm Tests 7–10 also succeed in production, not just sandbox — these are
+   the items still marked "not yet validated" as of this writing, and passing them in sandbox does
+   not guarantee an identical production `HOURS_BETWEEN_APPROVAL_REMINDERS` value produces the same
+   approval-reminder timing. (`POST_RENTAL_HOURS` no longer affects post-trip reminder timing —
+   see [docs/testing-plan.md](testing-plan.md) Test 9.)
 8. Only after this full pass succeeds should real customer bookings be allowed to flow through
    unattended.
 

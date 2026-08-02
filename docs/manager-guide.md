@@ -166,9 +166,13 @@ These two steps can happen in **either order** — the system handles both order
 
 | Step | Who | What happens | What the manager should do |
 |---|---|---|---|
-| 16 | System (automatic) | After the rental ends, the customer receives a post-rental message with the post-trip inspection form link. | Nothing required to send it. |
-| 17 | System (automatic) | You receive a post-rental inspection notice. | **Review it.** |
+| 16 | System (automatic) | About an hour after the customer completes the pre-trip inspection form (step 14) — not after the rental ends — the customer receives a message with the post-trip inspection form link. | Nothing required to send it. |
+| 17 | System (automatic) | You receive a post-trip inspection notice. | **Review it.** |
 | 18 | Customer | Submits the post-trip inspection form. | **Check that it was completed** and follow up if not. |
+
+Note: if the customer never submits the pre-trip inspection form, the post-trip message never
+gets sent, since it's timed from the pre-trip form's completion, not from a fixed time after
+pickup or drop-off.
 
 ---
 
@@ -188,8 +192,8 @@ not a routing decision.
 | **Approval request** ("Action needed: approve rental for...") | Manager (email) | Once the customer's welcome message has gone out | Customer and rental details, and the three approval choices | **Yes — decide and set Rental Approved** |
 | **Approval reminder** ("Reminder #N: approve rental for...") | Manager (email) | Repeats periodically if you haven't yet set Rental Approved | Same details, noting this is a follow-up | **Yes — same as above** |
 | **Approval escalation** | **Administrator**, not the manager | If reminders go unanswered past a set number of attempts | Notes that the manager hasn't responded and to follow up directly | Administrator-facing; if you see this was sent, follow up on the approval yourself |
-| **24-hour rental summary** | Manager (email + text) | About a day before the scheduled pickup, once the customer's reminder was actually delivered | Customer, vehicle, location, date/time, whether the lease is signed, and the pre-trip inspection link | Review and prepare the vehicle |
-| **Post-rental inspection notice** | Manager (email) | After the rental ends, once the post-rental customer message was sent | Customer, vehicle, location, date, and the post-trip inspection link | Review; follow up if the form isn't submitted within a day |
+| **24-hour rental summary** | Manager (email + text) | About a day before the scheduled pickup, once the customer's reminder was actually delivered | Customer, vehicle, location, date/time, whether the lease is signed — does **not** include the pre-trip inspection link, since the blank form is only ever sent to the customer | Review and prepare the vehicle |
+| **Post-trip inspection notice** | Manager (email) | About an hour after the customer completes the pre-trip inspection form, once the post-trip customer message was sent | Customer, vehicle, location, date, and the post-trip inspection link | Review; follow up if the form isn't submitted within a day |
 
 A note on the approval escalation: it is the one manager-related message that does **not** go to
 a location manager — it goes to the system administrator, because at that point the system has
@@ -208,8 +212,8 @@ a customer asks "did I miss something?"
 | **Deposit confirmation** | Right after the deposit step completes | Confirms the deposit, and lets them know the lease is coming |
 | **Lease (rental agreement)** | Once both intake and deposit are done | Sent directly by DocuSeal — the customer signs here |
 | **"Your rental is approved" email/text** | Once you've approved **and** the lease is signed | The one-time notice that everything is confirmed |
-| **24-hour reminder** | About a day before pickup | Reminds them of pickup time and includes the pre-trip inspection form |
-| **Post-rental message** | After the rental ends | Thanks them and includes the post-trip inspection form |
+| **24-hour reminder** | About a day before pickup | Reminds them of pickup time and includes the pre-trip inspection form (says the form must be completed before driving, and that the post-trip form follows once pre-trip is done) |
+| **Post-trip reminder** | About an hour after they complete the pre-trip inspection form | Thanks them and includes the post-trip inspection form |
 
 ---
 
@@ -231,7 +235,7 @@ exact current columns, in order.
 | I | Intake Sent | System, at booking creation | `Yes` once the welcome email (with the intake link) has been sent. This means the *link was emailed*, not that the customer filled it out — see column V for that. | No |
 | J | Lease Sent | System, once deposit and intake are both done | `Yes` once the rental agreement has been sent out for signature. | No |
 | K | 24hr Sent | System, about a day before pickup | `Yes` once the 24-hour reminder was actually delivered to the customer. | No |
-| L | Post-Rental Sent | System, after the rental ends | `Yes` once the post-rental message was sent. | No |
+| L | Post-Rental Sent | System, about an hour after the customer completes the pre-trip inspection form | `Yes` once the post-trip message was sent. | No |
 | M | Second Driver Email | System, at booking creation | The second driver's email, if the booking included one. Otherwise blank/placeholder. | No |
 | N | Lease Signed | System, once DocuSeal confirms signing | `Yes` once the lease has been fully signed. | No |
 | O | Rental Approved | **Manager** | Your decision. See [Section 8](#8-manager-approval-process) for the exact accepted values. | **Yes — this is the field you're expected to set.** |
@@ -242,11 +246,13 @@ exact current columns, in order.
 | T | DocuSeal Submission ID | System, when the lease is sent | An internal reference number for the signed lease. Used to match the signing confirmation back to the right booking. | No |
 | U | Customer Approval Notified | System, once approval + signing conditions are both met | `Yes` once the customer's "your rental is approved" message has been sent, so it's never sent twice. | No |
 | V | Intake Form Completed | System, when the customer actually submits the intake form | `Yes` once the customer has submitted the intake form (not just been sent the link). | No |
-| W | Pre-Inspection Form Completed | System, when the customer actually submits the pre-trip inspection form | `Yes` once the pre-trip inspection form has been submitted. | No — see [Section 9](#9-inspection-forms) |
-| X | Post-Inspection Form Completed | System, when the customer actually submits the post-trip inspection form | `Yes` once the post-trip inspection form has been submitted. | No — see [Section 9](#9-inspection-forms) |
+| W | Pre-Inspection Form Completed | System, when the customer actually submits the pre-trip inspection form | `Yes` followed by the date and time it was submitted (e.g. `Yes 8/2/2026 9:15 AM`) once the pre-trip inspection form has been submitted. This timestamp is also what the system uses to time the post-trip message (see [Section 9](#9-inspection-forms)). | No — see [Section 9](#9-inspection-forms) |
+| X | Post-Inspection Form Completed | System, when the customer actually submits the post-trip inspection form | `Yes` followed by the date and time it was submitted (e.g. `Yes 8/2/2026 4:08 PM`) once the post-trip inspection form has been submitted. | No — see [Section 9](#9-inspection-forms) |
 
-**In every column except O, "blank" means "hasn't happened yet" and "Yes" means "done." There is
-no other accepted value in these Yes/blank columns.**
+**In every column except O, W, and X, "blank" means "hasn't happened yet" and "Yes" means "done."
+There is no other accepted value in these Yes/blank columns. Columns W and X are the two
+exceptions: instead of a bare `Yes`, they hold `Yes` plus the exact date and time the form was
+submitted, in the same cell — blank still means "not done."**
 
 ---
 
@@ -350,12 +356,19 @@ tells the system which one they're completing. The two exact accepted answers ar
 
 | | Pre-trip inspection | Post-trip inspection |
 |---|---|---|
-| When the link is sent | With the 24-hour reminder, about a day before pickup | With the post-rental message, after the rental ends |
+| When the link is sent | With the 24-hour reminder, about a day before pickup | About an hour after the customer completes the pre-trip inspection form |
 | Sheet column it completes | W (Pre-Inspection Form Completed) | X (Post-Inspection Form Completed) |
 
-**A blank W or X simply means the customer hasn't submitted that form yet.** It does not, by
-itself, block or delay anything else in the workflow today — but it's still something you should
-follow up on, since it's the vehicle-condition record for that rental.
+**A blank X simply means the customer hasn't submitted the post-trip form yet.** It does not, by
+itself, block or delay anything else in the workflow — but it's still something you should follow
+up on, since it's the vehicle-condition record for that rental.
+
+**A blank W is different: it also means the post-trip message has not gone out yet.** The
+post-trip inspection link is only sent once the pre-trip form is completed (plus about an hour) —
+so if a customer never submits the pre-trip form, they will never automatically receive the
+post-trip link either. If a rental has ended and W is still blank, that's worth following up on
+for two reasons: the pre-trip inspection record is missing, and the post-trip message hasn't been
+triggered.
 
 ### If a customer says they submitted the form but the sheet still shows blank
 
@@ -373,6 +386,12 @@ submission is genuinely missing, the right move is to have the customer resubmit
 it — not to edit the column directly, which can hide a real problem (for example, a submission
 that came in but was matched to the wrong booking, or wasn't matched at all because of a mismatch
 in the confirmed email address or date).
+
+For column W specifically, there's an additional reason: the system reads the date/time that
+follows `Yes` in that cell to decide when to send the post-trip message (about an hour later). A
+hand-entered `Yes` with no date/time, or a date/time the system can't parse, means the post-trip
+message will never be sent automatically for that booking — the system will not guess a
+completion time it wasn't actually given.
 
 Both the intake form and both inspection forms live inside the same overall system — you don't
 need to know the technical details of how submissions are matched to bookings to use this guide;
@@ -488,11 +507,15 @@ For each issue: check the listed items, avoid the listed edits, and escalate whe
 **Pre-trip form was submitted but column W is still blank**
 - Follow the same steps as the intake-form entry above, applied to W instead of V.
 
-**Post-rental email did not send**
-- Check: has enough time passed since the scheduled end time? This message goes out a set number
-  of hours after the rental's end time.
+**Post-trip email did not send**
+- Check: has the customer actually completed the pre-trip inspection form (column W)? This message
+  is timed from that completion, about an hour later — **not** from the rental's scheduled end
+  time or how long ago pickup happened. If W is still blank, the post-trip message will not go out
+  yet, no matter how much time has passed since the rental ended.
+- Check: has at least an hour passed since the date/time shown in column W?
 - Do not: manually mark column L as `Yes`.
-- Escalate if: well past that window and still nothing has gone out.
+- Escalate if: column W shows a completion time more than an hour or two in the past and still
+  nothing has gone out.
 
 **Post-trip form was submitted but column X is still blank**
 - Follow the same steps as the intake-form entry above, applied to X instead of V.
@@ -696,12 +719,12 @@ As of this writing, the following have been validated end-to-end:
 
 The following are implemented but still awaiting final operational validation:
 
-- The automatic 24-hour reminder actually firing on schedule
-- The manager 24-hour greeting and summary
-- Pre-trip inspection completion tracking (column W)
-- The post-rental reminder actually firing on schedule
-- The manager post-rental greeting and notice
-- Post-trip inspection completion tracking (column X)
+- The automatic pre-trip reminder actually firing on schedule
+- The manager pre-trip greeting and summary
+- Pre-trip inspection completion tracking with the actual submission time (column W)
+- The post-trip reminder actually firing about an hour after pre-trip completion
+- The manager post-trip greeting and notice
+- Post-trip inspection completion tracking with the actual submission time (column X)
 
 If you notice any of the "still awaiting validation" items behaving unexpectedly, that is
 valuable information — please report it to the system administrator rather than assuming it's a

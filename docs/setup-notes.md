@@ -202,8 +202,8 @@ Row 1 headers (columns A–X). Columns R, S, U, V, W, and X are written by `sync
 | T   | DocuSeal Submission ID  | markDepositPaid / processIntakeFormSubmission_ / sendLeaseToNewBookings (via sendLeaseViaDocuSeal) |
 | U   | Customer Approval Notified | checkRentalEligibility (via notifyCustomerOfApproval) |
 | V   | Intake Form Completed   | processIntakeFormSubmission_, called from onFormSubmit (installable trigger — see below) |
-| W   | Pre-Inspection Form Completed | processInspectionFormSubmission_, called from onFormSubmit (installable trigger — see below) |
-| X   | Post-Inspection Form Completed | processInspectionFormSubmission_, called from onFormSubmit (installable trigger — see below) |
+| W   | Pre-Inspection Form Completed | processInspectionFormSubmission_, called from onFormSubmit (installable trigger — see below); value is `"Yes <date/time>"`, not a bare `Yes` |
+| X   | Post-Inspection Form Completed | processInspectionFormSubmission_, called from onFormSubmit (installable trigger — see below); value is `"Yes <date/time>"`, not a bare `Yes` |
 
 **Column U** is a simple `Yes`/blank flag, same pattern as I/J/K/L. It tracks whether the
 customer has been sent the one-time "your rental is approved" notification, so the notification
@@ -250,19 +250,29 @@ which the script could observe it.
 > tab's history. The event-driven flag does the matching work exactly once, at submission time,
 > for the cost of one row write — no matter how large the response sheets grow.
 
-**Columns W and X** are the same simple `Yes`/blank pattern as U and V, tracking whether the
-pre-trip and post-trip inspection forms were actually *submitted* — sending the link (in the
-24-hour reminder and the post-rental message, both in `processReminders`) is unchanged by this and
-does not by itself set either flag. Both are written only inside `processInspectionFormSubmission_()`,
-the inspection form's equivalent of `processIntakeFormSubmission_()`, also called only from
-`onFormSubmit()`. The two columns are tracked completely independently: a pre-trip submission only
-ever writes W, a post-trip submission only ever writes X, and each is idempotent on its own — a
-resubmission of an already-completed inspection is a silent no-op, not an error and not a
-duplicate write. Neither column currently gates any downstream behaviour (no code reads W or X
-anywhere else) — this task only records completion; see "Matching an inspection submission to the
-correct booking row" below for the matching details, and the note in `README.md` under "Vehicle
-Inspection Form" confirming that gating on these columns is explicitly out of scope for this
-change.
+**Columns W and X** track whether the pre-trip and post-trip inspection forms were actually
+*submitted*, like U and V, but unlike those two they are not a bare `Yes`/blank flag — each holds
+`"Yes " + formatDateTimeShort(submittedAt)` (e.g. `Yes 8/2/2026 9:15 AM`), combining the completion
+flag and the actual form-submission time in one cell (`formatInspectionCompletionValue()` in
+`src/Helpers.js`). The timestamp comes from the response sheet's own Google-Forms-generated
+`Timestamp` column (`e.namedValues['Timestamp']`, read in `extractInspectionSubmissionFields()` in
+`src/Forms.js`) — the actual moment the customer submitted the form, not the time the script
+happens to process the event. Both columns are written only inside
+`processInspectionFormSubmission_()`, the inspection form's equivalent of
+`processIntakeFormSubmission_()`, also called only from `onFormSubmit()`. The two columns are
+tracked completely independently: a pre-trip submission only ever writes W, a post-trip submission
+only ever writes X, and each is idempotent on its own — a resubmission of an already-completed
+inspection is a silent no-op, not an error and not a duplicate write (recognized by
+`isInspectionCompletionValueSet_()`, which treats any value with a `Yes` prefix as done, regardless
+of the timestamp text that follows it — see below).
+
+**Column W now gates the post-trip reminder's timing.** `processReminders` reads W back via
+`parseInspectionCompletionTimestamp_()` (`src/Helpers.js`) and sends the post-trip reminder on the
+first run at least one hour after that recorded completion time (`isPostTripReminderEligible()`) —
+see the `Reminders.js — Engine 3` entry in [README.md's Source File
+Reference](../README.md#5-source-file-reference). Column X is still not read anywhere else in the
+code — it only records completion. See "Matching an inspection submission to the correct booking
+row" below for the matching details.
 
 ### Matching an intake submission to the correct booking row
 

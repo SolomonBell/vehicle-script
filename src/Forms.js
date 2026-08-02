@@ -25,6 +25,20 @@ function buildInspectUrl(name, email, rentalDate, type) {
     + '&entry.' + CONFIG.INSPECT_ENTRY_TYPE  + '=' + encodeURIComponent(typeVal);
 }
 
+// Returns true for any completion-cell value that has already been marked
+// done -- both the plain 'Yes' used by column V (Intake Form Completed) and
+// the 'Yes <timestamp>' format used by columns W and X (Pre-/Post-Inspection
+// Form Completed, see formatInspectionCompletionValue() in Helpers.js). A
+// value is considered "set" purely by its 'Yes' prefix; the timestamp
+// portion, if any, does not need to be parseable for this check -- that is
+// a separate concern handled by parseInspectionCompletionTimestamp_() in
+// Helpers.js. Used by findBookingMatchRow_() below so it treats every
+// completion-flag format in this codebase identically when deciding whether
+// a row is still eligible to be matched.
+function isInspectionCompletionValueSet_(cellValue) {
+  return typeof cellValue === 'string' && cellValue.trim().indexOf('Yes') === 0;
+}
+
 // Pure row-matching logic shared by processIntakeFormSubmission_() and
 // processInspectionFormSubmission_(), separated out so it can be
 // unit-tested with synthetic data (no sheet reads, no live form event).
@@ -39,7 +53,10 @@ function buildInspectUrl(name, email, rentalDate, type) {
 // handled for the specific document being matched (V for intake, W for
 // pre-inspection, X for post-inspection) -- callers pass whichever column
 // applies so the same algorithm and the same "never guess" guarantee apply
-// to every form-submit handler in this codebase.
+// to every form-submit handler in this codebase. "Already handled" is
+// determined by isInspectionCompletionValueSet_() above, not by an exact
+// 'Yes' string match, so this works whether the column holds a bare 'Yes'
+// (V) or 'Yes <timestamp>' (W, X).
 //
 // dateStr, when provided, must already be in 'yyyy-MM-dd' form (the same
 // format formatDateForForm() uses to pre-fill the date field). Pass null to
@@ -79,7 +96,7 @@ function findBookingMatchRow_(data, email, dateStr, completionColIndex) {
     return { status: 'not_found', row: -1, precision: null };
   }
 
-  const eligible = withEmail.filter(function(i) { return data[i][completionColIndex] !== 'Yes'; });
+  const eligible = withEmail.filter(function(i) { return !isInspectionCompletionValueSet_(data[i][completionColIndex]); });
 
   if (eligible.length === 0) {
     return { status: 'already_done', row: -1, precision: null };
@@ -208,6 +225,16 @@ const INSPECT_RESPONSE_EMAIL_QUESTION_TITLE = 'Email Address';
 const INSPECT_RESPONSE_DATE_QUESTION_TITLE  = 'Rental Date';
 const INSPECT_RESPONSE_TYPE_QUESTION_TITLE  = 'Inspection Type';
 
+// Google Forms automatically adds a "Timestamp" column to every linked
+// response sheet, recording the actual moment the response was submitted --
+// this is a standard Google Forms behavior, not a question the form author
+// added, so it is not expected to ever be retitled the way the questions
+// above might be. Used to record the customer's actual pre-/post-trip
+// inspection completion time (see extractInspectionSubmissionFields() and
+// processInspectionFormSubmission_() below), rather than the time the
+// script happens to process the event.
+const INSPECT_RESPONSE_TIMESTAMP_QUESTION_TITLE = 'Timestamp';
+
 // Tab name of the linked inspection-form response sheet, within the SAME
 // spreadsheet as Bookings and the intake form (all three are tabs in the
 // one spreadsheet identified by the SHEET_ID Script Property -- there is no
@@ -237,14 +264,20 @@ const INSPECT_RESPONSE_SHEET_NAME = 'Rental Vehicle Condition Inspection Form';
 // normalized configured value is left unclassified (type: null) rather than
 // guessed.
 //
-// Returns { email, date, type, rawType } on success, where:
+// Returns { email, date, type, rawType, submittedAt } on success, where:
 //   - date is null if it was blank or unparseable (findInspectionMatchRow()
 //     handles that safely via its email-only fallback),
 //   - type is 'pre', 'post', or null if the normalized answer was neither
 //     -- the caller must refuse to update anything in that case and must
-//     never guess the type, and
+//     never guess the type,
 //   - rawType is the trimmed, original-case submitted answer, kept only for
-//     admin-alert context when type is null.
+//     admin-alert context when type is null, and
+//   - submittedAt is the actual form-submission time as a Date, read from
+//     the sheet's automatic "Timestamp" column (see
+//     INSPECT_RESPONSE_TIMESTAMP_QUESTION_TITLE above) -- null if that
+//     column is missing or unparseable, in which case the caller falls back
+//     to the time it happens to be processing the event (see
+//     processInspectionFormSubmission_() below).
 // Returns null if:
 //   - the event object doesn't look like a spreadsheet form-submit event
 //     (missing e.range or e.namedValues), or
@@ -258,13 +291,15 @@ function extractInspectionSubmissionFields(e) {
   const sourceSheetName = e.range.getSheet().getName();
   if (sourceSheetName !== INSPECT_RESPONSE_SHEET_NAME) return null;
 
-  const emailValues = e.namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE];
-  const dateValues  = e.namedValues[INSPECT_RESPONSE_DATE_QUESTION_TITLE];
-  const typeValues  = e.namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE];
+  const emailValues     = e.namedValues[INSPECT_RESPONSE_EMAIL_QUESTION_TITLE];
+  const dateValues      = e.namedValues[INSPECT_RESPONSE_DATE_QUESTION_TITLE];
+  const typeValues      = e.namedValues[INSPECT_RESPONSE_TYPE_QUESTION_TITLE];
+  const timestampValues = e.namedValues[INSPECT_RESPONSE_TIMESTAMP_QUESTION_TITLE];
 
-  const email   = (emailValues && emailValues[0] ? emailValues[0] : '').toString().toLowerCase().trim();
-  const rawDate = (dateValues && dateValues[0] ? dateValues[0] : '').toString().trim();
-  const rawType = (typeValues && typeValues[0] ? typeValues[0] : '').toString().trim();
+  const email        = (emailValues && emailValues[0] ? emailValues[0] : '').toString().toLowerCase().trim();
+  const rawDate      = (dateValues && dateValues[0] ? dateValues[0] : '').toString().trim();
+  const rawType      = (typeValues && typeValues[0] ? typeValues[0] : '').toString().trim();
+  const rawTimestamp = (timestampValues && timestampValues[0] ? timestampValues[0] : '').toString().trim();
 
   if (!email) return null;
 
@@ -274,6 +309,14 @@ function extractInspectionSubmissionFields(e) {
     catch(dateErr) { date = null; }
   }
 
+  let submittedAt = null;
+  if (rawTimestamp) {
+    try {
+      const parsed = new Date(rawTimestamp);
+      submittedAt = isNaN(parsed.getTime()) ? null : parsed;
+    } catch(timestampErr) { submittedAt = null; }
+  }
+
   const normalizedType = String(rawType).trim().toLowerCase();
   const normalizedPre  = String(CONFIG.INSPECT_VAL_PRE).trim().toLowerCase();
   const normalizedPost = String(CONFIG.INSPECT_VAL_POST).trim().toLowerCase();
@@ -281,7 +324,7 @@ function extractInspectionSubmissionFields(e) {
   if (normalizedType === normalizedPre)       type = 'pre';
   else if (normalizedType === normalizedPost) type = 'post';
 
-  return { email: email, date: date, type: type, rawType: rawType };
+  return { email: email, date: date, type: type, rawType: rawType, submittedAt: submittedAt };
 }
 
 // ============================================================
@@ -521,9 +564,18 @@ function processInspectionFormSubmission_(e) {
 
     const i   = match.row;
     const col = fields.type === 'pre' ? 23 : 24; // W: Pre-Inspection Form Completed / X: Post-Inspection Form Completed
-    sheet.getRange(i + 1, col).setValue('Yes');
+    // Use the actual form-submission time (fields.submittedAt, read from the
+    // response sheet's own Timestamp column) whenever it's available, so the
+    // recorded completion time -- and the one-hour post-trip delay measured
+    // from it, see isPostTripReminderEligible() in Helpers.js -- reflects
+    // when the customer actually submitted the form. Falling back to the
+    // time this handler happens to run is a rare, defensive fallback for the
+    // unlikely case the Timestamp column is missing or unparseable.
+    const completedAt = fields.submittedAt || new Date();
+    sheet.getRange(i + 1, col).setValue(formatInspectionCompletionValue(completedAt));
     Logger.log('processInspectionFormSubmission_: marked ' + fields.type + '-inspection complete for ' +
-               'row ' + (i + 1) + ' (matched by ' + match.precision + ')');
+               'row ' + (i + 1) + ' at ' + formatDateTimeShort(completedAt) +
+               ' (matched by ' + match.precision + ')');
   } catch(err) {
     Logger.log('processInspectionFormSubmission_ error: ' + err.toString());
     try { alertAdmin('processInspectionFormSubmission_ error', err.toString()); } catch(e2) { /* best effort */ }

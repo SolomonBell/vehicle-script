@@ -35,16 +35,17 @@ confirmed by an actual sandbox run reaching these conditions:
 
 | Area | Covered by |
 |---|---|
-| Automatic 24-hour reminder firing on schedule | Test 7 |
-| Manager 24-hour greeting/summary (including the location-specific greeting) | Test 7 |
-| Pre-trip inspection completion update (column W) | Test 8 |
-| Post-rental reminder firing on schedule | Test 9 |
-| Manager post-rental greeting/notice (including the location-specific greeting) | Test 9 |
-| Post-trip inspection completion update (column X) | Test 10 |
+| Automatic pre-trip reminder firing on schedule | Test 7 |
+| Manager pre-trip greeting/summary (including the location-specific greeting) | Test 7 |
+| Pre-trip inspection completion update with actual submission timestamp (column W) | Test 8 |
+| Post-trip reminder firing one hour after pre-trip completion | Test 9 |
+| Manager post-trip greeting/notice (including the location-specific greeting) | Test 9 |
+| Post-trip inspection completion update with actual submission timestamp (column X) | Test 10 |
 
 Do not report any item in the second table as "passed" until it has actually been exercised —
-either by waiting for a real booking to reach the 24-hour/post-rental windows, or by manually
-time-shifting a test row's Start Time / End Time as described in Tests 7 and 9.
+either by waiting for a real booking to reach the 24-hour window and, separately, a real hour to
+elapse after a real pre-trip inspection completion, or by manually time-shifting a test row's Start
+Time (Test 7) or column W completion timestamp (Test 9) as described in those tests.
 
 ---
 
@@ -204,7 +205,7 @@ Signed) is `Yes` — regardless of which one becomes true first.
 
 ---
 
-## Test 7: 24-hour reminder (processReminders)
+## Test 7: Pre-trip reminder (processReminders)
 
 **What to do:**
 1. Edit the Start Time in the sheet to be ~25 hours from now
@@ -214,22 +215,23 @@ Signed) is `Yes` — regardless of which one becomes true first.
 **Expected results:**
 - [ ] Column K (24hr Sent) = `Yes`
 - [ ] Customer receives a "Pickup reminder: {vehicle type} rental on {date}" email with a pre-trip
-      inspection form link
-- [ ] Customer receives a pickup reminder SMS with the same link
+      inspection form link, stating the form must be completed before driving and that the
+      post-trip form will follow once pre-trip is done
+- [ ] Customer receives a pickup reminder SMS with the same link and the same information
+- [ ] Both the email and SMS state the form only needs to be completed once
 - [ ] Manager receives an "Upcoming rental tomorrow" email opening with `Hi {Location} Manager,`,
-      including deposit/lease status
+      including deposit/lease status — confirm the email does **not** include the pre-trip
+      inspection form link (the blank form is intentionally not sent to the manager)
 - [ ] Manager receives a "Tomorrow's rental" SMS
 
 **Edge case — deposit not paid:**
 - [ ] Set G = blank, re-run
-- [ ] Email subject should be "Action needed: deposit due for tomorrow's {vehicle type} pickup"
-- [ ] This branch does **not** include the pre-trip inspection link — confirm the link is absent
-      from both the email and SMS in this case
-- [ ] **Known limitation to watch for:** column K is still marked `Yes` on this branch. If the
-      deposit is paid *after* this run, the inspection link will not be sent retroactively for
-      this booking — confirm this behavior matches what is documented in
-      [README.md §21](../README.md#21-known-limitations-and-future-work) before treating it as a
-      bug.
+- [ ] Confirm nothing is sent to the customer or manager, and column K stays blank
+      (`isPreTripReminderEligible()` in `src/Helpers.js` requires column G = `Yes`) — the row is
+      re-evaluated on every later `processReminders` run for as long as it stays inside the
+      26-hour window, so the reminder still fires once the deposit clears, as long as that happens
+      before the window closes
+- [ ] Set G back to `Yes` and re-run — confirm the reminder now sends normally
 
 **Status:** ⏳ Not yet validated. Implemented and reviewed in code; requires either waiting for a
 real booking to reach the 24-hour window or the manual time-shift above.
@@ -243,35 +245,53 @@ real booking to reach the 24-hour window or the manual time-shift above.
    pre-filled Inspection Type value as-is)
 
 **Expected results:**
-- [ ] Column W (Pre-Inspection Form Completed) = `Yes` on the matching row
+- [ ] Column W (Pre-Inspection Form Completed) = `Yes <date/time>` on the matching row (e.g.
+      `Yes 8/2/2026 9:15 AM`), using the actual form-submission time, in the same `M/d/yyyy h:mm a`
+      style already used for the booking's Start/End Time cells
 - [ ] Column X (Post-Inspection Form Completed) is **not** affected
 - [ ] Apps Script execution log shows `processInspectionFormSubmission_: marked pre-inspection
       complete for row N`
+- [ ] Resubmitting the same pre-trip inspection form again does **not** change column W's recorded
+      value (idempotent — see `isInspectionCompletionValueSet_()` in `src/Forms.js`)
 
 **Status:** ⏳ Not yet validated. Depends on Test 7 having produced a real pre-trip link to submit.
 
 ---
 
-## Test 9: Post-rental reminder (processReminders)
+## Test 9: Post-trip reminder (processReminders)
 
 **What to do:**
-1. Edit End Time in the sheet to be past the `POST_RENTAL_HOURS` threshold (e.g. ~2 hours ago if
-   `POST_RENTAL_HOURS = 1`)
-2. Confirm column L (Post-Rental Sent) = blank
-3. Wait for the trigger OR run it manually
+1. Complete Test 8 first, so column W holds a real completion timestamp
+2. Either wait roughly one hour after the column W timestamp, or manually edit column W to a
+   value more than one hour in the past (e.g. `Yes 8/1/2026 9:15 AM` if it is now past 10:15 AM the
+   same day), keeping the exact `Yes <date/time>` format
+3. Confirm column L (Post-Rental Sent) = blank
+4. Wait for the `processReminders` trigger (~30 min) OR run it manually
 
 **Expected results:**
 - [ ] Column L (Post-Rental Sent) = `Yes`
-- [ ] Customer receives a post-trip inspection email with a pre-filled form link
-- [ ] Customer receives a post-trip inspection SMS
-- [ ] Manager receives a "Post-trip inspection form sent to {name}" email opening with
-      `Hi {Location} Manager,`
+- [ ] Customer receives a post-trip inspection email with a pre-filled form link, stating the form
+      should be completed now that the vehicle has been returned
+- [ ] Customer receives a post-trip inspection SMS with the same link and information
+- [ ] Both the email and SMS state the form only needs to be completed once
+- [ ] Manager receives a "Post-rental inspection: {name} ({vehicle type})" email opening with
+      `Hi {Location} Manager,`, including the post-trip inspection form link
 
-Note: unlike the 24-hour reminder, this branch is not gated on approval or deposit status — it
-fires purely on elapsed time and column L.
+**Edge case — pre-trip not yet completed:**
+- [ ] On a row where column W is blank, confirm `processReminders` never sends the post-trip
+      reminder for that row, no matter how much time has passed since End Time
+      (`isPostTripReminderEligible()` in `src/Helpers.js` requires a parseable column W timestamp)
 
-**Status:** ⏳ Not yet validated. Implemented and reviewed in code; requires either waiting for a
-real booking's End Time to elapse or the manual time-shift above.
+**Edge case — less than one hour since pre-trip completion:**
+- [ ] Set column W to a timestamp less than one hour in the past and re-run — confirm the
+      post-trip reminder does not fire yet
+
+Note: this reminder is timed entirely from column W's recorded completion timestamp — not from
+the booking's End Time and not from `POST_RENTAL_HOURS` (that Script Property is no longer read by
+any code path). It is also not gated on approval or deposit status.
+
+**Status:** ⏳ Not yet validated. Implemented and reviewed in code; requires either waiting a real
+hour after a real pre-trip completion or the manual time-shift above.
 
 ---
 
@@ -282,10 +302,13 @@ real booking's End Time to elapse or the manual time-shift above.
    pre-filled Inspection Type value as-is)
 
 **Expected results:**
-- [ ] Column X (Post-Inspection Form Completed) = `Yes` on the matching row
-- [ ] Column W is **not** affected (should already be `Yes` from Test 8, and remains so)
+- [ ] Column X (Post-Inspection Form Completed) = `Yes <date/time>` on the matching row (e.g.
+      `Yes 8/2/2026 4:08 PM`), using the actual form-submission time, same format as column W
+- [ ] Column W is **not** affected (should already hold its Test 8 value, and remains so)
 - [ ] Apps Script execution log shows `processInspectionFormSubmission_: marked post-inspection
       complete for row N`
+- [ ] Resubmitting the same post-trip inspection form again does **not** change column X's
+      recorded value (idempotent)
 
 **Status:** ⏳ Not yet validated. Depends on Test 9 having produced a real post-trip link to submit.
 
