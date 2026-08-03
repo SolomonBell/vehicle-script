@@ -24,12 +24,15 @@ function doPost(e) {
       const submissionId = data.submissionId || null;
       const signerEmail  = data.signerEmail  || null;
       // signerRole is read and logged only -- it is NOT used in any decision
-      // below. It is not a guaranteed field: neither documented example
-      // Pipedream payload (README.md, docs/setup-notes.md) includes it, so
-      // markLeaseSigned() cannot safely depend on it being present or
-      // accurate. See the KNOWN LIMITATION comment on markLeaseSigned()
-      // below for why this means a two-driver booking can currently be
-      // marked signed after only one required driver has actually signed.
+      // below. Deciding which signer is the final required customer signer
+      // (Driver #1 alone for a one-driver lease, Driver #2 after Driver #1
+      // for a two-driver lease) is done upstream, in the deployed Pipedream
+      // DocuSeal workflow -- see "Final signing-completion logic" in
+      // docs/setup-notes.md. By the time a lease_signed POST reaches here,
+      // Pipedream has already filtered out the manager's signature, the
+      // non-final driver's signature on a two-driver lease, and DocuSeal's
+      // submission.completed event, so markLeaseSigned() below can safely
+      // mark the row signed on this call alone.
       const signerRole   = data.signerRole   || null;
       Logger.log('Lease signed — role: ' + signerRole +
                  ', email: ' + signerEmail +
@@ -207,45 +210,16 @@ function markDepositPaid(customerEmail, amountPaid, eventId) {
 // ============================================================
 // MARK LEASE SIGNED
 // ------------------------------------------------------------
-// KNOWN LIMITATION (not fixed by the additional-driver migration --
-// pre-existing, investigated and intentionally left unresolved):
-//
-// This function marks column O (Lease Signed) = 'Yes' on the FIRST
-// lease_signed webhook that matches a row, with no awareness of how many
-// signers a given booking actually requires. For a one-driver booking this
-// is correct (Driver #1 is the only required non-manager signer, and
-// Pipedream's DocuSeal workflow already filters out the manager's own
-// signing step per docs/setup-notes.md). For a TWO-driver booking (column N
-// holds a real email), this is NOT sufficient: whichever of Driver #1 /
-// Driver #2 signs first will mark the entire lease "signed" here, even
-// though the other required driver has not yet signed.
-//
-// This was not fixed as part of the additional-driver migration because
-// the information needed to fix it safely is not reliably available in the
-// current webhook payload. doPost() (Webhooks.js) reads an optional
-// data.signerRole field, but NEITHER documented example Pipedream payload
-// in this repository (README.md's DocuSeal "Signed event" section, or
-// docs/setup-notes.md's "DocuSeal Workflow" section) includes signerRole --
-// only secret, type, submissionId (sometimes), and signerEmail are
-// documented as guaranteed. Building per-role completion tracking on a
-// field that is not a documented, guaranteed part of the contract would
-// mean either silently trusting an unverified value, or breaking the
-// currently-working one-driver case if the field turns out to be absent in
-// production. Neither is acceptable, so no per-signer completion tracking
-// was added here.
-//
-// What would be required to fix this safely (next step, not implemented
-// here): either (a) Pipedream's DocuSeal workflow step must be changed to
-// reliably include the submitter's role (exactly matching the DocuSeal
-// template's role strings -- 'Driver #1' / 'Driver #2' / 'Reliable Storage
-// Manager') in every lease_signed POST, so this function can require both
-// driver roles to have independently reported completion for a two-driver
-// row before writing column O; or (b) this function (or a new helper it
-// calls) queries DocuSeal's own submission-status endpoint for the
-// submissionId to authoritatively confirm every required submitter has
-// completed, instead of trusting whatever Pipedream forwards. Either change
-// is a Pipedream and/or DocuSeal-integration change outside the scope of
-// this migration, and is not made here.
+// This workflow now relies on Pipedream to determine the final required
+// customer signer before forwarding a lease_signed event -- Driver #1 alone
+// for a one-driver lease, Driver #2 (after Driver #1) for a two-driver
+// lease, with the manager's signature and DocuSeal's submission.completed
+// event both ignored upstream. See "Final signing-completion logic" in
+// docs/setup-notes.md for the full per-template rule and the deployed
+// Pipedream code. markLeaseSigned() assumes the webhook has already been
+// filtered appropriately and therefore simply marks the booking as
+// customer-signed on the first matching call, with no per-role check of
+// its own.
 // ============================================================
 function markLeaseSigned(submissionId, signerEmail) {
   const sheet = getSheet();

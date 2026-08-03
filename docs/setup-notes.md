@@ -541,33 +541,145 @@ Pipedream sits between external services (Stripe and DocuSeal) and Apps Script. 
 - **Setup:** Point the Stripe webhook (in the Stripe Dashboard) at this Pipedream workflow's HTTP trigger URL
 
 ### 2. DocuSeal Workflow
-- **Trigger:** HTTP webhook from DocuSeal
-- **Pipedream steps:** Validates DocuSeal request; filters to completed signature events only; skips the manager signing role; extracts `signerEmail`; adds `secret`
+
+- **Trigger:** HTTP webhook from DocuSeal. The step processes only `form.completed` events;
+  `submission.completed` events (the final "everyone is done" event DocuSeal also sends) are
+  explicitly ignored — see "Final signing-completion logic" below for why.
+- **Pipedream steps:** Reads `data.submission_id`, `data.email` (the signer's email), `data.role`
+  (the signer's role), and `data.template.id` from the event body. Ignores the event entirely
+  (returns `{ ignored: true, reason: ... }`, does not POST to Apps Script) when:
+  - the event type is not `form.completed`,
+  - the signer role is `Reliable Storage Manager`, or
+  - the signer role is not the *final required customer signer* for that submission's template
+    (see the table below).
+
+  Adds `secret` and POSTs to Apps Script only on the one event per booking that represents the
+  final required customer signature.
 - **POSTs to Apps Script:**
   ```json
-  { "secret": "...", "type": "lease_signed", "signerEmail": "..." }
+  {
+    "secret": "...",
+    "type": "lease_signed",
+    "submissionId": "<DocuSeal submission ID, string>",
+    "signerEmail": "<final customer signer's email>",
+    "signerRole": "Driver #1 or Driver #2",
+    "eventType": "form.completed",
+    "templateId": <DocuSeal template ID, number>
+  }
   ```
+  (`templateId` is forwarded as a number, not a string — the deployed code below builds it with
+  `Number(data.template?.id)`.)
 - **Setup:** Register this Pipedream workflow's URL in DocuSeal as the webhook endpoint
 
-> **KNOWN LIMITATION — two-driver lease completion (not fixed by the additional-driver migration).**
-> `markLeaseSigned()` (`src/Webhooks.js`) marks column O (Lease Signed) = `Yes` on the FIRST
-> `lease_signed` webhook that matches a row, regardless of how many signers the booking actually
-> requires. This is correct for a one-driver booking, but for a two-driver booking (column N holds
-> a real email) it is not sufficient — whichever driver signs first marks the whole lease "signed"
-> even though the other required driver has not yet signed. This was investigated during the
-> additional-driver migration and intentionally left unresolved: `doPost()` reads an optional
-> `data.signerRole` field, but it is **not** part of the documented, guaranteed payload above (or
-> in README.md's equivalent example) — building per-role completion tracking on an unverified field
-> would mean either silently trusting an unconfirmed value or risking breakage of the
-> currently-working one-driver case. Fixing this safely requires one of:
-> (a) changing this Pipedream step to reliably include the submitter's role (exactly matching the
-> DocuSeal template's role strings — `Driver #1` / `Driver #2` / `Reliable Storage Manager`) in
-> every `lease_signed` POST, so `markLeaseSigned()` can require both driver roles to have
-> independently reported completion before writing column O for a two-driver row; or
-> (b) adding a new Apps Script call to DocuSeal's own submission-status endpoint, keyed by
-> `submissionId`, to authoritatively confirm every required submitter has completed before writing
-> column O. Neither is implemented here — this is next-step work for whoever owns the Pipedream
-> workflow.
+#### Final signing-completion logic (validated end-to-end in the sandbox)
+
+The previous "two-driver lease completion" limitation described in earlier revisions of this
+document is **resolved**. The fix lives entirely in Pipedream — `markLeaseSigned()`
+(`src/Webhooks.js`) itself is unchanged and still marks column O (Lease Signed) = `Yes` on the
+first `lease_signed` webhook that matches a row. That is now correct, because Pipedream guarantees
+at most one qualifying `lease_signed` POST per booking: every other DocuSeal event for that
+submission — the *other* driver's signature on a two-driver lease, the manager's signature, and
+DocuSeal's own `submission.completed` event — is filtered out in Pipedream before it ever reaches
+Apps Script.
+
+| Template (sandbox ID) | Ignored | Forwards `lease_signed` |
+|---|---|---|
+| One-driver — `DOCUSEAL_TEMPLATE_ONE_DRIVER` (sandbox `5142370`) | Manager signature; `submission.completed` | Driver #1 signs |
+| Two-driver — `DOCUSEAL_TEMPLATE_TWO_DRIVERS` (sandbox `4482457`) | Driver #1 signs (alone); manager signature; `submission.completed` | Driver #2 signs |
+
+Driver #1 must still sign a two-driver lease — DocuSeal itself requires every configured
+submitter to sign before the document is complete — but Driver #1's `form.completed` event on the
+two-driver template is deliberately ignored by this Pipedream step. Only Driver #2's
+`form.completed` event (which necessarily comes after Driver #1 has already signed) is treated as
+the final required customer signer and forwarded as `lease_signed`.
+
+**This is customer lease completion only.** Column O (Lease Signed) reflects that the required
+customer signer(s) completed DocuSeal, nothing more. It is not the same as the manager's own
+DocuSeal co-signature (which this workflow explicitly ignores for the purpose of writing column O),
+and it is not the same as column P (Rental Approved), which remains a manual, dropdown-only
+decision made by the site manager in the sheet — see [Approval State
+Machine](../README.md#12-approval-state-machine). Nothing in this workflow writes or influences
+column P; a signed lease does not auto-approve a rental.
+
+#### Deployed Pipedream code (sandbox, validated end-to-end)
+
+```javascript
+export default defineComponent({
+  async run({ steps }) {
+    const body = steps.trigger.event.body;
+    const data = body?.data;
+
+    if (!data) {
+      throw new Error("Missing DocuSeal event data");
+    }
+
+    if (body.event_type !== "form.completed") {
+      return {
+        ignored: true,
+        reason: `Unsupported event type: ${body.event_type}`,
+      };
+    }
+
+    const submissionId = data.submission_id;
+    const signerEmail = data.email;
+    const signerRole = data.role;
+    const templateId = Number(data.template?.id);
+
+    if (!submissionId) {
+      throw new Error("Missing DocuSeal submission ID");
+    }
+
+    if (!signerEmail) {
+      throw new Error("Missing signer email");
+    }
+
+    if (!signerRole) {
+      throw new Error("Missing signer role");
+    }
+
+    if (signerRole === "Reliable Storage Manager") {
+      return {
+        ignored: true,
+        reason: "Manager signature does not mark customer lease complete",
+      };
+    }
+
+    if (templateId === 5142370 && signerRole !== "Driver #1") {
+      return {
+        ignored: true,
+        reason: `Waiting for Driver #1 on one-driver template; received ${signerRole}`,
+      };
+    }
+
+    if (templateId === 4482457 && signerRole !== "Driver #2") {
+      return {
+        ignored: true,
+        reason: `Waiting for Driver #2 on two-driver template; received ${signerRole}`,
+      };
+    }
+
+    if (templateId !== 5142370 && templateId !== 4482457) {
+      throw new Error(`Unknown DocuSeal template ID: ${templateId}`);
+    }
+
+    return {
+      ignored: false,
+      type: "lease_signed",
+      submissionId: String(submissionId),
+      signerEmail,
+      signerRole,
+      eventType: body.event_type,
+      templateId,
+    };
+  },
+});
+```
+
+`5142370` and `4482457` are the **sandbox** DocuSeal template IDs (matching the sandbox
+`DOCUSEAL_TEMPLATE_ONE_DRIVER` / `DOCUSEAL_TEMPLATE_TWO_DRIVERS` Script Properties). If this
+workflow is ever ported to production, or the sandbox templates are recreated, these two literal
+IDs must be updated in this Pipedream step to match — nothing in this step reads them from Script
+Properties automatically.
 
 ## Webhook shared secret setup
 

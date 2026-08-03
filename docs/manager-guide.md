@@ -499,10 +499,17 @@ For each issue: check the listed items, avoid the listed edits, and escalate whe
 - Escalate if: the customer has a payment confirmation but G stays blank.
 
 **Lease was signed but column O is still blank**
-- Check: did *every* required signer — including you as the manager — actually complete their
-  signature? The lease is not considered fully signed until all required parties have signed.
+- Check: for a one-driver booking, did Driver #1 (the customer) sign? For a two-driver booking,
+  did *both* Driver #1 and Driver #2 sign — specifically, did Driver #2 sign? Column O is only set
+  once the final required customer signer completes; on a two-driver booking, Driver #1 signing
+  alone does not set it, even though DocuSeal still requires Driver #1 to sign before Driver #2
+  can complete the document.
+- Note: your own signature as the manager is never what sets column O — it's ignored for this
+  purpose. You may sign before, after, or around either driver's signature and column O is
+  unaffected by the order.
 - Do not: manually mark O as `Yes`.
-- Escalate if: everyone has genuinely signed and the column is still blank.
+- Escalate if: the correct final customer signer (Driver #1 for a one-driver booking, Driver #2
+  for a two-driver booking) has genuinely signed and the column is still blank.
 
 **Manager approval was entered but customer approval did not send**
 - Check: column O (Lease Signed). If it's blank, this is expected — see
@@ -679,7 +686,10 @@ No. This column should only ever reflect what Stripe actually confirmed. Setting
 cause a lease to be sent for a deposit that was never actually received.
 
 **Can I manually mark Lease Signed?**
-No. This should only reflect DocuSeal's confirmation that every required signature is complete.
+No. This should only reflect DocuSeal's confirmation that the customer side of the lease is
+complete — Driver #1 alone for a one-driver booking, or both Driver #1 and Driver #2 for a
+two-driver booking. Your own signature as manager is intentionally not what sets this column, and
+neither is DocuSeal's separate "everyone including the manager is done" event.
 
 **What if the customer has an additional driver?**
 Nothing special is required from you. The intake form now asks the customer directly whether

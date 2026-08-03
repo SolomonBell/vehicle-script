@@ -72,13 +72,21 @@ first blank one — that is almost always the actual blocker.
 
 ### "The customer says they signed the lease but the system doesn't show it"
 
-1. Check column O. If blank, the `lease_signed` webhook has not arrived or did not match.
-2. Check Executions for `markLeaseSigned` around the signing time — look for `no submissionId
-   match` or `no booking found`.
+1. **First, check which driver signed and which template the booking uses (column N).** On a
+   two-driver booking, Driver #1 signing alone does not set column O by design — the Pipedream
+   DocuSeal workflow deliberately ignores Driver #1's `form.completed` event on the two-driver
+   template and only forwards `lease_signed` once Driver #2 signs. If the customer who "signed" was
+   Driver #1 on a two-driver booking, this is expected, not a bug — see `docs/setup-notes.md`'s
+   "Final signing-completion logic" table.
+2. If the correct final signer did sign and column O is still blank: check Executions for
+   `markLeaseSigned` around the signing time — look for `no submissionId match` or `no booking
+   found`.
 3. If column U (DocuSeal Submission ID) is blank for this row, the match had to fall back to
    email — confirm the signer's email exactly matches column C.
 4. If nothing appears in the log at all for that time window, the issue is upstream — check the
-   Pipedream DocuSeal workflow's execution history for that event.
+   Pipedream DocuSeal workflow's execution history for that event. Confirm the event reached
+   Pipedream as `form.completed` (not `submission.completed`, which Pipedream ignores) and that the
+   `role` field matched the expected final signer for that template.
 
 ### "The manager says they never got an approval request"
 

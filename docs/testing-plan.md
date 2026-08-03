@@ -24,7 +24,7 @@ the described result in the sandbox.**
 | Welcome/intake message delivery | Test 1 |
 | Stripe payment/authorization flow | Test 4 |
 | DocuSeal lease delivery | Test 4 |
-| Lease signing | Test 5 |
+| Lease signing (one-driver and two-driver, including correct per-role signer gating in Pipedream) | Test 5, Test 11c |
 | Manager approval (request, decision, reminder stop) | Test 3 |
 | Approval Reminder Count (column R) audited — no bug found, regression test added | Test 3 |
 | Customer approval gating and notification | Test 6 |
@@ -178,14 +178,24 @@ mechanism; see README §12 Approval State Machine.
 ## Test 5: DocuSeal lease signed webhook
 
 **What to do:**
-1. Sign the lease as all required parties (customer, second driver if applicable, manager), or
-   POST a simulated `lease_signed` event to the webhook URL with `signerEmail` matching the
-   customer email in the sheet
+1. **One-driver booking:** sign the lease as Driver #1, then as the manager, in either order.
+2. **Two-driver booking:** sign the lease as Driver #1, confirm column O is still blank, then sign
+   as Driver #2, then as the manager, in either order.
 
 **Expected results:**
-- [ ] Column O (Lease Signed) = `Yes` on the matching row
+- [ ] One-driver: column O (Lease Signed) = `Yes` after Driver #1 signs. The manager's own
+      signature does not affect column O either way.
+- [ ] Two-driver: column O stays blank after Driver #1 signs alone (Pipedream ignores this event —
+      see `docs/setup-notes.md`'s "Final signing-completion logic"). Column O = `Yes` only after
+      Driver #2 signs.
+- [ ] Two-driver: the manager's signature (regardless of when it happens) never triggers or is
+      required for column O to become `Yes` — only Driver #2's signature does.
+- [ ] DocuSeal's final `submission.completed` event (sent once every party, including the manager,
+      has signed) does not produce a duplicate or redundant write to column O.
 
-**Status:** PASS — Validated.
+**Status:** PASS — Validated end-to-end in the sandbox for both the one-driver and two-driver
+templates, including confirming Driver #1's signature alone does not mark a two-driver lease
+signed, the manager's signature is ignored, and `submission.completed` is ignored.
 
 ---
 
@@ -328,12 +338,12 @@ hour after a real pre-trip completion or the manual time-shift above.
 
 ## Test 11: Additional-driver flow (columns M/N)
 
-**Status:** PENDING — Not yet re-validated against the redesigned intake form. The Calendar
-fallback sub-test below (11a) passed under the prior single-column design; the intake-form
-validation sub-tests (11b–11d) require live submissions against the redesigned form and have not
-yet been run outside the sandbox unit tests in `SandboxTests.js`
-(`testValidateAdditionalDriverSubmission`, `testProcessIntakeFormSubmissionAdditionalDriverWrite`,
-`testSendLeaseViaDocuSealTemplateSelection`).
+**Status:** MIXED. 11a passed under the prior single-column design. 11c (intake "Yes" with valid
+data, template selection, and the full two-driver signing sequence) has now been validated
+end-to-end in the sandbox. 11b and 11d (the "No" answer and the four validation-failure modes)
+have not yet been re-run against the redesigned live intake form — they are covered by the
+sandbox unit tests in `SandboxTests.js` (`testValidateAdditionalDriverSubmission`,
+`testProcessIntakeFormSubmissionAdditionalDriverWrite`) but still need a live-form pass.
 
 ### 11a. Calendar-description fallback (initial value only)
 
@@ -365,6 +375,8 @@ yet been run outside the sandbox unit tests in `SandboxTests.js`
 **What to do:**
 1. Submit the intake form answering "Yes", with a real `Additional Driver Full Name` and an
    `Additional Driver Email Address` different from the primary customer's email
+2. Pay the deposit and complete the booking through to lease delivery
+3. Sign the lease as Driver #1, then as Driver #2, then as the manager
 
 **Expected results:**
 - [ ] Column M populated with the submitted name
@@ -373,6 +385,13 @@ yet been run outside the sandbox unit tests in `SandboxTests.js`
 - [ ] When the lease is sent, DocuSeal uses the two-driver template (`DOCUSEAL_TEMPLATE_TWO_DRIVERS`)
 - [ ] Both Driver #1 and Driver #2 receive DocuSeal signing requests, and Driver #2's request uses
       the real submitted name and email — never a placeholder name
+- [ ] After Driver #1 signs (alone), column O (Lease Signed) is still blank
+- [ ] After Driver #2 signs, column O = `Yes`
+- [ ] The manager's own signature (whenever it happens) is not required for and does not
+      independently trigger column O
+
+**Status:** PASS — Validated end-to-end in the sandbox, including the full two-driver signing
+sequence (Driver #1 → Driver #2 → manager, with column O flipping only after Driver #2).
 
 ### 11d. Intake form — "Yes" answer with invalid data (validation failure modes)
 

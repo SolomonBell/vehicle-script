@@ -3778,24 +3778,25 @@ function testMarkLeaseSignedDuplicateWebhookSafety() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 45: Two-driver partial signing -- KNOWN LIMITATION, documented not
-// fixed (markLeaseSigned) [CONFIG]
+// TEST 45: Two-driver signing is filtered by Pipedream, not markLeaseSigned()
+// (markLeaseSigned) [CONFIG]
 // ------------------------------------------------------------
-// This test does NOT assert correct behavior -- it exists to document and
-// pin down the CURRENT, intentionally-unresolved behavior described in the
-// KNOWN LIMITATION comment above markLeaseSigned() (Webhooks.js): a
-// two-driver booking (column N holds a real additional-driver email) is
-// marked column O = 'Yes' (Lease Signed) after just ONE signer's webhook
-// arrives, with no verification that the other required driver has also
-// signed. Per Part 6 of the additional-driver migration: the current
-// webhook payload does not reliably carry a verifiable signerRole, so no
-// per-role completion tracking could be safely built -- see the KNOWN
-// LIMITATION comment for the exact Pipedream/DocuSeal change that would be
-// required to fix this properly. If a future change fixes this limitation,
-// this test's expectations must be updated to match the fixed behavior --
-// this test intentionally encodes the current bug, not the desired outcome.
+// markLeaseSigned() (Webhooks.js) has no per-role awareness of its own -- it
+// takes only (submissionId, signerEmail) and marks column O (Lease Signed)
+// = 'Yes' on the first call that matches a row, regardless of which signer
+// it was called for. That is by design: the deployed Pipedream DocuSeal
+// workflow (see "Final signing-completion logic" in docs/setup-notes.md)
+// is responsible for waiting for the correct final required customer
+// signer -- Driver #1 alone for a one-driver lease, Driver #2 (after
+// Driver #1) for a two-driver lease -- and ignoring the manager's
+// signature and DocuSeal's `submission.completed` event, before it ever
+// forwards a `lease_signed` webhook to Apps Script. This test simulates
+// calling markLeaseSigned() directly, bypassing Pipedream, to confirm that
+// assumption: a single matching call marks column O = 'Yes' immediately,
+// with no role check inside Apps Script itself -- proving the role
+// filtering genuinely lives in Pipedream and not here.
 // ---------------------------------------------------------------------------
-function testTwoDriverPartialSigningKnownLimitationDocumented() {
+function testTwoDriverSigningHandledByPipedream() {
   let passed = 0;
   let failed = 0;
 
@@ -3834,12 +3835,17 @@ function testTwoDriverPartialSigningKnownLimitationDocumented() {
     const sheet = fakeMutatingSheet([row]);
     getSheet = function() { return sheet; };
 
-    // Only Driver #1 has signed so far -- Driver #2 has NOT signed yet.
+    // Calls markLeaseSigned() directly with Driver #1's info for a two-driver
+    // booking -- something Pipedream would never actually forward in
+    // production (it withholds Driver #1's event on the two-driver template
+    // until Driver #2 also signs). Doing it directly here, bypassing
+    // Pipedream, is exactly how this test proves markLeaseSigned() has no
+    // independent role check of its own -- see the header comment above.
     markLeaseSigned('sub-two-driver', 'driver1@example.com');
 
-    check('KNOWN LIMITATION (documented, not fixed): a two-driver booking IS marked ' +
-          'column O = Yes after only Driver #1\'s webhook, even though Driver #2 has not ' +
-          'signed -- see the KNOWN LIMITATION comment above markLeaseSigned() in Webhooks.js',
+    check('markLeaseSigned() marks column O = Yes on the first matching webhook call, ' +
+          'with no independent role check -- confirming the signer-role filtering happens ' +
+          'in Pipedream (see docs/setup-notes.md), not in markLeaseSigned() itself',
           sheet.writes.some(function(w) { return w.row === 2 && w.col === 15 && w.value === 'Yes'; }));
   } finally {
     getSheet = realGetSheet;
@@ -3848,7 +3854,7 @@ function testTwoDriverPartialSigningKnownLimitationDocumented() {
   check('getSheet restored to the original function', getSheet === realGetSheet);
 
   Logger.log(failed === 0
-    ? 'All ' + passed + ' two-driver partial-signing (known limitation) checks passed.'
+    ? 'All ' + passed + ' two-driver signing / Pipedream-filtering checks passed.'
     : passed + ' passed, ' + failed + ' failed.');
   return failed;
 }
@@ -3892,7 +3898,7 @@ function testTwoDriverPartialSigningKnownLimitationDocumented() {
 // testCalendarAppendRowLayout, testSendLeaseViaDocuSealTemplateSelection,
 // testSetupSheetSchemaHeaderPositions,
 // testMarkLeaseSignedDuplicateWebhookSafety, and
-// testTwoDriverPartialSigningKnownLimitationDocumented (added for the
+// testTwoDriverSigningHandledByPipedream (added for the
 // additional-driver / M-Z column migration) follow the same pattern --
 // pure or stub-based, no live sheet/form/API dependency, all stubs restored
 // in a finally block.
@@ -3939,7 +3945,7 @@ function runAllSandboxConfigurationTests() {
     testSendLeaseViaDocuSealTemplateSelection,
     testSetupSheetSchemaHeaderPositions,
     testMarkLeaseSignedDuplicateWebhookSafety,
-    testTwoDriverPartialSigningKnownLimitationDocumented,
+    testTwoDriverSigningHandledByPipedream,
   ];
 
   // Every test function above returns the number of failed assertions (0 if

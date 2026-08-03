@@ -59,8 +59,12 @@ and [docs/testing-plan.md](docs/testing-plan.md) for the acceptance-test checkli
 - Calendar booking sync (`syncCalendarBookings`)
 - Welcome/intake message delivery
 - Stripe payment/authorization flow (Checkout Session → webhook → deposit marked paid)
-- DocuSeal lease delivery
-- Lease signing (DocuSeal webhook → Lease Signed = Yes)
+- DocuSeal lease delivery, including correct one-driver vs. two-driver template selection
+- Lease signing (DocuSeal webhook → Lease Signed = Yes), for both one-driver and two-driver
+  bookings — the Pipedream DocuSeal workflow forwards `lease_signed` only after the final required
+  customer signer (Driver #1 for one-driver, Driver #2 for two-driver) completes, correctly
+  ignoring the other driver's signature, the manager's signature, and DocuSeal's `submission.completed`
+  event (see [§9 DocuSeal Integration](#9-docuseal-integration))
 - Manager approval (request, decision, reminder stop)
 - Customer approval gating and notification (waits for both approval and signature)
 - Intake completion tracking (`onFormSubmit` → column W)
@@ -1433,17 +1437,34 @@ manager already receives a DocuSeal signing request as a co-signer on every leas
 
 ### Signed event
 
-After all parties sign, DocuSeal sends a webhook event to Pipedream. Pipedream validates the
-request, filters to completed signing events, skips the manager signing step (to avoid marking
-the lease signed before the customer signs), extracts `signerEmail` and `submissionId`, and POSTs
-to `doPost`:
+Each time a party signs, DocuSeal sends a `form.completed` webhook event to Pipedream (DocuSeal
+also sends a final `submission.completed` event once every party has signed; Pipedream ignores
+it). Pipedream reads `data.submission_id`, `data.email` (signer email), `data.role` (signer role),
+and `data.template.id`, and forwards a `lease_signed` payload to Apps Script **only** for the one
+event that represents the final required *customer* signature — the manager's own signature is
+always ignored, and on the two-driver template Driver #1's signature is ignored too (only Driver
+#2's signature, which necessarily comes after Driver #1's, is treated as final). See [Final
+signing-completion logic](docs/setup-notes.md#final-signing-completion-logic-validated-end-to-end-in-the-sandbox)
+in `docs/setup-notes.md` for the full per-template table and the deployed Pipedream code.
 
 ```json
-{ "secret": "...", "type": "lease_signed", "submissionId": "...", "signerEmail": "..." }
+{
+  "secret": "...",
+  "type": "lease_signed",
+  "submissionId": "...",
+  "signerEmail": "...",
+  "signerRole": "Driver #1 or Driver #2",
+  "eventType": "form.completed",
+  "templateId": 1234567
+}
 ```
 
 `doPost` routes this to `markLeaseSigned`, which first matches by `submissionId` against column U,
 then falls back to email match against column C, and sets column O (Lease Signed) = `Yes`.
+`markLeaseSigned` itself only ever looks at the first matching webhook it receives — that is
+correct because Pipedream now guarantees at most one qualifying `lease_signed` POST per booking.
+`signerRole`, `eventType`, and `templateId` are read and logged by `doPost` but not required by
+Apps Script's matching logic, which still keys on `submissionId` (primary) and email (fallback).
 
 ### DocuSeal Submission ID (Column U)
 

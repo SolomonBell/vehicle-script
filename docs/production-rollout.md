@@ -61,7 +61,12 @@ These are business/operational decisions, not code changes — resolve them befo
    in `src/Forms.js` (`'Rental Intake Form'` / `'Rental Vehicle Condition Inspection Form'`), or
    update those constants if the production tabs are named differently.
 2. **DocuSeal templates:** confirm production template IDs and role names (`Driver #1`,
-   `Driver #2`, `Reliable Storage Manager`) match exactly what `sendLeaseViaDocuSeal` sends.
+   `Driver #2`, `Reliable Storage Manager`) match exactly what `sendLeaseViaDocuSeal` sends. The
+   Pipedream DocuSeal workflow's signing-completion step also hardcodes the sandbox template IDs
+   (`5142370` one-driver, `4482457` two-driver, see `docs/setup-notes.md`'s "Deployed Pipedream
+   code") directly in its JavaScript — these two literals must be updated to the production
+   template IDs in that Pipedream step, not just in Script Properties, or the step will throw
+   `Unknown DocuSeal template ID` for every production signing event.
 3. **Stripe mode:** confirm live-mode Price IDs exist for both vehicle types and match the real
    deposit amounts.
 4. **Manager/admin recipients:** confirm `MANAGER_EMAIL`, `MANAGER_PHONE`, `ADMIN_EMAIL`, and the
