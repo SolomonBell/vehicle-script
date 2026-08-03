@@ -225,7 +225,7 @@ a customer asks "did I miss something?"
 
 ## 7. The Bookings Sheet Explained
 
-The Bookings sheet has one row per booking and columns A through Y. This table documents the
+The Bookings sheet has one row per booking and columns A through Z. This table documents the
 exact current columns, in order.
 
 | Col | Header | Who/what updates it | What it means | Should a manager edit it? |
@@ -238,26 +238,27 @@ exact current columns, in order.
 | F | End Time | System | The scheduled return date/time. | No |
 | G | Deposit Paid | System, when Stripe confirms payment | `Yes` once the deposit/authorization step is complete. Blank means not yet done. | No |
 | H | Stripe Amount | System, when Stripe confirms payment | The dollar amount the customer authorized. Informational. | No |
-| I | Intake Sent | System, at booking creation | `Yes` once the welcome email (with the intake link) has been sent. This means the *link was emailed*, not that the customer filled it out — see column V for that. | No |
+| I | Intake Sent | System, at booking creation | `Yes` once the welcome email (with the intake link) has been sent. This means the *link was emailed*, not that the customer filled it out — see column W for that. | No |
 | J | Lease Sent | System, once deposit and intake are both done | `Yes` once the rental agreement has been sent out for signature. | No |
 | K | 24hr Sent | System, about a day before pickup | `Yes` once the 24-hour reminder was actually delivered to the customer. | No |
 | L | Post-Rental Sent | System, about an hour after the customer completes the pre-trip inspection form | `Yes` once the post-trip message was sent. | No |
-| M | Second Driver Email | System, at booking creation | The second driver's email, if the booking included one. Otherwise blank/placeholder. | No |
-| N | Lease Signed | System, once DocuSeal confirms signing | `Yes` once the lease has been fully signed. | No |
-| O | Rental Approved | **Manager** | Your decision. See [Section 8](#8-manager-approval-process) for the exact accepted values. | **Yes — this is the field you're expected to set.** |
-| P | Approval Notified At | System | The timestamp of the last approval-request email sent to you. Used only to time reminders. | No |
-| Q | Approval Reminder Count | System | How many approval reminders have been sent so far. Used only to control the reminder loop. | No |
-| R | Vehicle Type | System, from the calendar the booking came from | The vehicle type for this booking (e.g. Cargo Van, Moving Truck). | No, under normal circumstances |
-| S | Location | System, from the calendar the booking came from | The location for this booking. | No, under normal circumstances |
-| T | DocuSeal Submission ID | System, when the lease is sent | An internal reference number for the signed lease. Used to match the signing confirmation back to the right booking. | No |
-| U | Customer Approval Notified | System, once approval + signing conditions are both met | `Yes` once the customer's "your rental is approved" message has been sent, so it's never sent twice. | No |
-| V | Intake Form Completed | System, when the customer actually submits the intake form | `Yes` once the customer has submitted the intake form (not just been sent the link). | No |
-| W | Pre-Inspection Form Completed | System, when the customer actually submits the pre-trip inspection form | `Yes` followed by the date and time it was submitted (e.g. `Yes 8/2/2026 9:15 AM`) once the pre-trip inspection form has been submitted. This timestamp is also what the system uses to time the post-trip message (see [Section 9](#9-inspection-forms)). | No — see [Section 9](#9-inspection-forms) |
-| X | Post-Inspection Form Completed | System, when the customer actually submits the post-trip inspection form | `Yes` followed by the date and time it was submitted (e.g. `Yes 8/2/2026 4:08 PM`) once the post-trip inspection form has been submitted. | No — see [Section 9](#9-inspection-forms) |
-| Y | Suspicious Timing Warning Sent | System, if the two inspection forms were submitted unusually close together | `Yes` once you have been sent the inspection timing review notice for this booking (see [Section 5](#5-manager-email-and-notification-guide)). Blank means either the two forms haven't both been submitted yet, or the timing wasn't unusual. | No |
+| M | Additional Driver Name | System, once the customer submits the intake form with "Yes" to an additional driver | The additional driver's full name. Blank until a validated "Yes" answer is submitted; cleared back to blank by a "No" answer. | No |
+| N | Additional Driver Email | System, at booking creation (initial guess) and again once intake is submitted (authoritative) | The additional driver's email, if any. Starts as whatever the calendar booking description carried (or the placeholder), then is overwritten by the intake form's answer once submitted. | No |
+| O | Lease Signed | System, once DocuSeal confirms signing | `Yes` once the lease has been fully signed. | No |
+| P | Rental Approved | **Manager** | Your decision. See [Section 8](#8-manager-approval-process) for the exact accepted values. | **Yes — this is the field you're expected to set.** |
+| Q | Approval Notified At | System | The timestamp of the last approval-request email sent to you. Used only to time reminders. | No |
+| R | Approval Reminder Count | System | How many approval reminders have been sent so far. Used only to control the reminder loop. | No |
+| S | Vehicle Type | System, from the calendar the booking came from | The vehicle type for this booking (e.g. Cargo Van, Moving Truck). | No, under normal circumstances |
+| T | Location | System, from the calendar the booking came from | The location for this booking. | No, under normal circumstances |
+| U | DocuSeal Submission ID | System, when the lease is sent | An internal reference number for the signed lease. Used to match the signing confirmation back to the right booking. | No |
+| V | Customer Approval Notified | System, once approval + signing conditions are both met | `Yes` once the customer's "your rental is approved" message has been sent, so it's never sent twice. | No |
+| W | Intake Form Completed | System, when the customer actually submits the intake form | `Yes` once the customer has submitted the intake form (not just been sent the link) — including a validated answer to the additional-driver question. | No |
+| X | Pre-Inspection Form Completed | System, when the customer actually submits the pre-trip inspection form | `Yes` followed by the date and time it was submitted (e.g. `Yes 8/2/2026 9:15 AM`) once the pre-trip inspection form has been submitted. This timestamp is also what the system uses to time the post-trip message (see [Section 9](#9-inspection-forms)). | No — see [Section 9](#9-inspection-forms) |
+| Y | Post-Inspection Form Completed | System, when the customer actually submits the post-trip inspection form | `Yes` followed by the date and time it was submitted (e.g. `Yes 8/2/2026 4:08 PM`) once the post-trip inspection form has been submitted. | No — see [Section 9](#9-inspection-forms) |
+| Z | Suspicious Timing Warning Sent | System, if the two inspection forms were submitted unusually close together | `Yes` once you have been sent the inspection timing review notice for this booking (see [Section 5](#5-manager-email-and-notification-guide)). Blank means either the two forms haven't both been submitted yet, or the timing wasn't unusual. | No |
 
-**In every column except O, W, and X, "blank" means "hasn't happened yet" and "Yes" means "done."
-There is no other accepted value in these Yes/blank columns. Columns W and X are the two
+**In every column except P, X, and Y, "blank" means "hasn't happened yet" and "Yes" means "done."
+There is no other accepted value in these Yes/blank columns. Columns X and Y are the two
 exceptions: instead of a bare `Yes`, they hold `Yes` plus the exact date and time the form was
 submitted, in the same cell — blank still means "not done."**
 
@@ -281,7 +282,7 @@ asking you to review it. It keeps asking on a repeating schedule until you set a
 
 ### Which field you edit, and the accepted values
 
-You record your decision in **column O, Rental Approved**. The system accepts exactly three
+You record your decision in **column P, Rental Approved**. The system accepts exactly three
 values:
 
 | Value | Meaning |
@@ -304,7 +305,7 @@ As soon as you set `Approved - Free` or `Approved - Paid`:
 The customer's "your rental is approved" message is only sent once **both** of these are true:
 
 1. Rental Approved is `Approved - Free` or `Approved - Paid`
-2. Lease Signed (column N) is `Yes`
+2. Lease Signed (column O) is `Yes`
 
 If you approve a rental before the lease has been signed, nothing is wrong — the system is simply
 waiting. As soon as the lease gets signed afterward, the customer approval message goes out
@@ -364,16 +365,16 @@ tells the system which one they're completing. The two exact accepted answers ar
 | | Pre-trip inspection | Post-trip inspection |
 |---|---|---|
 | When the link is sent | With the 24-hour reminder, about a day before pickup | About an hour after the customer completes the pre-trip inspection form |
-| Sheet column it completes | W (Pre-Inspection Form Completed) | X (Post-Inspection Form Completed) |
+| Sheet column it completes | X (Pre-Inspection Form Completed) | Y (Post-Inspection Form Completed) |
 
-**A blank X simply means the customer hasn't submitted the post-trip form yet.** It does not, by
+**A blank Y simply means the customer hasn't submitted the post-trip form yet.** It does not, by
 itself, block or delay anything else in the workflow — but it's still something you should follow
 up on, since it's the vehicle-condition record for that rental.
 
-**A blank W is different: it also means the post-trip message has not gone out yet.** The
+**A blank X is different: it also means the post-trip message has not gone out yet.** The
 post-trip inspection link is only sent once the pre-trip form is completed (plus about an hour) —
 so if a customer never submits the pre-trip form, they will never automatically receive the
-post-trip link either. If a rental has ended and W is still blank, that's worth following up on
+post-trip link either. If a rental has ended and X is still blank, that's worth following up on
 for two reasons: the pre-trip inspection record is missing, and the post-trip message hasn't been
 triggered.
 
@@ -408,7 +409,7 @@ it — not to edit the column directly, which can hide a real problem (for examp
 that came in but was matched to the wrong booking, or wasn't matched at all because of a mismatch
 in the confirmed email address or date).
 
-For column W specifically, there's an additional reason: the system reads the date/time that
+For column X specifically, there's an additional reason: the system reads the date/time that
 follows `Yes` in that cell to decide when to send the post-trip message (about an hour later). A
 hand-entered `Yes` with no date/time, or a date/time the system can't parse, means the post-trip
 message will never be sent automatically for that booking — the system will not guess a
@@ -435,11 +436,11 @@ rather than fix by hand.
 - [ ] Have the correct vehicle ready for the vehicle type/location/time shown
 
 ### At pickup
-- [ ] Confirm the pre-trip inspection form was completed (column W)
+- [ ] Confirm the pre-trip inspection form was completed (column X)
 - [ ] Hand off the vehicle per your normal process
 
 ### After return
-- [ ] Confirm the post-trip inspection form was completed (column X)
+- [ ] Confirm the post-trip inspection form was completed (column Y)
 - [ ] Follow up with the customer if it's still blank after a reasonable time
 
 ### End of day
@@ -485,7 +486,7 @@ For each issue: check the listed items, avoid the listed edits, and escalate whe
 - Do not: manually resend from the sheet — there is no manual resend feature.
 - Escalate if: the row shows I = `Yes` but the customer genuinely never received anything.
 
-**Intake form was submitted but column V is still blank**
+**Intake form was submitted but column W is still blank**
 - See [Section 9](#9-inspection-forms) for the same troubleshooting approach — it applies here too
   (double-check the row, confirm the customer actually submitted, allow a short delay).
 - Do not: manually mark V as `Yes`.
@@ -497,18 +498,18 @@ For each issue: check the listed items, avoid the listed edits, and escalate whe
   payment that may not have actually cleared.
 - Escalate if: the customer has a payment confirmation but G stays blank.
 
-**Lease was signed but column N is still blank**
+**Lease was signed but column O is still blank**
 - Check: did *every* required signer — including you as the manager — actually complete their
   signature? The lease is not considered fully signed until all required parties have signed.
-- Do not: manually mark N as `Yes`.
+- Do not: manually mark O as `Yes`.
 - Escalate if: everyone has genuinely signed and the column is still blank.
 
 **Manager approval was entered but customer approval did not send**
-- Check: column N (Lease Signed). If it's blank, this is expected — see
+- Check: column O (Lease Signed). If it's blank, this is expected — see
   [Section 8](#8-manager-approval-process). The customer email sends automatically once the lease
   is signed.
 - Do not: change any other column to try to force the email.
-- Escalate if: both O is approved and N is `Yes`, and the customer still hasn't received anything
+- Escalate if: both P is approved and O is `Yes`, and the customer still hasn't received anything
   after a reasonable wait.
 
 **Approval reminder keeps arriving**
@@ -517,7 +518,7 @@ For each issue: check the listed items, avoid the listed edits, and escalate whe
 - Escalate if: you've set a value and are still receiving reminders for that same booking.
 
 **24-hour email did not send**
-- Check: is the deposit paid (column G) and is the rental approved (column O)? Both are required
+- Check: is the deposit paid (column G) and is the rental approved (column P)? Both are required
   before this reminder goes out.
 - Check: is it actually within roughly a day of the scheduled pickup yet?
 - Do not: manually mark column K as `Yes` — this would prevent the real reminder from ever going
@@ -525,21 +526,21 @@ For each issue: check the listed items, avoid the listed edits, and escalate whe
 - Escalate if: deposit is paid, the rental is approved, pickup is within a day, and still nothing
   has gone out.
 
-**Pre-trip form was submitted but column W is still blank**
-- Follow the same steps as the intake-form entry above, applied to W instead of V.
+**Pre-trip form was submitted but column X is still blank**
+- Follow the same steps as the intake-form entry above, applied to X instead of W.
 
 **Post-trip email did not send**
-- Check: has the customer actually completed the pre-trip inspection form (column W)? This message
+- Check: has the customer actually completed the pre-trip inspection form (column X)? This message
   is timed from that completion, about an hour later — **not** from the rental's scheduled end
-  time or how long ago pickup happened. If W is still blank, the post-trip message will not go out
+  time or how long ago pickup happened. If X is still blank, the post-trip message will not go out
   yet, no matter how much time has passed since the rental ended.
-- Check: has at least an hour passed since the date/time shown in column W?
+- Check: has at least an hour passed since the date/time shown in column X?
 - Do not: manually mark column L as `Yes`.
-- Escalate if: column W shows a completion time more than an hour or two in the past and still
+- Escalate if: column X shows a completion time more than an hour or two in the past and still
   nothing has gone out.
 
-**Post-trip form was submitted but column X is still blank**
-- Follow the same steps as the intake-form entry above, applied to X instead of V.
+**Post-trip form was submitted but column Y is still blank**
+- Follow the same steps as the intake-form entry above, applied to Y instead of W.
 
 **Manager email has the wrong location greeting**
 - The greeting (e.g. "Hi Bainbridge Manager,") is generated from the booking's Location column
@@ -570,7 +571,7 @@ For each issue: check the listed items, avoid the listed edits, and escalate whe
 **Booking is for the wrong vehicle type or location**
 - Check: which calendar the booking actually came from — vehicle type and location are set from
   that, automatically, at the time the booking is created.
-- Do not: routinely edit columns R or S as a way of "fixing" bookings — this is not a normal
+- Do not: routinely edit columns S or T as a way of "fixing" bookings — this is not a normal
   manager workflow in the current system.
 - Escalate if: a booking consistently shows the wrong vehicle type or location for its calendar.
 
@@ -578,7 +579,7 @@ For each issue: check the listed items, avoid the listed edits, and escalate whe
 - If it's a system-managed column (anything other than O), note what it was changed to (if you
   remember the original value) and contact the system administrator — some system-managed values
   can be hard to reconstruct correctly by guessing.
-- If it's column O, simply set it to the correct value — this is safe to correct yourself.
+- If it's column P, simply set it to the correct value — this is safe to correct yourself.
 
 **Customer cancels or changes the rental**
 - There is currently no built-in cancellation or rescheduling feature in this system. Handle
@@ -594,20 +595,21 @@ For each issue: check the listed items, avoid the listed edits, and escalate whe
 
 | Field | Notes |
 |---|---|
-| **Column O — Rental Approved** | This is the field you are expected to set, using exactly one of the three accepted values from [Section 8](#8-manager-approval-process). |
+| **Column P — Rental Approved** | This is the field you are expected to set, using exactly one of the three accepted values from [Section 8](#8-manager-approval-process). |
 
 ### System-managed fields — do not edit
 
 | Fields | Why manual edits can create a misleading state |
 |---|---|
-| A, B, C, D, E, F, M, R, S (booking details) | These are filled in automatically from the calendar booking. Editing them changes the record without changing what actually happened, which can make the sheet disagree with Stripe, DocuSeal, or the customer's actual booking. |
+| A, B, C, D, E, F, N, S, T (booking details) | These are filled in automatically from the calendar booking. Editing them changes the record without changing what actually happened, which can make the sheet disagree with Stripe, DocuSeal, or the customer's actual booking. Column N (Additional Driver Email) starts with whatever the calendar booking description carried (or `No Second Email`), but is then overwritten by the intake form once the customer submits it — see the next row. |
+| M, N (Additional Driver Name / Email) | Once the intake form is submitted, these two are authoritative and system-written — a "Yes" answer writes the real name and email; a "No" answer clears M and resets N to `No Second Email`. Editing them by hand can make DocuSeal send (or fail to send) the wrong lease template, or address the wrong person as Driver #2. |
 | G, H (deposit) | These reflect what Stripe actually confirmed. Setting G to `Yes` by hand does not create a real deposit — it can cause the system to send a lease or other messages as if payment had cleared when it hasn't. |
 | I, J, K, L (sent flags) | These record that a specific message was actually delivered. Marking one `Yes` by hand can permanently prevent the real message from ever being sent for that booking. |
-| N (Lease Signed) | This reflects DocuSeal's confirmation that signing is complete. Setting it by hand can let a rental proceed as if a legally required signature exists when it may not. |
-| P, Q (approval timing/count) | These exist only to control the manager reminder schedule. Editing them can cause reminders to stop or restart unexpectedly. |
-| T (DocuSeal Submission ID) | This is the internal reference number the system uses to match a signing confirmation to the right booking. Changing it can cause a real signature to be matched to the wrong row, or to no row at all. |
-| U, V, W, X (approval/intake/inspection completion) | These record that the customer actually completed a specific step. Marking one `Yes` by hand tells the system (and anyone reading the sheet) something happened that may not have — see [Section 9](#9-inspection-forms) for why this matters especially for the inspection columns. |
-| Y (Suspicious Timing Warning Sent) | Records that you've already received the one-time inspection timing review notice for this booking. Marking it `Yes` by hand would suppress that notice even if it hasn't actually been sent. |
+| O (Lease Signed) | This reflects DocuSeal's confirmation that signing is complete. Setting it by hand can let a rental proceed as if a legally required signature exists when it may not. |
+| Q, R (approval timing/count) | These exist only to control the manager reminder schedule. Editing them can cause reminders to stop or restart unexpectedly. |
+| U (DocuSeal Submission ID) | This is the internal reference number the system uses to match a signing confirmation to the right booking. Changing it can cause a real signature to be matched to the wrong row, or to no row at all. |
+| V, W, X, Y (approval/intake/inspection completion) | These record that the customer actually completed a specific step. Marking one `Yes` by hand tells the system (and anyone reading the sheet) something happened that may not have — see [Section 9](#9-inspection-forms) for why this matters especially for the inspection columns. |
+| Z (Suspicious Timing Warning Sent) | Records that you've already received the one-time inspection timing review notice for this booking. Marking it `Yes` by hand would suppress that notice even if it hasn't actually been sent. |
 
 **Rule of thumb:** if a column records something the *customer* did (submitted a form, paid, signed) or something the *system* did (sent a message), leave it alone. If it records something *you* decide, it's yours to set.
 
@@ -648,19 +650,19 @@ Reach out to the system administrator when you see any of the following:
 **Approval:**
 - [ ] Review the booking
 - [ ] Set Rental Approved to `Approved - Free`, `Approved - Paid`, or `Denied`
-- [ ] Confirm Customer Approval Notified (column U) eventually changes to `Yes` once both approval
+- [ ] Confirm Customer Approval Notified (column V) eventually changes to `Yes` once both approval
       and signing are done
 
 **Before pickup:**
 - [ ] Check 24hr Sent (column K)
-- [ ] Confirm Lease Signed (column N) is `Yes`
+- [ ] Confirm Lease Signed (column O) is `Yes`
 - [ ] Confirm Deposit Paid (column G) is `Yes`
-- [ ] Confirm Customer Approval Notified (column U) is `Yes`
-- [ ] Confirm Pre-Inspection Form Completed (column W) as appropriate for your process
+- [ ] Confirm Customer Approval Notified (column V) is `Yes`
+- [ ] Confirm Pre-Inspection Form Completed (column X) as appropriate for your process
 
 **After return:**
 - [ ] Check Post-Rental Sent (column L)
-- [ ] Confirm Post-Inspection Form Completed (column X)
+- [ ] Confirm Post-Inspection Form Completed (column Y)
 - [ ] Escalate damage or discrepancies through your normal company process — this system does not
       include a built-in damage-resolution workflow
 
@@ -669,7 +671,7 @@ Reach out to the system administrator when you see any of the following:
 ## 16. Frequently Asked Questions
 
 **Why has the customer not received their approval email yet?**
-Almost always because Lease Signed (column N) is still blank. The customer approval email
+Almost always because Lease Signed (column O) is still blank. The customer approval email
 requires both your approval and a completed signature — see [Section 8](#8-manager-approval-process).
 
 **Can I manually set Deposit Paid to Yes?**
@@ -679,10 +681,13 @@ cause a lease to be sent for a deposit that was never actually received.
 **Can I manually mark Lease Signed?**
 No. This should only reflect DocuSeal's confirmation that every required signature is complete.
 
-**What if the customer has a second driver?**
-Nothing special is required from you. If the booking's details include a second driver's email,
-the system automatically uses the two-driver version of the lease and sends a signing request to
-both drivers.
+**What if the customer has an additional driver?**
+Nothing special is required from you. The intake form now asks the customer directly whether
+there's an additional authorized driver, and for that driver's name and email if so. Once the
+customer submits a valid answer, the system automatically uses the two-driver version of the
+lease and sends a signing request to both drivers. (The booking's calendar details may show an
+initial guess at the additional driver's email before the intake form is submitted — the intake
+form's answer is what actually determines the lease sent.)
 
 **Does the manager need to send the inspection forms?**
 No. Both the pre-trip and post-trip inspection form links are sent automatically, bundled with
@@ -706,7 +711,7 @@ Because Rental Approved is still blank for that booking. Reminders stop as soon 
 value.
 
 **Does changing the sheet send an email?**
-Only column O behaves this way, and only indirectly: setting it to an approved value can allow
+Only column P behaves this way, and only indirectly: setting it to an approved value can allow
 the customer approval email to go out (if the lease is already signed), and setting it to
 anything stops your approval reminders. Editing other columns by hand does not trigger a real
 message — see [Section 13](#13-safe-editing-rules) for why editing them is still discouraged.
@@ -751,11 +756,11 @@ The following are implemented but still awaiting final operational validation:
 
 - The automatic pre-trip reminder actually firing on schedule
 - The manager pre-trip greeting and summary
-- Pre-trip inspection completion tracking with the actual submission time (column W)
+- Pre-trip inspection completion tracking with the actual submission time (column X)
 - The post-trip reminder actually firing about an hour after pre-trip completion
 - The manager post-trip greeting and notice
-- Post-trip inspection completion tracking with the actual submission time (column X)
-- The inspection timing review notice actually firing when two inspections are unusually close together (column Y)
+- Post-trip inspection completion tracking with the actual submission time (column Y)
+- The inspection timing review notice actually firing when two inspections are unusually close together (column Z)
 
 If you notice any of the "still awaiting validation" items behaving unexpectedly, that is
 valuable information — please report it to the system administrator rather than assuming it's a

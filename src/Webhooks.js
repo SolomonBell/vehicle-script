@@ -23,6 +23,13 @@ function doPost(e) {
     if (data.type === 'lease_signed') {
       const submissionId = data.submissionId || null;
       const signerEmail  = data.signerEmail  || null;
+      // signerRole is read and logged only -- it is NOT used in any decision
+      // below. It is not a guaranteed field: neither documented example
+      // Pipedream payload (README.md, docs/setup-notes.md) includes it, so
+      // markLeaseSigned() cannot safely depend on it being present or
+      // accurate. See the KNOWN LIMITATION comment on markLeaseSigned()
+      // below for why this means a two-driver booking can currently be
+      // marked signed after only one required driver has actually signed.
       const signerRole   = data.signerRole   || null;
       Logger.log('Lease signed — role: ' + signerRole +
                  ', email: ' + signerEmail +
@@ -125,22 +132,23 @@ function markDepositPaid(customerEmail, amountPaid, eventId) {
   sheet.getRange(i + 1, 7).setValue('Yes');
   sheet.getRange(i + 1, 8).setValue(amountPaid);
 
-  const name        = data[i][1];
-  const email       = data[i][2];
-  const phone       = data[i][3];
-  const secondEmail = data[i][12] || '';
-  const startTime   = new Date(data[i][4]);
-  const endTime     = new Date(data[i][5]);
-  const dateStr     = formatDateTime(startTime);
-  const leaseSent   = data[i][9];
-  const vehicleType = data[i][17] || '';  // R: Vehicle Type
-  const location    = data[i][18] || '';  // S: Location
-  const locCfg      = getLocationConfig(location);
+  const name                  = data[i][1];
+  const email                  = data[i][2];
+  const phone                  = data[i][3];
+  const additionalDriverName   = data[i][12] || ''; // M: Additional Driver Name
+  const additionalDriverEmail  = data[i][13] || ''; // N: Additional Driver Email
+  const startTime               = new Date(data[i][4]);
+  const endTime                 = new Date(data[i][5]);
+  const dateStr                 = formatDateTime(startTime);
+  const leaseSent               = data[i][9];
+  const vehicleType             = data[i][18] || '';  // S: Vehicle Type
+  const location                = data[i][19] || '';  // T: Location
+  const locCfg                  = getLocationConfig(location);
 
   if (leaseSent !== 'Yes' && email !== 'No Email') {
     try {
       const firstName       = name.split(' ')[0];
-      const intakeCompleted = data[i][21] || ''; // V: Intake Form Completed
+      const intakeCompleted = data[i][22] || ''; // W: Intake Form Completed
 
       // SMS confirmation
       const customerSms = intakeCompleted === 'Yes'
@@ -175,19 +183,19 @@ function markDepositPaid(customerEmail, amountPaid, eventId) {
       sendEmailHtml(email, 'Deposit confirmed: ' + vehicleType + ' rental on ' + dateStr, customerEmailHtml, locCfg.email, locCfg.email);
 
       // Send the lease via DocuSeal only once the intake form has also been
-      // completed (column V) -- not merely sent (column I). If intake is not
+      // completed (column W) -- not merely sent (column I). If intake is not
       // yet complete, processIntakeFormSubmission_() sends the lease when it arrives.
       if (isDocuSealEligible('Yes', intakeCompleted, leaseSent)) {
-        const docuSealResp = sendLeaseViaDocuSeal(name, email, secondEmail, startTime, endTime, vehicleType, location);
+        const docuSealResp = sendLeaseViaDocuSeal(name, email, additionalDriverName, additionalDriverEmail, startTime, endTime, vehicleType, location);
         const submissionId = extractDocuSealSubmissionId(docuSealResp);
 
         sheet.getRange(i + 1, 10).setValue('Yes'); // J: Lease Sent
         if (submissionId != null) {
-          sheet.getRange(i + 1, 20).setValue(submissionId); // T: DocuSeal Submission ID
+          sheet.getRange(i + 1, 21).setValue(submissionId); // U: DocuSeal Submission ID
         }
         Logger.log('Deposit confirmed and lease sent for: ' + email);
       } else {
-        Logger.log('Deposit confirmed for ' + email + '; lease withheld until intake form is completed (column V).');
+        Logger.log('Deposit confirmed for ' + email + '; lease withheld until intake form is completed (column W).');
       }
 
     } catch(e) {
@@ -198,20 +206,60 @@ function markDepositPaid(customerEmail, amountPaid, eventId) {
 
 // ============================================================
 // MARK LEASE SIGNED
+// ------------------------------------------------------------
+// KNOWN LIMITATION (not fixed by the additional-driver migration --
+// pre-existing, investigated and intentionally left unresolved):
+//
+// This function marks column O (Lease Signed) = 'Yes' on the FIRST
+// lease_signed webhook that matches a row, with no awareness of how many
+// signers a given booking actually requires. For a one-driver booking this
+// is correct (Driver #1 is the only required non-manager signer, and
+// Pipedream's DocuSeal workflow already filters out the manager's own
+// signing step per docs/setup-notes.md). For a TWO-driver booking (column N
+// holds a real email), this is NOT sufficient: whichever of Driver #1 /
+// Driver #2 signs first will mark the entire lease "signed" here, even
+// though the other required driver has not yet signed.
+//
+// This was not fixed as part of the additional-driver migration because
+// the information needed to fix it safely is not reliably available in the
+// current webhook payload. doPost() (Webhooks.js) reads an optional
+// data.signerRole field, but NEITHER documented example Pipedream payload
+// in this repository (README.md's DocuSeal "Signed event" section, or
+// docs/setup-notes.md's "DocuSeal Workflow" section) includes signerRole --
+// only secret, type, submissionId (sometimes), and signerEmail are
+// documented as guaranteed. Building per-role completion tracking on a
+// field that is not a documented, guaranteed part of the contract would
+// mean either silently trusting an unverified value, or breaking the
+// currently-working one-driver case if the field turns out to be absent in
+// production. Neither is acceptable, so no per-signer completion tracking
+// was added here.
+//
+// What would be required to fix this safely (next step, not implemented
+// here): either (a) Pipedream's DocuSeal workflow step must be changed to
+// reliably include the submitter's role (exactly matching the DocuSeal
+// template's role strings -- 'Driver #1' / 'Driver #2' / 'Reliable Storage
+// Manager') in every lease_signed POST, so this function can require both
+// driver roles to have independently reported completion for a two-driver
+// row before writing column O; or (b) this function (or a new helper it
+// calls) queries DocuSeal's own submission-status endpoint for the
+// submissionId to authoritatively confirm every required submitter has
+// completed, instead of trusting whatever Pipedream forwards. Either change
+// is a Pipedream and/or DocuSeal-integration change outside the scope of
+// this migration, and is not made here.
 // ============================================================
 function markLeaseSigned(submissionId, signerEmail) {
   const sheet = getSheet();
   const data  = sheet.getDataRange().getValues();
 
-  // Primary lookup: match by DocuSeal Submission ID in column T (index 19).
+  // Primary lookup: match by DocuSeal Submission ID in column U (index 20).
   // Normalize to string because IDs may arrive as numbers or strings.
   if (submissionId != null) {
     const needle = String(submissionId).trim();
     for (let i = 1; i < data.length; i++) {
-      const rowSubId    = String(data[i][19] || '').trim(); // T: DocuSeal Submission ID
-      const leaseSigned = data[i][13];                      // N: Lease Signed
+      const rowSubId    = String(data[i][20] || '').trim(); // U: DocuSeal Submission ID
+      const leaseSigned = data[i][14];                      // O: Lease Signed
       if (rowSubId !== '' && rowSubId === needle && leaseSigned !== 'Yes') {
-        sheet.getRange(i + 1, 14).setValue('Yes');
+        sheet.getRange(i + 1, 15).setValue('Yes'); // O: Lease Signed
         Logger.log('Lease signed (by submissionId ' + submissionId + '): row ' + (i + 1));
         return;
       }
@@ -227,9 +275,9 @@ function markLeaseSigned(submissionId, signerEmail) {
   const emailNeedle = signerEmail.toLowerCase().trim();
   for (let i = 1; i < data.length; i++) {
     const rowEmail    = (data[i][2] || '').toLowerCase().trim(); // C: Email
-    const leaseSigned = data[i][13];                             // N: Lease Signed
+    const leaseSigned = data[i][14];                             // O: Lease Signed
     if (rowEmail === emailNeedle && leaseSigned !== 'Yes') {
-      sheet.getRange(i + 1, 14).setValue('Yes');
+      sheet.getRange(i + 1, 15).setValue('Yes'); // O: Lease Signed
       Logger.log('Lease signed (by email fallback ' + signerEmail + '): row ' + (i + 1));
       return;
     }

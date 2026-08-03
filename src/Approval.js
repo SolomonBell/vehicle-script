@@ -6,14 +6,14 @@
 // Once the manager sets Rental Approved to Approved - Free or
 // Approved - Paid, manager reminders stop immediately -- but the
 // CUSTOMER is not notified until the lease has actually been signed
-// (column N, set only by the DocuSeal signed webhook). The approved
+// (column O, set only by the DocuSeal signed webhook). The approved
 // value may sit in the sheet for as long as it takes; each run just
-// checks column N again. Once signed, the very next run sends the
-// one-time customer notification (tracked in column U so later runs
-// do not resend). Script never writes to column O -- only the manager
+// checks column O again. Once signed, the very next run sends the
+// one-time customer notification (tracked in column V so later runs
+// do not resend). Script never writes to column P -- only the manager
 // touches it.
-// State is tracked in P (Approval Notified At) and Q (Reminder Count)
-// for the manager reminder loop, and U (Customer Approval Notified)
+// State is tracked in Q (Approval Notified At) and R (Reminder Count)
+// for the manager reminder loop, and V (Customer Approval Notified)
 // for the one-time customer notification.
 // ============================================================
 function checkRentalEligibility() {
@@ -31,7 +31,7 @@ function checkRentalEligibility() {
 }
 
 // Actual implementation, run only while checkRentalEligibility() holds the
-// script lock -- guards against an overlapping execution reading column U
+// script lock -- guards against an overlapping execution reading column V
 // before a prior run has finished writing it, which could otherwise send
 // the customer approval email twice. Same locking pattern as
 // processReminders() (Reminders.js).
@@ -41,18 +41,18 @@ function checkRentalEligibility_() {
 
   for (let i = 1; i < data.length; i++) {
     const intakeSent       = data[i][8];                // I: Intake Sent
-    const approved         = data[i][14];               // O: Rental Approved
-    const lastNotified     = data[i][15];               // P: Approval Notified At
-    const reminderCount    = Number(data[i][16]) || 0;  // Q: Approval Reminder Count
-    const leaseSigned      = data[i][13];                // N: Lease Signed
-    const customerNotified = data[i][20];                // U: Customer Approval Notified
+    const approved         = data[i][15];               // P: Rental Approved
+    const lastNotified     = data[i][16];               // Q: Approval Notified At
+    const reminderCount    = Number(data[i][17]) || 0;  // R: Approval Reminder Count
+    const leaseSigned      = data[i][14];                // O: Lease Signed
+    const customerNotified = data[i][21];                // V: Customer Approval Notified
 
     // Skip rows that aren't fully initialized yet
     if (intakeSent !== 'Yes') continue;
 
     // Manager has approved (with or without a fee) -- manager reminders
     // stop here regardless of lease-signature status. The customer is only
-    // notified once the lease has actually been signed (column N); until
+    // notified once the lease has actually been signed (column O); until
     // then this row is silently skipped and re-checked on the next run.
     if (approved === 'Approved - Free' || approved === 'Approved - Paid') {
       if (shouldNotifyCustomerOfApproval(approved, leaseSigned, customerNotified)) {
@@ -68,11 +68,11 @@ function checkRentalEligibility_() {
     if (reminderCount > CONFIG.MAX_APPROVAL_REMINDERS) continue;
 
     const name        = data[i][1];
-    const email       = data[i][2];
-    const phone       = data[i][3];
-    const dateStr     = formatDateTime(new Date(data[i][4]));
-    const vehicleType = data[i][17] || '';  // R: Vehicle Type
-    const location    = data[i][18] || '';  // S: Location
+    const email        = data[i][2];
+    const phone        = data[i][3];
+    const dateStr      = formatDateTime(new Date(data[i][4]));
+    const vehicleType  = data[i][18] || '';  // S: Vehicle Type
+    const location     = data[i][19] || '';  // T: Location
 
     let locCfg;
     try {
@@ -115,9 +115,9 @@ function checkRentalEligibility_() {
       try {
         sendEmailHtml(CONFIG.MANAGER_EMAIL,
           'Action needed: approve rental for ' + name, html, locCfg.email, locCfg.email);
-        // Only update P and Q on successful send so failed sends will retry
-        sheet.getRange(i + 1, 16).setValue(new Date());
-        sheet.getRange(i + 1, 17).setValue(1);
+        // Only update Q and R on successful send so failed sends will retry
+        sheet.getRange(i + 1, 17).setValue(new Date());
+        sheet.getRange(i + 1, 18).setValue(1);
         SpreadsheetApp.flush();
       } catch(e) {
         Logger.log('checkRentalEligibility initial email failed for ' + name + ': ' + e);
@@ -141,8 +141,8 @@ function checkRentalEligibility_() {
       try {
         sendEmailHtml(CONFIG.MANAGER_EMAIL,
           'Reminder #' + reminderCount + ': approve rental for ' + name, html, locCfg.email, locCfg.email);
-        sheet.getRange(i + 1, 16).setValue(new Date());
-        sheet.getRange(i + 1, 17).setValue(reminderCount + 1);
+        sheet.getRange(i + 1, 17).setValue(new Date());
+        sheet.getRange(i + 1, 18).setValue(reminderCount + 1);
         SpreadsheetApp.flush();
       } catch(e) {
         Logger.log('checkRentalEligibility reminder email failed for ' + name + ': ' + e);
@@ -168,9 +168,9 @@ function checkRentalEligibility_() {
         sendEmailHtml(CONFIG.ADMIN_EMAIL,
           'ESCALATION: ' + CONFIG.MAX_APPROVAL_REMINDERS +
             ' approval reminders unanswered for ' + name, html, locCfg.email, locCfg.email);
-        // Bump Q past MAX so the top-of-loop check skips this row forever.
-        // Do NOT update P — there's nothing more to time off of.
-        sheet.getRange(i + 1, 17).setValue(CONFIG.MAX_APPROVAL_REMINDERS + 1);
+        // Bump R past MAX so the top-of-loop check skips this row forever.
+        // Do NOT update Q — there's nothing more to time off of.
+        sheet.getRange(i + 1, 18).setValue(CONFIG.MAX_APPROVAL_REMINDERS + 1);
         SpreadsheetApp.flush();
       } catch(e) {
         Logger.log('checkRentalEligibility escalation email failed for ' + name + ': ' + e);
@@ -185,12 +185,12 @@ function checkRentalEligibility_() {
 // ============================================================
 // NOTIFY CUSTOMER OF APPROVAL (called once per row from checkRentalEligibility)
 // Sends the customer a one-time email (and SMS, if a phone is on file) telling
-// them their rental has been approved. Only ever called once column N (Lease
+// them their rental has been approved. Only ever called once column O (Lease
 // Signed) is already 'Yes' -- see shouldNotifyCustomerOfApproval() -- so this
 // does not need to hedge about whether the lease has been signed yet, and
 // does not read column J (Lease Sent) at all. Idempotency is tracked in
-// column U (Customer Approval Notified) — separate from columns P/Q, which
-// belong only to the manager reminder loop. U is set to 'Yes' only after a
+// column V (Customer Approval Notified) — separate from columns Q/R, which
+// belong only to the manager reminder loop. V is set to 'Yes' only after a
 // successful send so a failed attempt is retried on the next trigger run.
 // ============================================================
 function notifyCustomerOfApproval(sheet, data, i) {
@@ -198,8 +198,8 @@ function notifyCustomerOfApproval(sheet, data, i) {
   const email       = data[i][2];
   const phone       = data[i][3];
   const dateStr     = formatDateTime(new Date(data[i][4]));
-  const vehicleType = data[i][17] || ''; // R: Vehicle Type
-  const location    = data[i][18] || ''; // S: Location
+  const vehicleType = data[i][18] || ''; // S: Vehicle Type
+  const location    = data[i][19] || ''; // T: Location
 
   let locCfg;
   try {
@@ -244,7 +244,7 @@ function notifyCustomerOfApproval(sheet, data, i) {
   }
 
   if (delivered) {
-    sheet.getRange(i + 1, 21).setValue('Yes'); // U: Customer Approval Notified
+    sheet.getRange(i + 1, 22).setValue('Yes'); // V: Customer Approval Notified
     SpreadsheetApp.flush();
   }
 }

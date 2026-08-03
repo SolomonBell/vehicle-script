@@ -263,13 +263,14 @@ function testSyncCalendarBookingsNoNotifications() {
         '',                               // J: Lease Sent
         '',                               // K: 24hr Sent
         '',                               // L: Post-Rental Sent
-        secondEmail || 'No Second Email', // M: Second Driver Email
-        '',                               // N: Lease Signed
-        '',                               // O: Rental Approved
-        '',                               // P: Approval Notified At
-        '',                               // Q: Approval Reminder Count
-        calCfg.vehicleType,               // R: Vehicle Type
-        calCfg.location,                  // S: Location
+        '',                               // M: Additional Driver Name
+        secondEmail || 'No Second Email', // N: Additional Driver Email
+        '',                               // O: Lease Signed
+        '',                               // P: Rental Approved
+        '',                               // Q: Approval Notified At
+        '',                               // R: Approval Reminder Count
+        calCfg.vehicleType,               // S: Vehicle Type
+        calCfg.location,                  // T: Location
       ]);
 
       Logger.log('ADDED [' + calCfg.location + ' / ' + calCfg.vehicleType + ']: ' +
@@ -356,7 +357,7 @@ function testLogStripeUrlForExistingBooking() {
 
   let row = null;
   for (let i = 1; i < data.length; i++) {
-    if (data[i][0] && data[i][17]) {
+    if (data[i][0] && data[i][18]) {
       row = data[i];
       break;
     }
@@ -364,12 +365,12 @@ function testLogStripeUrlForExistingBooking() {
 
   if (!row) {
     Logger.log('testLogStripeUrlForExistingBooking: no row found with both an ' +
-               'eventId (col A) and a vehicle type (col R). Add a booking row first.');
+               'eventId (col A) and a vehicle type (col S). Add a booking row first.');
     return;
   }
 
   const eventId           = row[0];
-  const vehicleType       = row[17]; // R: Vehicle Type (0-indexed 17)
+  const vehicleType       = row[18]; // S: Vehicle Type (0-indexed 18)
   const clientReferenceId = Utilities.base64EncodeWebSafe(eventId).replace(/=+$/, '');
   const priceId           = getStripePriceId(vehicleType);
 
@@ -400,7 +401,7 @@ function testCreateStripeCheckoutSession() {
 
   let row = null;
   for (let i = 1; i < data.length; i++) {
-    if (data[i][0] && data[i][17]) {
+    if (data[i][0] && data[i][18]) {
       row = data[i];
       break;
     }
@@ -408,12 +409,12 @@ function testCreateStripeCheckoutSession() {
 
   if (!row) {
     Logger.log('testCreateStripeCheckoutSession: no row found with both an ' +
-               'eventId (col A) and a vehicle type (col R). Add a booking row first.');
+               'eventId (col A) and a vehicle type (col S). Add a booking row first.');
     return;
   }
 
   const eventId           = row[0];
-  const vehicleType       = row[17]; // R: Vehicle Type (0-indexed 17)
+  const vehicleType       = row[18]; // S: Vehicle Type (0-indexed 18)
   const clientReferenceId = Utilities.base64EncodeWebSafe(eventId).replace(/=+$/, '');
 
   Logger.log('Vehicle type:         ' + vehicleType);
@@ -463,7 +464,7 @@ function testDepositAmounts() {
   const unknownAmount = getDepositAmount('Unknown Vehicle');
   Logger.log('Unknown type → fallback amount: ' + (unknownAmount || 'not set (DEPOSIT_AMOUNT is blank)'));
 
-  // Blank vehicle type (old rows with empty column R)
+  // Blank vehicle type (old rows with empty column S)
   const blankAmount = getDepositAmount('');
   Logger.log('Blank type   → fallback amount: ' + (blankAmount || 'not set (DEPOSIT_AMOUNT is blank)'));
 
@@ -478,9 +479,9 @@ function testDepositAmounts() {
 // Verifies the pure decision helper checkRentalEligibility() uses to decide
 // whether to send the customer their one-time approval notification. The
 // customer must never be notified before the lease has actually been signed
-// (column N) -- a manager approval value alone (column O) is not enough, no
+// (column O) -- a manager approval value alone (column P) is not enough, no
 // matter how long it has been sitting in the sheet. Also verifies the
-// no-duplicates guarantee once column U is already 'Yes'. No sheet reads, no
+// no-duplicates guarantee once column V is already 'Yes'. No sheet reads, no
 // external calls, no writes, no email or SMS sent.
 // ---------------------------------------------------------------------------
 function testApprovalNotificationEligibility() {
@@ -863,8 +864,8 @@ function testMarkDepositPaidRowLookup() {
 // TEST 14: Lease-signed webhook row-lookup logic (no side effects) [SHEET]
 // Simulates the submissionId-first, email-fallback matching logic in
 // markLeaseSigned without writing to the sheet or calling any external API.
-// Requires at least one unsigned booking row (column N ≠ 'Yes') with an email
-// in column C. Sub-test A additionally requires a value in column T.
+// Requires at least one unsigned booking row (column O ≠ 'Yes') with an email
+// in column C. Sub-test A additionally requires a value in column U.
 // ---------------------------------------------------------------------------
 function testMarkLeaseSignedRowLookup() {
   const sheet = getSheet();
@@ -877,39 +878,39 @@ function testMarkLeaseSignedRowLookup() {
 
   for (let i = 1; i < data.length; i++) {
     const email  = (data[i][2] || '').toLowerCase().trim();
-    const signed = data[i][13]; // N: Lease Signed
+    const signed = data[i][14]; // O: Lease Signed
     if (email && email !== 'no email' && signed !== 'Yes') {
       testRowIdx = i;
       testEmail  = email;
-      testSubId  = data[i][19] ? String(data[i][19]).trim() : null; // T: DocuSeal Submission ID
+      testSubId  = data[i][20] ? String(data[i][20]).trim() : null; // U: DocuSeal Submission ID
       break;
     }
   }
 
   if (testRowIdx === -1) {
-    Logger.log('SKIP: No unsigned row found with an email (col C, N ≠ "Yes"). ' +
+    Logger.log('SKIP: No unsigned row found with an email (col C, O ≠ "Yes"). ' +
                'Add a test booking row to run this test.');
     return;
   }
 
   Logger.log('Test row: index=' + (testRowIdx + 1) +
              ' | email=' + testEmail +
-             ' | submissionId=' + (testSubId || '(none in col T)'));
+             ' | submissionId=' + (testSubId || '(none in col U)'));
 
   let passed = 0;
   let failed = 0;
 
-  // ---- Sub-test A: submission ID matches column T (primary lookup) ----------
+  // ---- Sub-test A: submission ID matches column U (primary lookup) ----------
   (function testSubmissionIdMatch() {
     if (!testSubId) {
-      Logger.log('SKIP (submissionId match): column T is blank on test row — ' +
+      Logger.log('SKIP (submissionId match): column U is blank on test row — ' +
                  'trigger a live DocuSeal submission first to populate it');
       return;
     }
     let found = -1;
     for (let i = 1; i < data.length; i++) {
-      const rowSubId = String(data[i][19] || '').trim();
-      const signed   = data[i][13];
+      const rowSubId = String(data[i][20] || '').trim();
+      const signed   = data[i][14];
       if (rowSubId !== '' && rowSubId === testSubId && signed !== 'Yes') { found = i; break; }
     }
     if (found === testRowIdx) {
@@ -927,14 +928,14 @@ function testMarkLeaseSignedRowLookup() {
     const bogusSubId = '000000';
     let foundById    = -1;
     for (let i = 1; i < data.length; i++) {
-      const rowSubId = String(data[i][19] || '').trim();
-      const signed   = data[i][13];
+      const rowSubId = String(data[i][20] || '').trim();
+      const signed   = data[i][14];
       if (rowSubId !== '' && rowSubId === bogusSubId && signed !== 'Yes') { foundById = i; break; }
     }
     let foundByEmail = -1;
     for (let i = 1; i < data.length; i++) {
       const rowEmail = (data[i][2] || '').toLowerCase().trim();
-      const signed   = data[i][13];
+      const signed   = data[i][14];
       if (rowEmail === testEmail && signed !== 'Yes') { foundByEmail = i; break; }
     }
     if (foundById !== -1) {
@@ -957,7 +958,7 @@ function testMarkLeaseSignedRowLookup() {
     if (!noSubId) {
       for (let i = 1; i < data.length; i++) {
         const rowEmail = (data[i][2] || '').toLowerCase().trim();
-        const signed   = data[i][13];
+        const signed   = data[i][14];
         if (rowEmail === testEmail && signed !== 'Yes') { found = i; break; }
       }
     }
@@ -992,14 +993,14 @@ function testIntakeFormSubmitRowMatching() {
   let failed = 0;
 
   // Column layout matches the real sheet (0-indexed): ... C=2 Email ...
-  // E=4 Start Time ... V=21 Intake Form Completed. Only the columns
+  // E=4 Start Time ... W=22 Intake Form Completed. Only the columns
   // findIntakeMatchRow() actually reads are populated; the rest are left
   // undefined, which is fine since the function under test never touches them.
   function fakeRow(email, startTime, intakeCompleted) {
-    const row = new Array(22);
+    const row = new Array(23);
     row[2]  = email;
     row[4]  = startTime;
-    row[21] = intakeCompleted;
+    row[22] = intakeCompleted;
     return row;
   }
 
@@ -1292,8 +1293,8 @@ function testExtractIntakeSubmissionFields() {
 // TEST 23: Inspection form-submit row matching (findInspectionMatchRow) [CONFIG]
 // Pure test against synthetic data -- no sheet reads, no live form event.
 // Verifies the same ambiguity-safe email+date matching used for intake also
-// applies correctly to inspection submissions, that the pre-trip (W) and
-// post-trip (X) completion columns are tracked fully independently of each
+// applies correctly to inspection submissions, that the pre-trip (X) and
+// post-trip (Y) completion columns are tracked fully independently of each
 // other via the inspectionType argument, and that matching never considers
 // customer name.
 // ---------------------------------------------------------------------------
@@ -1302,16 +1303,16 @@ function testInspectionFormSubmitRowMatching() {
   let failed = 0;
 
   // Column layout matches the real sheet (0-indexed): ... C=2 Email ...
-  // E=4 Start Time ... W=22 Pre-Inspection Form Completed ... X=23
+  // E=4 Start Time ... X=23 Pre-Inspection Form Completed ... Y=24
   // Post-Inspection Form Completed. Only the columns findInspectionMatchRow()
   // actually reads are populated; name is deliberately never stored, since
   // the function under test does not accept or use it.
   function fakeRow(email, startTime, preCompleted, postCompleted) {
-    const row = new Array(24);
+    const row = new Array(25);
     row[2]  = email;
     row[4]  = startTime;
-    row[22] = preCompleted;
-    row[23] = postCompleted;
+    row[23] = preCompleted;
+    row[24] = postCompleted;
     return row;
   }
 
@@ -1347,22 +1348,22 @@ function testInspectionFormSubmitRowMatching() {
     check('post submission, single booking -- matched', data, 'solo@example.com', null, 'post', 'matched', 1);
   })();
 
-  // ---- W and X are tracked independently: a row already complete in the ----
+  // ---- X and Y are tracked independently: a row already complete in the ----
   // OTHER column is still eligible for this one -- proves a pre submission
-  // never alters X's eligibility and a post submission never alters W's.
+  // never alters Y's eligibility and a post submission never alters X's.
   (function columnsAreIndependent() {
     const dataPreEligible = [
       [],
-      fakeRow('done-post@example.com', new Date('2026-08-01T10:00:00'), '', 'Yes'), // X already Yes, W blank
+      fakeRow('done-post@example.com', new Date('2026-08-01T10:00:00'), '', 'Yes'), // Y already Yes, X blank
     ];
-    check('post already done does not block a pre match (pre unaffected by X)',
+    check('post already done does not block a pre match (pre unaffected by Y)',
           dataPreEligible, 'done-post@example.com', null, 'pre', 'matched', 1);
 
     const dataPostEligible = [
       [],
-      fakeRow('done-pre@example.com', new Date('2026-08-01T10:00:00'), 'Yes', ''), // W already Yes, X blank
+      fakeRow('done-pre@example.com', new Date('2026-08-01T10:00:00'), 'Yes', ''), // X already Yes, Y blank
     ];
-    check('pre already done does not block a post match (post unaffected by W)',
+    check('pre already done does not block a post match (post unaffected by X)',
           dataPostEligible, 'done-pre@example.com', null, 'post', 'matched', 1);
   })();
 
@@ -2171,7 +2172,7 @@ function testInspectionCompletionFormatting() {
   })();
 
   // ---- isInspectionCompletionValueSet_() recognizes both the plain 'Yes' ----
-  // (column V) and 'Yes <timestamp>' (columns W/X) formats, and only those.
+  // (column W) and 'Yes <timestamp>' (columns X/Y) formats, and only those.
   (function completionValueSetDetection() {
     check('bare "Yes" is set', isInspectionCompletionValueSet_('Yes') === true);
     check('"Yes <timestamp>" is set', isInspectionCompletionValueSet_('Yes 8/2/2026 9:15 AM') === true);
@@ -2372,11 +2373,11 @@ function testApprovalReminderCountBehavior() {
   // Fake sheet backed by a plain in-memory array of rows (header + data).
   // getRange(row, col).setValue() records writes instead of touching a live
   // sheet. Row/column layout matches the real Bookings sheet up through
-  // column U (0-indexed 0-20) -- only the columns checkRentalEligibility_()
+  // column V (0-indexed 0-21) -- only the columns checkRentalEligibility_()
   // actually reads are populated.
   function fakeSheet(rows) {
     const writes = [];
-    const header = new Array(21).fill('');
+    const header = new Array(22).fill('');
     const data   = [header].concat(rows);
     return {
       writes: writes,
@@ -2392,23 +2393,23 @@ function testApprovalReminderCountBehavior() {
   }
 
   function fakeRow(name, email, phone, startTime, approvedValue, lastNotifiedAt, reminderCountRaw) {
-    const row = new Array(21);
+    const row = new Array(22);
     row[1]  = name;
     row[2]  = email;
     row[3]  = phone;
     row[4]  = startTime;
     row[8]  = 'Yes';            // I: Intake Sent -- required for the row to be considered at all
-    row[13] = '';                // N: Lease Signed
-    row[14] = approvedValue;     // O: Rental Approved (blank = pending)
-    row[15] = lastNotifiedAt;    // P: Approval Notified At
-    row[16] = reminderCountRaw;  // Q: Approval Reminder Count
-    row[17] = 'Cargo Van';       // R: Vehicle Type
-    row[18] = 'Bainbridge';      // S: Location
-    row[20] = '';                // U: Customer Approval Notified
+    row[14] = '';                // O: Lease Signed
+    row[15] = approvedValue;     // P: Rental Approved (blank = pending)
+    row[16] = lastNotifiedAt;    // Q: Approval Notified At
+    row[17] = reminderCountRaw;  // R: Approval Reminder Count
+    row[18] = 'Cargo Van';       // S: Vehicle Type
+    row[19] = 'Bainbridge';      // T: Location
+    row[21] = '';                // V: Customer Approval Notified
     return row;
   }
 
-  const soon         = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);  // outside the reminder-due window by itself; only O/P/Q matter here
+  const soon         = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);  // outside the reminder-due window by itself; only P/Q/R matter here
   const longAgo       = new Date(Date.now() - 100 * 60 * 60 * 1000);     // well past HOURS_BETWEEN_APPROVAL_REMINDERS
   const recentlySent   = new Date(Date.now() - 1 * 60 * 60 * 1000);       // not yet due again under the documented default (12h)
 
@@ -2430,8 +2431,8 @@ function testApprovalReminderCountBehavior() {
       emailCallCount = 0;
       checkRentalEligibility_();
       check('blank count -- exactly one email sent (initial)', emailCallCount === 1);
-      check('blank count -- Q written as 1 on row 2', sheet.writes.some(function(w) { return w.row === 2 && w.col === 17 && w.value === 1; }));
-      check('blank count -- P written on row 2', sheet.writes.some(function(w) { return w.row === 2 && w.col === 16; }));
+      check('blank count -- R written as 1 on row 2', sheet.writes.some(function(w) { return w.row === 2 && w.col === 18 && w.value === 1; }));
+      check('blank count -- Q written on row 2', sheet.writes.some(function(w) { return w.row === 2 && w.col === 17; }));
     })();
 
     // ---- 2. Existing numeric count (1), due for its next reminder -- increments to 2 ----
@@ -2441,7 +2442,7 @@ function testApprovalReminderCountBehavior() {
       emailCallCount = 0;
       checkRentalEligibility_();
       check('numeric count 1 -- one reminder email sent', emailCallCount === 1);
-      check('numeric count 1 -- Q written as 2', sheet.writes.some(function(w) { return w.row === 2 && w.col === 17 && w.value === 2; }));
+      check('numeric count 1 -- R written as 2', sheet.writes.some(function(w) { return w.row === 2 && w.col === 18 && w.value === 2; }));
     })();
 
     // ---- 3. Existing numeric-STRING count ("2"), due for its next reminder -- increments to 3 ----
@@ -2451,7 +2452,7 @@ function testApprovalReminderCountBehavior() {
       emailCallCount = 0;
       checkRentalEligibility_();
       check('numeric-string count "2" -- one reminder email sent', emailCallCount === 1);
-      check('numeric-string count "2" -- Q written as 3', sheet.writes.some(function(w) { return w.row === 2 && w.col === 17 && w.value === 3; }));
+      check('numeric-string count "2" -- R written as 3', sheet.writes.some(function(w) { return w.row === 2 && w.col === 18 && w.value === 3; }));
     })();
 
     // ---- 4. Count at MAX -- escalates instead of a normal reminder; reminders stop at the intended maximum ----
@@ -2461,9 +2462,9 @@ function testApprovalReminderCountBehavior() {
       emailCallCount = 0;
       checkRentalEligibility_();
       check('count at MAX -- exactly one escalation email sent', emailCallCount === 1);
-      check('count at MAX -- Q written as MAX+1 (permanent skip)',
-            sheet.writes.some(function(w) { return w.row === 2 && w.col === 17 && w.value === CONFIG.MAX_APPROVAL_REMINDERS + 1; }));
-      check('count at MAX -- P is NOT written on escalation', !sheet.writes.some(function(w) { return w.row === 2 && w.col === 16; }));
+      check('count at MAX -- R written as MAX+1 (permanent skip)',
+            sheet.writes.some(function(w) { return w.row === 2 && w.col === 18 && w.value === CONFIG.MAX_APPROVAL_REMINDERS + 1; }));
+      check('count at MAX -- Q is NOT written on escalation', !sheet.writes.some(function(w) { return w.row === 2 && w.col === 17; }));
     })();
 
     // ---- 5. Count already past MAX -- permanently silenced: no email, no write ----
@@ -2508,9 +2509,9 @@ function testApprovalReminderCountBehavior() {
 
       check('two-row run -- exactly two emails sent (one per row)', emailCallCount === 2);
       check('row A (sheet row 2) written with value 1',
-            sheet.writes.some(function(w) { return w.row === 2 && w.col === 17 && w.value === 1; }));
+            sheet.writes.some(function(w) { return w.row === 2 && w.col === 18 && w.value === 1; }));
       check('row B (sheet row 3) written with value MAX+1',
-            sheet.writes.some(function(w) { return w.row === 3 && w.col === 17 && w.value === CONFIG.MAX_APPROVAL_REMINDERS + 1; }));
+            sheet.writes.some(function(w) { return w.row === 3 && w.col === 18 && w.value === CONFIG.MAX_APPROVAL_REMINDERS + 1; }));
       check('no write landed on any row other than 2 or 3',
             sheet.writes.every(function(w) { return w.row === 2 || w.row === 3; }));
     })();
@@ -2607,7 +2608,7 @@ function testSuspiciousInspectionTimingCalculations() {
 // TEST 35: Suspicious inspection timing warning send/flag behavior
 // (sendSuspiciousInspectionTimingWarning_) [CONFIG]
 // Verifies src/Reminders.js's sendSuspiciousInspectionTimingWarning_() only
-// writes column Y (Suspicious Timing Warning Sent) after a successful
+// writes column Z (Suspicious Timing Warning Sent) after a successful
 // manager email, matching the same write-after-success pattern used
 // throughout Reminders.js -- this is what makes the warning durably
 // send-once-per-booking. Uses a fake sheet (no live Sheets API calls) and
@@ -2647,7 +2648,7 @@ function testSendSuspiciousInspectionTimingWarningFlagBehavior() {
   const realSendEmailHtml = sendEmailHtml;
 
   try {
-    // ---- Successful send writes column Y = Yes (duplicate-prevention flag) ----
+    // ---- Successful send writes column Z = Yes (duplicate-prevention flag) ----
     (function successWritesFlag() {
       sendEmailHtml = function() { /* succeeds */ };
       const sheet = fakeSheet();
@@ -2657,11 +2658,11 @@ function testSendSuspiciousInspectionTimingWarningFlagBehavior() {
         pre, post, 10, fakeLocCfg
       );
       check('successful send returns true', result === true);
-      check('column Y (row 5, col 25) written exactly once', sheet.writes.length === 1 &&
-            sheet.writes[0].row === 5 && sheet.writes[0].col === 25 && sheet.writes[0].value === 'Yes');
+      check('column Z (row 5, col 26) written exactly once', sheet.writes.length === 1 &&
+            sheet.writes[0].row === 5 && sheet.writes[0].col === 26 && sheet.writes[0].value === 'Yes');
     })();
 
-    // ---- Failed send does not write column Y -- retried on the next run ----
+    // ---- Failed send does not write column Z -- retried on the next run ----
     (function failureDoesNotWriteFlag() {
       sendEmailHtml = function() { throw new Error('simulated SendGrid outage'); };
       const sheet = fakeSheet();
@@ -3139,6 +3140,719 @@ function testLocationSenderConfig() {
   return failed;
 }
 
+// ---------------------------------------------------------------------------
+// TEST 38: Additional-driver submission validation (validateAdditionalDriverSubmission_) [CONFIG]
+// Pure test against the additional-driver branch validator (Forms.js) added
+// for the M/N column migration -- no sheet reads, no external calls, no live
+// form event. Never guesses: every case not explicitly valid must be
+// rejected with a specific machine-readable reason so
+// processIntakeFormSubmission_() can alert the admin with useful context
+// instead of silently completing a booking with missing or bad Driver #2
+// identity data.
+// ---------------------------------------------------------------------------
+function testValidateAdditionalDriverSubmission() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, hasAdditionalDriver, name, email, primaryEmail, expectedValid, expectedReason) {
+    const actual = validateAdditionalDriverSubmission_(hasAdditionalDriver, name, email, primaryEmail);
+    const ok = actual.valid === expectedValid && (expectedValid || actual.reason === expectedReason);
+    if (ok) {
+      Logger.log('OK (' + label + '): ' + JSON.stringify(actual));
+      passed++;
+    } else {
+      Logger.log('FAIL (' + label + '): expected valid=' + expectedValid +
+                 (expectedReason ? ', reason=' + expectedReason : '') + ', got ' + JSON.stringify(actual));
+      failed++;
+    }
+  }
+
+  // ---- "No" branch: always valid, regardless of name/email content -------
+  check('No branch, blank name/email -- valid', false, '', '', 'customer@example.com', true);
+  check('No branch, stray name/email present -- still valid (ignored)', false, 'Stray Name', 'stray@example.com', 'customer@example.com', true);
+
+  // ---- Unrecognized / missing answer -- never guessed --------------------
+  check('null answer (missing/unparseable) -- invalid, unrecognized-answer', null, 'Name', 'email@example.com', 'customer@example.com', false, 'unrecognized-answer');
+  check('undefined answer -- invalid, unrecognized-answer', undefined, 'Name', 'email@example.com', 'customer@example.com', false, 'unrecognized-answer');
+
+  // ---- "Yes" branch: every required field, checked in order --------------
+  check('Yes branch, missing name -- invalid, missing-name', true, '', 'driver2@example.com', 'customer@example.com', false, 'missing-name');
+  check('Yes branch, missing email -- invalid, missing-email', true, 'Driver Two', '', 'customer@example.com', false, 'missing-email');
+  check('Yes branch, invalid email format -- invalid, invalid-email-format', true, 'Driver Two', 'not-an-email', 'customer@example.com', false, 'invalid-email-format');
+  check('Yes branch, additional email equals primary email (exact case) -- invalid, duplicate-email',
+        true, 'Driver Two', 'customer@example.com', 'customer@example.com', false, 'duplicate-email');
+  check('Yes branch, additional email equals primary email (different case/whitespace) -- invalid, duplicate-email',
+        true, 'Driver Two', '  Customer@Example.com  ', 'customer@example.com', false, 'duplicate-email');
+  check('Yes branch, valid distinct name/email -- valid', true, 'Driver Two', 'driver2@example.com', 'customer@example.com', true);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' additional-driver validation checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+  return failed;
+}
+
+// ---------------------------------------------------------------------------
+// TEST 39: Intake additional-driver field extraction (extractIntakeSubmissionFields) [CONFIG]
+// Pure test against the additional-driver portion of
+// extractIntakeSubmissionFields() (Forms.js) -- no sheet reads, no live form
+// event. Covers hasAdditionalDriver normalization (Yes/No/blank/garbage,
+// case- and whitespace-insensitive) and trimming/lowercasing of the name and
+// email answers.
+// ---------------------------------------------------------------------------
+function testExtractIntakeAdditionalDriverFields() {
+  let passed = 0;
+  let failed = 0;
+
+  function fakeRange(sheetName) {
+    return { getSheet: function() { return { getName: function() { return sheetName; } }; } };
+  }
+  function fakeEvent(namedValues) {
+    return { range: fakeRange(INTAKE_RESPONSE_SHEET_NAME), namedValues: namedValues };
+  }
+  function baseNamedValues() {
+    const nv = {};
+    nv[INTAKE_RESPONSE_EMAIL_QUESTION_TITLE] = ['customer@example.com'];
+    return nv;
+  }
+
+  function check(label, condition) {
+    if (condition) { Logger.log('OK: ' + label); passed++; }
+    else { Logger.log('FAIL: ' + label); failed++; }
+  }
+
+  // ---- "Yes" (and case/whitespace variants) normalizes to true -----------
+  ['Yes', 'YES', '  yes  '].forEach(function(raw) {
+    const nv = baseNamedValues();
+    nv[INTAKE_RESPONSE_ADDITIONAL_DRIVER_QUESTION_TITLE] = [raw];
+    const actual = extractIntakeSubmissionFields(fakeEvent(nv));
+    check('answer ' + JSON.stringify(raw) + ' normalizes to hasAdditionalDriver=true', actual.hasAdditionalDriver === true);
+  });
+
+  // ---- "No" (and case/whitespace variants) normalizes to false -----------
+  ['No', 'NO', '  no  '].forEach(function(raw) {
+    const nv = baseNamedValues();
+    nv[INTAKE_RESPONSE_ADDITIONAL_DRIVER_QUESTION_TITLE] = [raw];
+    const actual = extractIntakeSubmissionFields(fakeEvent(nv));
+    check('answer ' + JSON.stringify(raw) + ' normalizes to hasAdditionalDriver=false', actual.hasAdditionalDriver === false);
+  });
+
+  // ---- Missing or unrecognized answer -- null, never guessed -------------
+  (function missingAnswer() {
+    const nv = baseNamedValues(); // no additional-driver key at all
+    const actual = extractIntakeSubmissionFields(fakeEvent(nv));
+    check('missing additional-driver answer -- hasAdditionalDriver is null', actual.hasAdditionalDriver === null);
+  })();
+  (function garbageAnswer() {
+    const nv = baseNamedValues();
+    nv[INTAKE_RESPONSE_ADDITIONAL_DRIVER_QUESTION_TITLE] = ['Maybe'];
+    const actual = extractIntakeSubmissionFields(fakeEvent(nv));
+    check('unrecognized additional-driver answer -- hasAdditionalDriver is null', actual.hasAdditionalDriver === null);
+    check('rawAdditionalDriverAnswer preserved for admin-alert context', actual.rawAdditionalDriverAnswer === 'Maybe');
+  })();
+
+  // ---- Name/email trimming and email lowercasing --------------------------
+  (function nameAndEmailNormalized() {
+    const nv = baseNamedValues();
+    nv[INTAKE_RESPONSE_ADDITIONAL_DRIVER_QUESTION_TITLE] = ['Yes'];
+    nv[INTAKE_RESPONSE_ADDITIONAL_DRIVER_NAME_QUESTION_TITLE] = ['  Driver Two  '];
+    nv[INTAKE_RESPONSE_ADDITIONAL_DRIVER_EMAIL_QUESTION_TITLE] = ['  Driver2@Example.com  '];
+    const actual = extractIntakeSubmissionFields(fakeEvent(nv));
+    check('additional driver name is trimmed', actual.additionalDriverName === 'Driver Two');
+    check('additional driver email is trimmed and lowercased', actual.additionalDriverEmail === 'driver2@example.com');
+  })();
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' intake additional-driver extraction checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+  return failed;
+}
+
+// ---------------------------------------------------------------------------
+// TEST 40: Intake additional-driver write behavior (processIntakeFormSubmission_) [CONFIG]
+// End-to-end (minus the live sheet/form) test of the M/N/W write behavior
+// added to processIntakeFormSubmission_() (Forms.js) for the additional-
+// driver branch: the "No" path (M cleared, N reset to the placeholder), the
+// "Yes" valid path (M/N written from the submission), and every validation
+// failure mode (missing name, missing email, invalid email format,
+// duplicate email, unrecognized answer) -- each of which must withhold ALL
+// writes (M, N, and W) and alert the admin, never partially completing a
+// booking. Stubs getSheet with a fake sheet whose writes are recorded and
+// applied in place (so repeated reads within one call see prior writes),
+// and stubs alertAdmin and sendLeaseViaDocuSeal (the fake sheet's deposit
+// column is always blank, so isDocuSealEligible() is false and
+// sendLeaseViaDocuSeal must never actually be invoked in this test -- the
+// stub throws if it is, to catch a regression). All three are restored in a
+// finally block even if an assertion fails.
+// ---------------------------------------------------------------------------
+function testProcessIntakeFormSubmissionAdditionalDriverWrite() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) { Logger.log('OK: ' + label); passed++; }
+    else { Logger.log('FAIL: ' + label); failed++; }
+  }
+
+  function fakeMutatingSheet(rows) {
+    const header = new Array(26).fill('');
+    const data = [header].concat(rows);
+    const writes = [];
+    return {
+      writes: writes,
+      getDataRange: function() { return { getValues: function() { return data; } }; },
+      getRange: function(row, col) {
+        return {
+          setValue: function(value) {
+            data[row - 1][col - 1] = value;
+            writes.push({ row: row, col: col, value: value });
+          }
+        };
+      }
+    };
+  }
+
+  function fakeBookingRow(email, startTime) {
+    const row = new Array(26).fill('');
+    row[1] = 'Test Customer';
+    row[2] = email;
+    row[4] = startTime;
+    row[5] = new Date(startTime.getTime() + 4 * 60 * 60 * 1000);
+    row[6] = ''; // G: Deposit Paid -- blank, so isDocuSealEligible() is always false in this test
+    row[9] = ''; // J: Lease Sent
+    row[18] = 'Cargo Van';  // S: Vehicle Type
+    row[19] = 'Bainbridge'; // T: Location
+    return row;
+  }
+
+  function fakeIntakeEvent(email, additionalDriverAnswer, additionalDriverName, additionalDriverEmail) {
+    const nv = {};
+    nv[INTAKE_RESPONSE_EMAIL_QUESTION_TITLE] = [email];
+    if (additionalDriverAnswer !== undefined) nv[INTAKE_RESPONSE_ADDITIONAL_DRIVER_QUESTION_TITLE] = [additionalDriverAnswer];
+    if (additionalDriverName !== undefined) nv[INTAKE_RESPONSE_ADDITIONAL_DRIVER_NAME_QUESTION_TITLE] = [additionalDriverName];
+    if (additionalDriverEmail !== undefined) nv[INTAKE_RESPONSE_ADDITIONAL_DRIVER_EMAIL_QUESTION_TITLE] = [additionalDriverEmail];
+    return {
+      range: { getSheet: function() { return { getName: function() { return INTAKE_RESPONSE_SHEET_NAME; } }; } },
+      namedValues: nv
+    };
+  }
+
+  const realGetSheet             = getSheet;
+  const realAlertAdmin           = alertAdmin;
+  const realSendLeaseViaDocuSeal = sendLeaseViaDocuSeal;
+  let alertCalls = 0;
+
+  try {
+    alertAdmin = function() { alertCalls++; };
+    sendLeaseViaDocuSeal = function() { throw new Error('sendLeaseViaDocuSeal should not be called -- deposit is unpaid in this test'); };
+
+    // ---- Case 1: "No" branch -- M cleared, N reset, W marked complete ------
+    (function noBranch() {
+      const startTime = new Date('2026-08-01T10:00:00');
+      const row = fakeBookingRow('no-driver@example.com', startTime);
+      row[12] = 'Stale Name';        // pre-existing Calendar-era leftover -- must be cleared
+      row[13] = 'stale@example.com'; // pre-existing Calendar fallback -- must be reset
+      const sheet = fakeMutatingSheet([row]);
+      getSheet = function() { return sheet; };
+      alertCalls = 0;
+
+      processIntakeFormSubmission_(fakeIntakeEvent('no-driver@example.com', 'No'));
+
+      check('No branch: M (col 13) cleared', sheet.writes.some(function(w) { return w.row === 2 && w.col === 13 && w.value === ''; }));
+      check('No branch: N (col 14) reset to placeholder', sheet.writes.some(function(w) { return w.row === 2 && w.col === 14 && w.value === 'No Second Email'; }));
+      check('No branch: W (col 23) marked complete', sheet.writes.some(function(w) { return w.row === 2 && w.col === 23 && w.value === 'Yes'; }));
+      check('No branch: no admin alert', alertCalls === 0);
+    })();
+
+    // ---- Case 2: "Yes" branch, valid name/email -- M/N written, W complete -
+    (function yesBranchValid() {
+      const startTime = new Date('2026-08-01T10:00:00');
+      const row = fakeBookingRow('yes-driver@example.com', startTime);
+      const sheet = fakeMutatingSheet([row]);
+      getSheet = function() { return sheet; };
+      alertCalls = 0;
+
+      processIntakeFormSubmission_(fakeIntakeEvent('yes-driver@example.com', 'Yes', 'Driver Two', 'driver2@example.com'));
+
+      check('Yes branch valid: M (col 13) written with the driver name', sheet.writes.some(function(w) { return w.row === 2 && w.col === 13 && w.value === 'Driver Two'; }));
+      check('Yes branch valid: N (col 14) written with the driver email', sheet.writes.some(function(w) { return w.row === 2 && w.col === 14 && w.value === 'driver2@example.com'; }));
+      check('Yes branch valid: W (col 23) marked complete', sheet.writes.some(function(w) { return w.row === 2 && w.col === 23 && w.value === 'Yes'; }));
+      check('Yes branch valid: no admin alert', alertCalls === 0);
+    })();
+
+    // ---- Case 3: missing name -- all writes withheld, admin alerted --------
+    (function missingNameRejected() {
+      const startTime = new Date('2026-08-01T10:00:00');
+      const row = fakeBookingRow('missing-name@example.com', startTime);
+      const sheet = fakeMutatingSheet([row]);
+      getSheet = function() { return sheet; };
+      alertCalls = 0;
+
+      processIntakeFormSubmission_(fakeIntakeEvent('missing-name@example.com', 'Yes', '', 'driver2@example.com'));
+
+      check('missing name: no write at all (M/N/W all withheld)', sheet.writes.length === 0);
+      check('missing name: admin was alerted exactly once', alertCalls === 1);
+    })();
+
+    // ---- Case 4: missing email -- all writes withheld, admin alerted -------
+    (function missingEmailRejected() {
+      const startTime = new Date('2026-08-01T10:00:00');
+      const row = fakeBookingRow('missing-email@example.com', startTime);
+      const sheet = fakeMutatingSheet([row]);
+      getSheet = function() { return sheet; };
+      alertCalls = 0;
+
+      processIntakeFormSubmission_(fakeIntakeEvent('missing-email@example.com', 'Yes', 'Driver Two', ''));
+
+      check('missing email: no write at all', sheet.writes.length === 0);
+      check('missing email: admin was alerted exactly once', alertCalls === 1);
+    })();
+
+    // ---- Case 5: invalid email format -- all writes withheld, admin alerted
+    (function invalidEmailRejected() {
+      const startTime = new Date('2026-08-01T10:00:00');
+      const row = fakeBookingRow('invalid-email@example.com', startTime);
+      const sheet = fakeMutatingSheet([row]);
+      getSheet = function() { return sheet; };
+      alertCalls = 0;
+
+      processIntakeFormSubmission_(fakeIntakeEvent('invalid-email@example.com', 'Yes', 'Driver Two', 'not-an-email'));
+
+      check('invalid email format: no write at all', sheet.writes.length === 0);
+      check('invalid email format: admin was alerted exactly once', alertCalls === 1);
+    })();
+
+    // ---- Case 6: additional email equals primary email -- withheld, alerted
+    (function duplicateEmailRejected() {
+      const startTime = new Date('2026-08-01T10:00:00');
+      const row = fakeBookingRow('same-email@example.com', startTime);
+      const sheet = fakeMutatingSheet([row]);
+      getSheet = function() { return sheet; };
+      alertCalls = 0;
+
+      processIntakeFormSubmission_(fakeIntakeEvent('same-email@example.com', 'Yes', 'Driver Two', 'same-email@example.com'));
+
+      check('duplicate email: no write at all', sheet.writes.length === 0);
+      check('duplicate email: admin was alerted exactly once', alertCalls === 1);
+    })();
+
+    // ---- Case 7: unrecognized additional-driver answer -- withheld, alerted
+    (function unrecognizedAnswer() {
+      const startTime = new Date('2026-08-01T10:00:00');
+      const row = fakeBookingRow('garbage-answer@example.com', startTime);
+      const sheet = fakeMutatingSheet([row]);
+      getSheet = function() { return sheet; };
+      alertCalls = 0;
+
+      processIntakeFormSubmission_(fakeIntakeEvent('garbage-answer@example.com', 'Maybe'));
+
+      check('unrecognized answer: no write at all', sheet.writes.length === 0);
+      check('unrecognized answer: admin was alerted exactly once', alertCalls === 1);
+    })();
+  } finally {
+    getSheet             = realGetSheet;
+    alertAdmin           = realAlertAdmin;
+    sendLeaseViaDocuSeal = realSendLeaseViaDocuSeal;
+  }
+
+  check('getSheet restored to the original function', getSheet === realGetSheet);
+  check('alertAdmin restored to the original function', alertAdmin === realAlertAdmin);
+  check('sendLeaseViaDocuSeal restored to the original function', sendLeaseViaDocuSeal === realSendLeaseViaDocuSeal);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' intake additional-driver write-behavior checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+  return failed;
+}
+
+// ---------------------------------------------------------------------------
+// TEST 41: Calendar append-row layout (syncCalendarBookings) [CONFIG]
+// Pure test -- no CalendarApp, no sheet writes. Mirrors the exact
+// appendRow() array built by syncCalendarBookings() (CalendarSync.js),
+// asserting the A-T column layout and, specifically, that column M
+// (Additional Driver Name) is always written blank (unknown until intake is
+// submitted) while column N (Additional Driver Email) carries the
+// Calendar-description-derived fallback (or the 'No Second Email'
+// placeholder). Kept in sync manually with the literal array in
+// CalendarSync.js -- the same array shape is also exercised live (with a
+// real sheet append) by testSyncCalendarBookingsNoNotifications() [MUTATION]
+// above.
+// ---------------------------------------------------------------------------
+function testCalendarAppendRowLayout() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) { Logger.log('OK: ' + label); passed++; }
+    else { Logger.log('FAIL: ' + label); failed++; }
+  }
+
+  function buildRow(eventId, name, email, phone, startTime, endTime, secondEmail, vehicleType, location) {
+    return [
+      eventId,                          // A
+      name,                             // B
+      email       || 'No Email',        // C
+      phone ? "'" + phone : 'No Phone', // D
+      startTime,                        // E
+      endTime,                          // F
+      '',                               // G: Deposit Paid
+      '',                               // H: Stripe Amount
+      '',                               // I: Intake Sent
+      '',                               // J: Lease Sent
+      '',                               // K: 24hr Sent
+      '',                               // L: Post-Rental Sent
+      '',                               // M: Additional Driver Name
+      secondEmail || 'No Second Email', // N: Additional Driver Email
+      '',                               // O: Lease Signed
+      '',                               // P: Rental Approved
+      '',                               // Q: Approval Notified At
+      '',                               // R: Approval Reminder Count
+      vehicleType,                      // S: Vehicle Type
+      location,                         // T: Location
+    ];
+  }
+
+  const startTime = new Date('2026-08-01T10:00:00');
+  const endTime   = new Date('2026-08-01T14:00:00');
+
+  const rowWithSecondEmail = buildRow('evt-1', 'Jane Doe', 'jane@example.com', '2065551234', startTime, endTime, 'second@example.com', 'Cargo Van', 'Bainbridge');
+  check('row has exactly 20 columns (A through T)', rowWithSecondEmail.length === 20);
+  check('M (index 12) Additional Driver Name is always blank on append', rowWithSecondEmail[12] === '');
+  check('N (index 13) Additional Driver Email holds the Calendar-derived fallback', rowWithSecondEmail[13] === 'second@example.com');
+  check('S (index 18) Vehicle Type', rowWithSecondEmail[18] === 'Cargo Van');
+  check('T (index 19) Location', rowWithSecondEmail[19] === 'Bainbridge');
+
+  const rowWithoutSecondEmail = buildRow('evt-2', 'John Roe', 'john@example.com', '2065555678', startTime, endTime, null, 'Moving Truck', 'Poulsbo');
+  check('N falls back to "No Second Email" when the Calendar description has none', rowWithoutSecondEmail[13] === 'No Second Email');
+  check('M is still blank even with no second email extracted', rowWithoutSecondEmail[12] === '');
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' calendar append-row layout checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+  return failed;
+}
+
+// ---------------------------------------------------------------------------
+// TEST 42: DocuSeal template selection and Driver #2 identity (sendLeaseViaDocuSeal) [CONFIG]
+// Verifies src/DocuSeal.js's sendLeaseViaDocuSeal(): one-driver bookings
+// (blank / 'No Second Email' additionalDriverEmail) use
+// CONFIG.DOCUSEAL_TEMPLATE_SINGLE and submit only Driver #1 (+ the manager,
+// if configured); two-driver bookings (a real additionalDriverEmail) use
+// CONFIG.DOCUSEAL_TEMPLATE_TWO_DRIVERS and add a 'Driver #2' submitter with
+// the REAL additionalDriverName/additionalDriverEmail -- never the old
+// hardcoded 'Second Driver' placeholder. Stubs UrlFetchApp.fetch so no real
+// DocuSeal API call is made; restores it (and the temporarily-overridden
+// CONFIG values) in a finally block even if an assertion fails.
+// ---------------------------------------------------------------------------
+function testSendLeaseViaDocuSealTemplateSelection() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) { Logger.log('OK: ' + label); passed++; }
+    else { Logger.log('FAIL: ' + label); failed++; }
+  }
+
+  const realFetch = UrlFetchApp.fetch;
+  const realConfig = {
+    DOCUSEAL_TEMPLATE_SINGLE:      CONFIG.DOCUSEAL_TEMPLATE_SINGLE,
+    DOCUSEAL_TEMPLATE_TWO_DRIVERS: CONFIG.DOCUSEAL_TEMPLATE_TWO_DRIVERS,
+    MANAGER_EMAIL:                 CONFIG.MANAGER_EMAIL,
+    FROM_NAME:                     CONFIG.FROM_NAME,
+    COMPANY_NAME:                  CONFIG.COMPANY_NAME,
+    DOCUSEAL_KEY:                  CONFIG.DOCUSEAL_KEY,
+  };
+
+  CONFIG.DOCUSEAL_TEMPLATE_SINGLE      = 111;
+  CONFIG.DOCUSEAL_TEMPLATE_TWO_DRIVERS = 222;
+  CONFIG.MANAGER_EMAIL                 = 'manager@example.com';
+  CONFIG.FROM_NAME                     = 'Reliable Storage';
+  CONFIG.COMPANY_NAME                  = 'Reliable Storage';
+  CONFIG.DOCUSEAL_KEY                  = 'test-key';
+
+  let lastPayload = null;
+  UrlFetchApp.fetch = function(url, options) {
+    lastPayload = JSON.parse(options.payload);
+    return {
+      getResponseCode: function() { return 200; },
+      getContentText:  function() { return JSON.stringify([{ id: 1, submission_id: 999 }]); }
+    };
+  };
+
+  try {
+    const startTime = new Date('2026-08-01T10:00:00');
+    const endTime   = new Date('2026-08-01T14:00:00');
+
+    // ---- One-driver: blank additionalDriverEmail --------------------------
+    sendLeaseViaDocuSeal('Jane Doe', 'jane@example.com', '', '', startTime, endTime, 'Cargo Van', 'Bainbridge');
+    check('blank additionalDriverEmail -- uses the single-driver template', lastPayload.template_id === 111);
+    check('blank additionalDriverEmail -- no Driver #2 submitter',
+          lastPayload.submitters.filter(function(s) { return s.role === 'Driver #2'; }).length === 0);
+
+    // ---- One-driver: 'No Second Email' placeholder -------------------------
+    sendLeaseViaDocuSeal('Jane Doe', 'jane@example.com', '', 'No Second Email', startTime, endTime, 'Cargo Van', 'Bainbridge');
+    check('"No Second Email" placeholder -- uses the single-driver template', lastPayload.template_id === 111);
+    check('"No Second Email" placeholder -- no Driver #2 submitter',
+          lastPayload.submitters.filter(function(s) { return s.role === 'Driver #2'; }).length === 0);
+
+    // ---- Two-driver: a real additional driver email + name -----------------
+    sendLeaseViaDocuSeal('Jane Doe', 'jane@example.com', 'Driver Two', 'driver2@example.com', startTime, endTime, 'Cargo Van', 'Bainbridge');
+    check('real additionalDriverEmail -- uses the two-driver template', lastPayload.template_id === 222);
+    const driverTwo = lastPayload.submitters.filter(function(s) { return s.role === 'Driver #2'; })[0];
+    check('Driver #2 submitter is present', !!driverTwo);
+    check('Driver #2 email is the REAL additionalDriverEmail', driverTwo && driverTwo.email === 'driver2@example.com');
+    check('Driver #2 name is the REAL additionalDriverName, not the old hardcoded "Second Driver"',
+          driverTwo && driverTwo.name === 'Driver Two' && driverTwo.name !== 'Second Driver');
+
+    // ---- Driver #1 always carries the real primary name/email --------------
+    const driverOne = lastPayload.submitters.filter(function(s) { return s.role === 'Driver #1'; })[0];
+    check('Driver #1 submitter uses the real primary name/email', driverOne && driverOne.name === 'Jane Doe' && driverOne.email === 'jane@example.com');
+  } finally {
+    UrlFetchApp.fetch = realFetch;
+    CONFIG.DOCUSEAL_TEMPLATE_SINGLE      = realConfig.DOCUSEAL_TEMPLATE_SINGLE;
+    CONFIG.DOCUSEAL_TEMPLATE_TWO_DRIVERS = realConfig.DOCUSEAL_TEMPLATE_TWO_DRIVERS;
+    CONFIG.MANAGER_EMAIL                 = realConfig.MANAGER_EMAIL;
+    CONFIG.FROM_NAME                     = realConfig.FROM_NAME;
+    CONFIG.COMPANY_NAME                  = realConfig.COMPANY_NAME;
+    CONFIG.DOCUSEAL_KEY                  = realConfig.DOCUSEAL_KEY;
+  }
+
+  check('UrlFetchApp.fetch restored to the original function', UrlFetchApp.fetch === realFetch);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' DocuSeal template selection / Driver #2 identity checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+  return failed;
+}
+
+// ---------------------------------------------------------------------------
+// TEST 43: Sheet schema header positions (setupSheetSchema) [CONFIG]
+// Verifies setupSheetSchema() (Setup.js) writes the correct header text at
+// the correct A-Z cell for every column this migration touched -- M/N (new)
+// and the S-Z block (each shifted one column right). Stubs getSheet with a
+// fake sheet that records every getRange(a1).setValue() call (and no-ops
+// setDataValidation); no live sheet is read or written.
+// ---------------------------------------------------------------------------
+function testSetupSheetSchemaHeaderPositions() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) { Logger.log('OK: ' + label); passed++; }
+    else { Logger.log('FAIL: ' + label); failed++; }
+  }
+
+  function fakeSchemaSheet() {
+    const cells = {};
+    const writes = [];
+    return {
+      writes: writes,
+      getRange: function(a1) {
+        return {
+          getValue: function() { return cells[a1] || ''; },
+          setValue: function(v) { cells[a1] = v; writes.push({ a1: a1, value: v }); },
+          setDataValidation: function() { /* no-op -- not exercised by this test */ }
+        };
+      }
+    };
+  }
+
+  const realGetSheet = getSheet;
+  const sheet = fakeSchemaSheet();
+  getSheet = function() { return sheet; };
+
+  try {
+    setupSheetSchema();
+  } finally {
+    getSheet = realGetSheet;
+  }
+
+  const EXPECTED = {
+    'M1': 'Additional Driver Name',
+    'N1': 'Additional Driver Email',
+    'S1': 'Vehicle Type',
+    'T1': 'Location',
+    'V1': 'Customer Approval Notified',
+    'W1': 'Intake Form Completed',
+    'X1': 'Pre-Inspection Form Completed',
+    'Y1': 'Post-Inspection Form Completed',
+    'Z1': 'Suspicious Timing Warning Sent',
+  };
+
+  Object.keys(EXPECTED).forEach(function(a1) {
+    check(a1 + ' header written as "' + EXPECTED[a1] + '"',
+          sheet.writes.some(function(w) { return w.a1 === a1 && w.value === EXPECTED[a1]; }));
+  });
+
+  check('getSheet restored to the original function', getSheet === realGetSheet);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' sheet schema header position checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+  return failed;
+}
+
+// ---------------------------------------------------------------------------
+// TEST 44: Duplicate lease-signed webhook safety (markLeaseSigned) [CONFIG]
+// Verifies markLeaseSigned() (Webhooks.js) is idempotent: a second webhook
+// carrying the same submissionId (or, in the email-fallback path, the same
+// signerEmail) for a row already marked signed does not write column O
+// again. Uses a fake sheet whose getRange(row,col).setValue() mutates the
+// same in-memory array getDataRange().getValues() returns, so a second call
+// to markLeaseSigned() sees the effect of the first -- unlike the read-only
+// row-lookup tests elsewhere in this file, this is required here because
+// idempotency can only be proven by actually observing the second call's
+// behavior against the first call's result.
+// ---------------------------------------------------------------------------
+function testMarkLeaseSignedDuplicateWebhookSafety() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) { Logger.log('OK: ' + label); passed++; }
+    else { Logger.log('FAIL: ' + label); failed++; }
+  }
+
+  function fakeMutatingSheet(rows) {
+    const header = new Array(26).fill('');
+    const data = [header].concat(rows);
+    const writes = [];
+    return {
+      writes: writes,
+      getDataRange: function() { return { getValues: function() { return data; } }; },
+      getRange: function(row, col) {
+        return {
+          setValue: function(value) {
+            data[row - 1][col - 1] = value;
+            writes.push({ row: row, col: col, value: value });
+          }
+        };
+      }
+    };
+  }
+
+  const realGetSheet = getSheet;
+
+  try {
+    // ---- submissionId path: second identical webhook is a no-op ----------
+    (function submissionIdDuplicate() {
+      const row = new Array(26).fill('');
+      row[2]  = 'driver@example.com';
+      row[14] = '';        // O: Lease Signed -- initially unsigned
+      row[20] = 'sub-123'; // U: DocuSeal Submission ID
+      const sheet = fakeMutatingSheet([row]);
+      getSheet = function() { return sheet; };
+
+      markLeaseSigned('sub-123', 'driver@example.com');
+      check('first webhook marks O (col 15) Yes on row 2', sheet.writes.some(function(w) { return w.row === 2 && w.col === 15 && w.value === 'Yes'; }));
+      const writesAfterFirst = sheet.writes.length;
+
+      markLeaseSigned('sub-123', 'driver@example.com'); // duplicate webhook, same submissionId
+      check('duplicate webhook (same submissionId) writes nothing further', sheet.writes.length === writesAfterFirst);
+    })();
+
+    // ---- email-fallback path: second identical webhook is a no-op --------
+    (function emailFallbackDuplicate() {
+      const row = new Array(26).fill('');
+      row[2]  = 'driver-noid@example.com';
+      row[14] = ''; // O: Lease Signed -- initially unsigned, no submissionId on file
+      const sheet = fakeMutatingSheet([row]);
+      getSheet = function() { return sheet; };
+
+      markLeaseSigned(null, 'driver-noid@example.com');
+      check('first webhook (email fallback) marks O (col 15) Yes on row 2', sheet.writes.some(function(w) { return w.row === 2 && w.col === 15 && w.value === 'Yes'; }));
+      const writesAfterFirst = sheet.writes.length;
+
+      markLeaseSigned(null, 'driver-noid@example.com'); // duplicate webhook
+      check('duplicate webhook (email fallback) writes nothing further', sheet.writes.length === writesAfterFirst);
+    })();
+  } finally {
+    getSheet = realGetSheet;
+  }
+
+  check('getSheet restored to the original function', getSheet === realGetSheet);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' duplicate lease-signed webhook safety checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+  return failed;
+}
+
+// ---------------------------------------------------------------------------
+// TEST 45: Two-driver partial signing -- KNOWN LIMITATION, documented not
+// fixed (markLeaseSigned) [CONFIG]
+// ------------------------------------------------------------
+// This test does NOT assert correct behavior -- it exists to document and
+// pin down the CURRENT, intentionally-unresolved behavior described in the
+// KNOWN LIMITATION comment above markLeaseSigned() (Webhooks.js): a
+// two-driver booking (column N holds a real additional-driver email) is
+// marked column O = 'Yes' (Lease Signed) after just ONE signer's webhook
+// arrives, with no verification that the other required driver has also
+// signed. Per Part 6 of the additional-driver migration: the current
+// webhook payload does not reliably carry a verifiable signerRole, so no
+// per-role completion tracking could be safely built -- see the KNOWN
+// LIMITATION comment for the exact Pipedream/DocuSeal change that would be
+// required to fix this properly. If a future change fixes this limitation,
+// this test's expectations must be updated to match the fixed behavior --
+// this test intentionally encodes the current bug, not the desired outcome.
+// ---------------------------------------------------------------------------
+function testTwoDriverPartialSigningKnownLimitationDocumented() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) { Logger.log('OK: ' + label); passed++; }
+    else { Logger.log('FAIL: ' + label); failed++; }
+  }
+
+  function fakeMutatingSheet(rows) {
+    const header = new Array(26).fill('');
+    const data = [header].concat(rows);
+    const writes = [];
+    return {
+      writes: writes,
+      getDataRange: function() { return { getValues: function() { return data; } }; },
+      getRange: function(row, col) {
+        return {
+          setValue: function(value) {
+            data[row - 1][col - 1] = value;
+            writes.push({ row: row, col: col, value: value });
+          }
+        };
+      }
+    };
+  }
+
+  const realGetSheet = getSheet;
+
+  try {
+    const row = new Array(26).fill('');
+    row[2]  = 'driver1@example.com'; // C: Email (Driver #1 / primary customer)
+    row[12] = 'Driver Two';          // M: Additional Driver Name -- a real two-driver booking
+    row[13] = 'driver2@example.com'; // N: Additional Driver Email -- a real two-driver booking
+    row[14] = '';                    // O: Lease Signed -- initially unsigned
+    row[20] = 'sub-two-driver';      // U: DocuSeal Submission ID
+    const sheet = fakeMutatingSheet([row]);
+    getSheet = function() { return sheet; };
+
+    // Only Driver #1 has signed so far -- Driver #2 has NOT signed yet.
+    markLeaseSigned('sub-two-driver', 'driver1@example.com');
+
+    check('KNOWN LIMITATION (documented, not fixed): a two-driver booking IS marked ' +
+          'column O = Yes after only Driver #1\'s webhook, even though Driver #2 has not ' +
+          'signed -- see the KNOWN LIMITATION comment above markLeaseSigned() in Webhooks.js',
+          sheet.writes.some(function(w) { return w.row === 2 && w.col === 15 && w.value === 'Yes'; }));
+  } finally {
+    getSheet = realGetSheet;
+  }
+
+  check('getSheet restored to the original function', getSheet === realGetSheet);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' two-driver partial-signing (known limitation) checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+  return failed;
+}
+
 // ============================================================
 // TEST RUNNERS
 // ============================================================
@@ -3172,10 +3886,19 @@ function testLocationSenderConfig() {
 // temporarily stub global functions -- including, for
 // testApprovalReminderCountBehavior, getSheet itself -- and always restore
 // them, even on failure), with no live sheet or form dependency and no real
-// email/SMS ever sent.
+// email/SMS ever sent. testValidateAdditionalDriverSubmission,
+// testExtractIntakeAdditionalDriverFields,
+// testProcessIntakeFormSubmissionAdditionalDriverWrite,
+// testCalendarAppendRowLayout, testSendLeaseViaDocuSealTemplateSelection,
+// testSetupSheetSchemaHeaderPositions,
+// testMarkLeaseSignedDuplicateWebhookSafety, and
+// testTwoDriverPartialSigningKnownLimitationDocumented (added for the
+// additional-driver / M-Z column migration) follow the same pattern --
+// pure or stub-based, no live sheet/form/API dependency, all stubs restored
+// in a finally block.
 // ---------------------------------------------------------------------------
 function runAllSandboxConfigurationTests() {
-  Logger.log('===== Running Sandbox Configuration Tests (31 tests) =====');
+  Logger.log('===== Running Sandbox Configuration Tests (39 tests) =====');
 
   const tests = [
     validateConfig,
@@ -3209,6 +3932,14 @@ function runAllSandboxConfigurationTests() {
     testSuspiciousInspectionTimingCalculations,
     testSendSuspiciousInspectionTimingWarningFlagBehavior,
     testTriggerRegistrationIsWellFormed,
+    testValidateAdditionalDriverSubmission,
+    testExtractIntakeAdditionalDriverFields,
+    testProcessIntakeFormSubmissionAdditionalDriverWrite,
+    testCalendarAppendRowLayout,
+    testSendLeaseViaDocuSealTemplateSelection,
+    testSetupSheetSchemaHeaderPositions,
+    testMarkLeaseSignedDuplicateWebhookSafety,
+    testTwoDriverPartialSigningKnownLimitationDocumented,
   ];
 
   // Every test function above returns the number of failed assertions (0 if
@@ -3335,9 +4066,9 @@ function testSendPreTripInspection() {
   const phone       = (row[3] || '').toString().replace(/^'/, '');
   const rentalDate  = new Date(row[4]);
   const dateStr     = formatDateTime(rentalDate);
-  const vehicleType = row[17] || '';
-  const location    = row[18] || '';
-  const leaseSigned = row[13];
+  const vehicleType = row[18] || '';
+  const location    = row[19] || '';
+  const leaseSigned = row[14];
 
   // Validate the test booking has what it needs before building or sending anything.
   const problems = [];
@@ -3432,8 +4163,8 @@ function testSendPostTripInspection() {
   const phone       = (row[3] || '').toString().replace(/^'/, '');
   const rentalDate  = new Date(row[4]);
   const dateStr     = formatDateTime(rentalDate);
-  const vehicleType = row[17] || '';
-  const location    = row[18] || '';
+  const vehicleType = row[18] || '';
+  const location    = row[19] || '';
 
   const problems = [];
   if (!email || email === 'No Email') problems.push('email');

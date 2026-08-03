@@ -18,12 +18,13 @@
 //   D: Phone                 E: Start Time           F: End Time
 //   G: Deposit Paid          H: Stripe Amount        I: Intake Sent
 //   J: Lease Sent            K: 24hr Sent            L: Post-Rental Sent
-//   M: Second Driver Email   N: Lease Signed         O: Rental Approved
-//   P: Approval Notified At  Q: Approval Reminder Count
-//   R: Vehicle Type          S: Location             T: DocuSeal Submission ID
-//   U: Customer Approval Notified   V: Intake Form Completed
-//   W: Pre-Inspection Form Completed   X: Post-Inspection Form Completed
-//   Y: Suspicious Timing Warning Sent
+//   M: Additional Driver Name   N: Additional Driver Email
+//   O: Lease Signed          P: Rental Approved
+//   Q: Approval Notified At  R: Approval Reminder Count
+//   S: Vehicle Type          T: Location             U: DocuSeal Submission ID
+//   V: Customer Approval Notified   W: Intake Form Completed
+//   X: Pre-Inspection Form Completed   Y: Post-Inspection Form Completed
+//   Z: Suspicious Timing Warning Sent
 // ============================================================
 // CHANGES IN v7:
 //   - Approval reminder loop reworked. Script no longer writes
@@ -84,7 +85,7 @@ const CONFIG = {
   // ---- Location-specific senders (email and SMS) ---------------
   // Each active location has its own sending email address and Twilio phone number.
   // All customer-facing and manager-facing messages for a booking use the sender
-  // for that booking's location (column S). FROM_EMAIL is used only by alertAdmin().
+  // for that booking's location (column T). FROM_EMAIL is used only by alertAdmin().
   EMAIL_BAINBRIDGE:   PROPS.EMAIL_BAINBRIDGE,
   PHONE_BAINBRIDGE:   PROPS.PHONE_BAINBRIDGE,
   EMAIL_POULSBO:      PROPS.EMAIL_POULSBO,

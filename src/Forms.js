@@ -26,8 +26,8 @@ function buildInspectUrl(name, email, rentalDate, type) {
 }
 
 // Returns true for any completion-cell value that has already been marked
-// done -- both the plain 'Yes' used by column V (Intake Form Completed) and
-// the 'Yes <timestamp>' format used by columns W and X (Pre-/Post-Inspection
+// done -- both the plain 'Yes' used by column W (Intake Form Completed) and
+// the 'Yes <timestamp>' format used by columns X and Y (Pre-/Post-Inspection
 // Form Completed, see formatInspectionCompletionValue() in Helpers.js). A
 // value is considered "set" purely by its 'Yes' prefix; the timestamp
 // portion, if any, does not need to be parseable for this check -- that is
@@ -50,13 +50,13 @@ function isInspectionCompletionValueSet_(cellValue) {
 // this is the strongest match available without a Google Form change.
 //
 // completionColIndex is the 0-based column that marks a row as already
-// handled for the specific document being matched (V for intake, W for
-// pre-inspection, X for post-inspection) -- callers pass whichever column
+// handled for the specific document being matched (W for intake, X for
+// pre-inspection, Y for post-inspection) -- callers pass whichever column
 // applies so the same algorithm and the same "never guess" guarantee apply
 // to every form-submit handler in this codebase. "Already handled" is
 // determined by isInspectionCompletionValueSet_() above, not by an exact
 // 'Yes' string match, so this works whether the column holds a bare 'Yes'
-// (V) or 'Yes <timestamp>' (W, X).
+// (W) or 'Yes <timestamp>' (X, Y).
 //
 // dateStr, when provided, must already be in 'yyyy-MM-dd' form (the same
 // format formatDateForForm() uses to pre-fill the date field). Pass null to
@@ -131,12 +131,12 @@ function findBookingMatchRow_(data, email, dateStr, completionColIndex) {
 // exactly as before this function was generalized, so
 // processIntakeFormSubmission_() and its tests continue to behave
 // identically. A duplicate intake
-// submission (every match already marked 'Yes' in column V) is reported as
+// submission (every match already marked 'Yes' in column W) is reported as
 // 'not_found', same as if no row had matched at all -- this function never
 // exposed the 'already_done' distinction, so callers must not start relying
 // on it here.
 function findIntakeMatchRow(data, email, dateStr) {
-  const result = findBookingMatchRow_(data, email, dateStr, 21); // V: Intake Form Completed
+  const result = findBookingMatchRow_(data, email, dateStr, 22); // W: Intake Form Completed
   if (result.status === 'already_done') return { status: 'not_found', row: -1, precision: null };
   return result;
 }
@@ -144,13 +144,13 @@ function findIntakeMatchRow(data, email, dateStr) {
 // Inspection-specific wrapper around findBookingMatchRow_(). inspectionType
 // must be 'pre' or 'post' (see extractInspectionSubmissionFields()) and
 // selects which completion column duplicate-submission checks and matching
-// are scoped to -- W for 'pre', X for 'post'. Unlike findIntakeMatchRow(),
+// are scoped to -- X for 'pre', Y for 'post'. Unlike findIntakeMatchRow(),
 // this exposes 'already_done' as its own status so
 // processInspectionFormSubmission_() can treat a resubmission of an
 // already-completed inspection as a silent no-op rather than alerting the
 // admin about a "missing" match.
 function findInspectionMatchRow(data, email, dateStr, inspectionType) {
-  const completionCol = inspectionType === 'pre' ? 22 : 23; // W: Pre-Inspection Form Completed / X: Post-Inspection Form Completed
+  const completionCol = inspectionType === 'pre' ? 23 : 24; // X: Pre-Inspection Form Completed / Y: Post-Inspection Form Completed
   return findBookingMatchRow_(data, email, dateStr, completionCol);
 }
 
@@ -164,6 +164,14 @@ function findInspectionMatchRow(data, email, dateStr, inspectionType) {
 const INTAKE_RESPONSE_EMAIL_QUESTION_TITLE = 'Email Address';
 const INTAKE_RESPONSE_DATE_QUESTION_TITLE  = 'Rental Date';
 
+// Exact question titles for the redesigned intake form's additional-driver
+// branch (Section 2/3 -- see docs/setup-notes.md). Same "verify against the
+// live form, safely find/process nothing if retitled" contract as the two
+// constants above.
+const INTAKE_RESPONSE_ADDITIONAL_DRIVER_QUESTION_TITLE      = 'Will there be an additional authorized driver?';
+const INTAKE_RESPONSE_ADDITIONAL_DRIVER_NAME_QUESTION_TITLE  = 'Additional Driver Full Name';
+const INTAKE_RESPONSE_ADDITIONAL_DRIVER_EMAIL_QUESTION_TITLE = 'Additional Driver Email Address';
+
 // Tab name of the linked intake-form response sheet, within the SAME
 // spreadsheet as Bookings -- verified live against the sandbox project.
 // Used only as a safety check so this handler ignores submissions from any
@@ -176,9 +184,24 @@ const INTAKE_RESPONSE_SHEET_NAME = 'Rental Intake Form';
 // spreadsheet form-submit event object -- separated out so it can be
 // unit-tested with a synthetic event (no sheet reads, no live trigger).
 //
-// Returns { email, date } on success (date is null if it was blank or
-// unparseable -- findIntakeMatchRow() handles that safely via its
-// email-only fallback), or null if:
+// Returns { email, date, hasAdditionalDriver, rawAdditionalDriverAnswer,
+// additionalDriverName, additionalDriverEmail } on success, where:
+//   - date is null if it was blank or unparseable -- findIntakeMatchRow()
+//     handles that safely via its email-only fallback,
+//   - hasAdditionalDriver is true/false when the answer normalizes to
+//     exactly "yes"/"no" (case/whitespace-insensitive), or null if the
+//     answer is missing or does not normalize to either -- callers must
+//     never guess and must treat null as "cannot process this submission's
+//     additional-driver data" (see validateAdditionalDriverSubmission_()
+//     below),
+//   - rawAdditionalDriverAnswer is the trimmed, original-case answer, kept
+//     only for admin-alert context when hasAdditionalDriver is null,
+//   - additionalDriverName / additionalDriverEmail are the trimmed (and,
+//     for email, lowercased) answers to the two Section 3 questions --
+//     always returned as-extracted (possibly blank strings) regardless of
+//     hasAdditionalDriver; validation of whether they are required happens
+//     in validateAdditionalDriverSubmission_(), not here.
+// Returns null if:
 //   - the event object doesn't look like a spreadsheet form-submit event
 //     (missing e.range or e.namedValues), or
 //   - the submission is from a sheet other than INTAKE_RESPONSE_SHEET_NAME
@@ -213,7 +236,70 @@ function extractIntakeSubmissionFields(e) {
     catch(dateErr) { date = null; }
   }
 
-  return { email: email, date: date };
+  const additionalDriverValues      = e.namedValues[INTAKE_RESPONSE_ADDITIONAL_DRIVER_QUESTION_TITLE];
+  const additionalDriverNameValues  = e.namedValues[INTAKE_RESPONSE_ADDITIONAL_DRIVER_NAME_QUESTION_TITLE];
+  const additionalDriverEmailValues = e.namedValues[INTAKE_RESPONSE_ADDITIONAL_DRIVER_EMAIL_QUESTION_TITLE];
+
+  const rawAdditionalDriverAnswer = (additionalDriverValues && additionalDriverValues[0] ? additionalDriverValues[0] : '').toString().trim();
+  const additionalDriverName      = (additionalDriverNameValues && additionalDriverNameValues[0] ? additionalDriverNameValues[0] : '').toString().trim();
+  const additionalDriverEmail     = (additionalDriverEmailValues && additionalDriverEmailValues[0] ? additionalDriverEmailValues[0] : '').toString().toLowerCase().trim();
+
+  const normalizedAdditionalDriverAnswer = rawAdditionalDriverAnswer.toLowerCase();
+  let hasAdditionalDriver = null;
+  if (normalizedAdditionalDriverAnswer === 'yes') hasAdditionalDriver = true;
+  else if (normalizedAdditionalDriverAnswer === 'no') hasAdditionalDriver = false;
+
+  return {
+    email: email,
+    date: date,
+    hasAdditionalDriver: hasAdditionalDriver,
+    rawAdditionalDriverAnswer: rawAdditionalDriverAnswer,
+    additionalDriverName: additionalDriverName,
+    additionalDriverEmail: additionalDriverEmail
+  };
+}
+
+// Validates the additional-driver branch of an intake submission (see
+// extractIntakeSubmissionFields() above). Pure -- no sheet reads, no
+// external calls -- so it can be unit-tested directly. Never guesses:
+// anything not explicitly valid is rejected. Returns { valid: true } or
+// { valid: false, reason: '<short machine-readable reason>' }.
+//
+//   - hasAdditionalDriver === false -> always valid; there is nothing else
+//     to check on the "No" branch.
+//   - hasAdditionalDriver !== true (i.e. null, or any other unexpected
+//     value) -> invalid, reason 'unrecognized-answer'. This covers a
+//     missing/blank answer or one that didn't normalize to "yes"/"no".
+//   - hasAdditionalDriver === true requires, in order:
+//       * a nonblank additionalDriverName ('missing-name' if blank),
+//       * a nonblank additionalDriverEmail ('missing-email' if blank),
+//       * a syntactically valid email format ('invalid-email-format'),
+//       * additionalDriverEmail different from primaryEmail, case-
+//         insensitively ('duplicate-email' if they match).
+//
+// Used by processIntakeFormSubmission_() to decide whether it is safe to
+// write columns M/N and mark Intake Form Completed (column W) for this
+// submission.
+function validateAdditionalDriverSubmission_(hasAdditionalDriver, additionalDriverName, additionalDriverEmail, primaryEmail) {
+  if (hasAdditionalDriver === false) {
+    return { valid: true };
+  }
+  if (hasAdditionalDriver !== true) {
+    return { valid: false, reason: 'unrecognized-answer' };
+  }
+  if (!additionalDriverName) {
+    return { valid: false, reason: 'missing-name' };
+  }
+  if (!additionalDriverEmail) {
+    return { valid: false, reason: 'missing-email' };
+  }
+  if (!isValidEmailFormat_(additionalDriverEmail)) {
+    return { valid: false, reason: 'invalid-email-format' };
+  }
+  if (additionalDriverEmail.toLowerCase().trim() === (primaryEmail || '').toLowerCase().trim()) {
+    return { valid: false, reason: 'duplicate-email' };
+  }
+  return { valid: true };
 }
 
 // Exact Google Form question titles and response-sheet tab name for the
@@ -401,10 +487,11 @@ function onFormSubmit(e) {
 // This is the repository's only mechanism for detecting that the intake
 // form was actually completed, as opposed to Intake Sent (column I), which
 // only means the pre-filled link was emailed to the customer. It does not
-// read or store the full response -- consistent with the documented design
-// ("the script does not read form responses") -- it only confirms a
-// submission arrived and marks column V (Intake Form Completed) on the
-// matching booking row. The flag can only ever be set here, which
+// read or store the full response beyond what is documented here -- only
+// email/date (matching) and the additional-driver branch (columns M/N) are
+// ever read -- it only confirms a submission arrived, records the
+// additional-driver outcome, and marks column W (Intake Form Completed) on
+// the matching booking row. The flag can only ever be set here, which
 // onFormSubmit() invokes only after Google Forms has already accepted and
 // recorded the submission -- there is no earlier point at which the script
 // could observe or act on it.
@@ -418,6 +505,19 @@ function onFormSubmit(e) {
 // if the submission's email matches more than one eligible (not-yet-complete)
 // booking and the rental date cannot tell them apart, this function updates
 // nothing and logs a warning instead of marking an arbitrary row complete.
+//
+// Additional-driver branch (columns M / N -- Additional Driver Name /
+// Additional Driver Email): validated by validateAdditionalDriverSubmission_()
+// above before anything is written. Column W (Intake Form Completed) is
+// deliberately NOT set if that validation fails -- an invalid or incomplete
+// additional-driver answer is treated the same as "not yet usably
+// submitted," and an admin alert is sent instead, rather than silently
+// completing the booking with missing/bad driver-2 identity data. On a
+// valid "Yes" answer, M/N are written from the submission. On a valid "No"
+// answer, M/N are authoritatively reset to "no additional driver" -- this
+// also overwrites any earlier Calendar-description-derived fallback value
+// syncCalendarBookings() (CalendarSync.js) may have put in column N, since
+// the intake form is the authoritative source once submitted.
 //
 // If the deposit was already paid before the intake form was submitted,
 // this function also sends the DocuSeal lease immediately, mirroring the
@@ -453,7 +553,42 @@ function processIntakeFormSubmission_(e) {
     }
 
     const i = match.row;
-    sheet.getRange(i + 1, 22).setValue('Yes'); // V: Intake Form Completed
+
+    // Validate the additional-driver branch before writing or marking
+    // anything for this submission -- see validateAdditionalDriverSubmission_()
+    // above and the function-level comment for why.
+    const validation = validateAdditionalDriverSubmission_(
+      fields.hasAdditionalDriver, fields.additionalDriverName, fields.additionalDriverEmail, fields.email
+    );
+
+    if (!validation.valid) {
+      Logger.log('processIntakeFormSubmission_: additional-driver data for ' + fields.email +
+                 ' failed validation (' + validation.reason + ', raw answer "' +
+                 fields.rawAdditionalDriverAnswer + '") -- row ' + (i + 1) +
+                 ' NOT marked complete. Review the Bookings sheet / intake response manually.');
+      alertAdmin('Intake form: invalid additional-driver submission',
+        'A submission from ' + fields.email + ' had an invalid additional-driver answer (' +
+        validation.reason + '; raw answer: "' + fields.rawAdditionalDriverAnswer + '"). Row ' +
+        (i + 1) + ' was NOT marked Intake Form Completed. Review the raw response and correct ' +
+        'columns M/N manually if needed, or ask the customer to resubmit.');
+      return;
+    }
+
+    if (fields.hasAdditionalDriver === true) {
+      sheet.getRange(i + 1, 13).setValue(fields.additionalDriverName);  // M: Additional Driver Name
+      sheet.getRange(i + 1, 14).setValue(fields.additionalDriverEmail); // N: Additional Driver Email
+      Logger.log('processIntakeFormSubmission_: additional driver recorded for row ' + (i + 1) +
+                 ' (' + fields.additionalDriverName + ', ' + fields.additionalDriverEmail + ')');
+    } else {
+      // "No" branch -- authoritatively clears any earlier Calendar-derived
+      // fallback value back to the "no additional driver" state.
+      sheet.getRange(i + 1, 13).setValue('');                 // M: Additional Driver Name
+      sheet.getRange(i + 1, 14).setValue('No Second Email');  // N: Additional Driver Email
+      Logger.log('processIntakeFormSubmission_: no additional driver for row ' + (i + 1) +
+                 ' -- M cleared, N reset to "No Second Email".');
+    }
+
+    sheet.getRange(i + 1, 23).setValue('Yes'); // W: Intake Form Completed
     Logger.log('processIntakeFormSubmission_: marked intake complete for row ' + (i + 1) +
                ' (matched by ' + match.precision + ')');
 
@@ -466,17 +601,22 @@ function processIntakeFormSubmission_(e) {
       try {
         const name        = data[i][1];
         const email       = data[i][2];
-        const secondEmail = data[i][12] || '';
+        // Use the just-validated fields.* values (not a stale re-read of
+        // data[i][12]/[13], which still holds whatever was in the sheet
+        // BEFORE the writes just above) so this send always reflects
+        // exactly what was just recorded for this submission.
+        const additionalDriverName  = fields.hasAdditionalDriver === true ? fields.additionalDriverName  : '';
+        const additionalDriverEmail = fields.hasAdditionalDriver === true ? fields.additionalDriverEmail : 'No Second Email';
         const startTime   = new Date(data[i][4]);
         const endTime     = new Date(data[i][5]);
-        const vehicleType = data[i][17] || '';
-        const location    = data[i][18] || '';
+        const vehicleType = data[i][18] || ''; // S: Vehicle Type
+        const location    = data[i][19] || ''; // T: Location
 
-        const docuSealResp = sendLeaseViaDocuSeal(name, email, secondEmail, startTime, endTime, vehicleType, location);
+        const docuSealResp = sendLeaseViaDocuSeal(name, email, additionalDriverName, additionalDriverEmail, startTime, endTime, vehicleType, location);
         const submissionId = extractDocuSealSubmissionId(docuSealResp);
 
         sheet.getRange(i + 1, 10).setValue('Yes'); // J: Lease Sent
-        if (submissionId != null) sheet.getRange(i + 1, 20).setValue(submissionId); // T: DocuSeal Submission ID
+        if (submissionId != null) sheet.getRange(i + 1, 21).setValue(submissionId); // U: DocuSeal Submission ID
         Logger.log('processIntakeFormSubmission_: deposit was already paid -- lease sent for ' + email);
       } catch(leaseErr) {
         Logger.log('processIntakeFormSubmission_: DocuSeal send failed for row ' + (i + 1) + ': ' + leaseErr);
@@ -498,8 +638,8 @@ function processIntakeFormSubmission_(e) {
 // buildInspectUrl() above). This function reads that answer back out of
 // the submission (via extractInspectionSubmissionFields(), which
 // normalizes it independently of the CONFIG.INSPECT_VAL_PRE/POST display
-// strings used only for URL pre-fill) to decide whether to write column W
-// (Pre-Inspection Form Completed) or column X (Post-Inspection Form
+// strings used only for URL pre-fill) to decide whether to write column X
+// (Pre-Inspection Form Completed) or column Y (Post-Inspection Form
 // Completed) -- never both in the same run, and never based on customer
 // name alone.
 //
@@ -571,7 +711,7 @@ function processInspectionFormSubmission_(e) {
     }
 
     const i   = match.row;
-    const col = fields.type === 'pre' ? 23 : 24; // W: Pre-Inspection Form Completed / X: Post-Inspection Form Completed
+    const col = fields.type === 'pre' ? 24 : 25; // X: Pre-Inspection Form Completed / Y: Post-Inspection Form Completed
     // Use the actual form-submission time (fields.submittedAt, read from the
     // response sheet's own Timestamp column) whenever it's available, so the
     // recorded completion time -- and the one-hour post-trip delay measured

@@ -36,15 +36,22 @@ docs/sandbox-plan.md             ← historical — see README.md §14 for curre
 
 ## Rules for editing src/
 
-- Column O (Rental Approved) is manager-only. The script must NEVER write to it.
+- Column P (Rental Approved) is manager-only. The script must NEVER write to it.
   Valid values are set only by the manager: `Approved - Free` / `Approved - Paid` / `Denied`.
-- Columns P and Q (Approval Notified At / Approval Reminder Count) are the script's
+- Columns Q and R (Approval Notified At / Approval Reminder Count) are the script's
   only state for the approval reminder loop. Do not remove or rename them.
-- Column U (Customer Approval Notified) is written only after both O is approved AND
-  N (Lease Signed) = Yes — never send the customer approval notice on approval alone.
-- Columns V, W, X (Intake / Pre-Inspection / Post-Inspection Form Completed) are written only
+- Column V (Customer Approval Notified) is written only after both P is approved AND
+  O (Lease Signed) = Yes — never send the customer approval notice on approval alone.
+- Columns W, X, Y (Intake / Pre-Inspection / Post-Inspection Form Completed) are written only
   by the ambiguity-safe form-submission matchers in Forms.js — never guess a row when a
   submission could match more than one booking.
+- Column M (Additional Driver Name) and column N (Additional Driver Email) hold the
+  second-driver identity used by DocuSeal template selection. Column N may be initialized by
+  `syncCalendarBookings()` from the Calendar description as a fallback, but the intake form
+  (via `processIntakeFormSubmission_()` in Forms.js) is authoritative once submitted — a valid
+  "Yes" answer overwrites both columns; a "No" answer clears M and resets N to
+  `'No Second Email'`. Never guess: an invalid or incomplete additional-driver answer must
+  withhold the write to column W (Intake Form Completed), not silently complete the booking.
 - There is exactly one spreadsheet-bound `onFormSubmit` trigger (installed by
   `installFormSubmitTrigger_()` in Setup.js). It dispatches by response-tab name — do not add a
   second form-submit trigger; Apps Script does not support two on the same spreadsheet.

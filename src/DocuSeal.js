@@ -1,10 +1,24 @@
 // ============================================================
 // DOCUSEAL -- SEND LEASE FOR E-SIGNATURE
+// ------------------------------------------------------------
+// additionalDriverName / additionalDriverEmail come from the Bookings sheet
+// columns M and N (Additional Driver Name / Additional Driver Email -- see
+// processIntakeFormSubmission_() in Forms.js), which are authoritative once
+// the intake form has been submitted. additionalDriverEmail may also be an
+// earlier, Calendar-description-derived fallback value if the intake form
+// has not been submitted yet (see syncCalendarBookings() in CalendarSync.js)
+// -- but DocuSeal is never actually sent until intake is complete (column W
+// = 'Yes', enforced by isDocuSealEligible() at every call site), so by the
+// time this function runs, additionalDriverEmail has always gone through
+// the validated intake write whenever it holds a real email: intake
+// validation requires a nonblank additionalDriverName alongside any
+// nonblank additionalDriverEmail (see Forms.js), so the two are never
+// expected to disagree about whether a second driver exists.
 // ============================================================
-function sendLeaseViaDocuSeal(name, email, secondEmail, startTime, endTime, vehicleType, location) {
-  const hasTwoDrivers = secondEmail &&
-                        secondEmail !== 'No Second Email' &&
-                        secondEmail !== '';
+function sendLeaseViaDocuSeal(name, email, additionalDriverName, additionalDriverEmail, startTime, endTime, vehicleType, location) {
+  const hasTwoDrivers = additionalDriverEmail &&
+                        additionalDriverEmail !== 'No Second Email' &&
+                        additionalDriverEmail !== '';
 
   const templateId = hasTwoDrivers
     ? CONFIG.DOCUSEAL_TEMPLATE_TWO_DRIVERS
@@ -31,10 +45,19 @@ function sendLeaseViaDocuSeal(name, email, secondEmail, startTime, endTime, vehi
   ];
 
   if (hasTwoDrivers) {
+    // additionalDriverName is expected to be non-blank here -- see the
+    // function-level comment above. Deliberately NOT substituted with a
+    // placeholder like the old hardcoded 'Second Driver' if it somehow is
+    // blank (e.g. a pre-migration booking whose second-driver email came
+    // only from the Calendar description and was never confirmed by an
+    // intake submission): sending whatever is actually known, including
+    // blank, and letting a DocuSeal validation error surface loudly via
+    // alertAdmin (see the callers of this function) is safer than silently
+    // pretending a name is known when it is not.
     submitters.push({
       role:  'Driver #2',
-      email: secondEmail,
-      name:  'Second Driver'
+      email: additionalDriverEmail,
+      name:  additionalDriverName
     });
   }
 
@@ -93,7 +116,7 @@ function sendLeaseViaDocuSeal(name, email, secondEmail, startTime, endTime, vehi
   }
 
   Logger.log('DocuSeal lease sent to: ' + email +
-             (hasTwoDrivers ? ' and ' + secondEmail : ''));
+             (hasTwoDrivers ? ' and ' + additionalDriverEmail + ' (' + additionalDriverName + ')' : ''));
   return JSON.parse(resp.getContentText());
 }
 

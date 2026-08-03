@@ -23,10 +23,10 @@ function processReminders() {
                                : startTime + 4 * 60 * 60 * 1000;
       const sent24hr  = row[10];
       const sentPost  = row[11];
-      const approved  = row[14]; // O: Rental Approved
-      const preTripCompletionRaw  = row[22]; // W: Pre-Inspection Form Completed
-      const postTripCompletionRaw = row[23]; // X: Post-Inspection Form Completed
-      const timingWarningSent     = row[24]; // Y: Suspicious Timing Warning Sent
+      const approved  = row[15]; // P: Rental Approved
+      const preTripCompletionRaw  = row[23]; // X: Pre-Inspection Form Completed
+      const postTripCompletionRaw = row[24]; // Y: Post-Inspection Form Completed
+      const timingWarningSent     = row[25]; // Z: Suspicious Timing Warning Sent
 
       if (isNaN(startTime)) continue;
 
@@ -44,8 +44,8 @@ function processReminders() {
       const hoursUntilStart = (startTime - now) / (1000 * 60 * 60);
       const rentalDate      = new Date(row[4]);
       const dateStr         = formatDateTime(rentalDate);
-      const vehicleType     = row[17] || '';  // R: Vehicle Type
-      const location        = row[18] || '';  // S: Location
+      const vehicleType     = row[18] || '';  // S: Vehicle Type
+      const location        = row[19] || '';  // T: Location
 
       try {
         const locCfg = getLocationConfig(location);
@@ -57,7 +57,7 @@ function processReminders() {
         const depositPaid = row[6];
         if (isPreTripReminderEligible(hoursUntilStart, sent24hr, approved, depositPaid)) {
           const preUrl = buildInspectUrl(name, email || '', rentalDate, 'pre');
-          sendPreTripReminder_(sheet, i, name, email, phone, locCfg, dateStr, vehicleType, location, preUrl, row[13]);
+          sendPreTripReminder_(sheet, i, name, email, phone, locCfg, dateStr, vehicleType, location, preUrl, row[14]);
         }
 
         // Post-trip reminder. Fires exactly one hour after the pre-trip
@@ -81,7 +81,7 @@ function processReminders() {
         // inclusive of the boundary itself (see isSuspiciousInspectionTiming()
         // in Helpers.js). Purely informational -- never blocks or alters
         // anything else in the workflow -- and sent at most once per
-        // booking (column Y).
+        // booking (column Z).
         const postTripCompletedAt = parseInspectionCompletionTimestamp_(postTripCompletionRaw);
         if (preTripCompletedAt && postTripCompletedAt && timingWarningSent !== 'Yes') {
           const elapsedMinutes = getInspectionElapsedMinutes(preTripCompletedAt, postTripCompletedAt);
@@ -342,11 +342,11 @@ function sendPostTripReminder_(sheet, rowIndex, name, email, phone, locCfg, date
 // the customer, and never containing a customer-facing form link or
 // instructions. Does not accuse the customer of anything and does not block
 // or alter any other part of the workflow; it only states that the timing
-// may be worth a look. Written to column Y (Suspicious Timing Warning Sent)
+// may be worth a look. Written to column Z (Suspicious Timing Warning Sent)
 // only after a successful send, so this fires at most once per booking and
 // a failed send is retried on the next run -- same pattern as columns K/L.
 //
-// Returns true if the warning was sent and Y was written, false otherwise
+// Returns true if the warning was sent and Z was written, false otherwise
 // -- used by tests; processReminders() does not use the return value.
 // ============================================================
 function sendSuspiciousInspectionTimingWarning_(sheet, rowIndex, eventId, name, vehicleType, location,
@@ -381,7 +381,7 @@ function sendSuspiciousInspectionTimingWarning_(sheet, rowIndex, eventId, name, 
     return false;
   }
 
-  sheet.getRange(rowIndex + 1, 25).setValue('Yes'); // Y: Suspicious Timing Warning Sent
+  sheet.getRange(rowIndex + 1, 26).setValue('Yes'); // Z: Suspicious Timing Warning Sent
   SpreadsheetApp.flush();
   return true;
 }
@@ -442,9 +442,9 @@ function sendPreTripInspectionNowForRow(rowNumber) {
   const phone       = row[3];
   const rentalDate  = new Date(row[4]);
   const dateStr     = formatDateTime(rentalDate);
-  const vehicleType = row[17] || ''; // R: Vehicle Type
-  const location    = row[18] || ''; // S: Location
-  const leaseSigned = row[13];       // N: Lease Signed
+  const vehicleType = row[18] || ''; // S: Vehicle Type
+  const location    = row[19] || ''; // T: Location
+  const leaseSigned = row[14];       // O: Lease Signed
 
   if (!eventId) {
     throw new Error('sendPreTripInspectionNowForRow: row ' + rowNumber + ' has no booking identifier ' +
@@ -520,8 +520,8 @@ function sendPostTripInspectionNowForRow(rowNumber) {
   const phone       = row[3];
   const rentalDate  = new Date(row[4]);
   const dateStr     = formatDateTime(rentalDate);
-  const vehicleType = row[17] || ''; // R: Vehicle Type
-  const location    = row[18] || ''; // S: Location
+  const vehicleType = row[18] || ''; // S: Vehicle Type
+  const location    = row[19] || ''; // T: Location
 
   if (!eventId) {
     throw new Error('sendPostTripInspectionNowForRow: row ' + rowNumber + ' has no booking identifier ' +

@@ -73,61 +73,76 @@ function installFormSubmitTrigger_() {
 function setupSheetSchema() {
   const sheet = getSheet();
 
-  // Column R header
-  const headerCell = sheet.getRange('R1');
+  // Column M header: Additional Driver Name — written only by
+  // processIntakeFormSubmission_() in Forms.js, once a validated "Yes"
+  // additional-driver answer has been received. Blank until then.
+  const mHeaderCell = sheet.getRange('M1');
+  if (!mHeaderCell.getValue()) mHeaderCell.setValue('Additional Driver Name');
+
+  // Column N header: Additional Driver Email — initially populated (or left
+  // as the 'No Second Email' placeholder) by syncCalendarBookings() in
+  // CalendarSync.js from the Calendar description as a fallback; the intake
+  // form is authoritative once submitted (see processIntakeFormSubmission_()
+  // in Forms.js).
+  const nHeaderCell = sheet.getRange('N1');
+  if (!nHeaderCell.getValue()) nHeaderCell.setValue('Additional Driver Email');
+
+  // Column S header
+  const headerCell = sheet.getRange('S1');
   if (!headerCell.getValue()) headerCell.setValue('Vehicle Type');
 
-  // Column R data validation: derive vehicle types from CALENDAR_CONFIGS (single source of truth)
+  // Column S data validation: derive vehicle types from CALENDAR_CONFIGS (single source of truth)
   const vehicleTypes = [...new Set(CALENDAR_CONFIGS.map(c => c.vehicleType))];
   const rule = SpreadsheetApp.newDataValidation()
     .requireValueInList(vehicleTypes, true)
     .setAllowInvalid(true)   // allow blank (existing rows) and script-written empty strings
     .build();
-  sheet.getRange('R2:R').setDataValidation(rule);
+  sheet.getRange('S2:S').setDataValidation(rule);
 
-  // Column S: Location — derive from CALENDAR_CONFIGS
-  const sHeaderCell = sheet.getRange('S1');
-  if (!sHeaderCell.getValue()) sHeaderCell.setValue('Location');
+  // Column T: Location — derive from CALENDAR_CONFIGS
+  const tHeaderCell = sheet.getRange('T1');
+  if (!tHeaderCell.getValue()) tHeaderCell.setValue('Location');
 
   const locations = [...new Set(CALENDAR_CONFIGS.map(c => c.location))];
   const locationRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(locations, true)
     .setAllowInvalid(true)
     .build();
-  sheet.getRange('S2:S').setDataValidation(locationRule);
+  sheet.getRange('T2:T').setDataValidation(locationRule);
 
-  // Column U header: Customer Approval Notified — a simple Yes/blank flag
+  // Column V header: Customer Approval Notified — a simple Yes/blank flag
   // (same pattern as I/J/K/L), set by notifyCustomerOfApproval() in Approval.js.
   // No dropdown needed, same as the other Yes/blank flag columns.
-  const uHeaderCell = sheet.getRange('U1');
-  if (!uHeaderCell.getValue()) uHeaderCell.setValue('Customer Approval Notified');
+  const vHeaderCell = sheet.getRange('V1');
+  if (!vHeaderCell.getValue()) vHeaderCell.setValue('Customer Approval Notified');
 
-  // Column V header: Intake Form Completed — a simple Yes/blank flag set by
+  // Column W header: Intake Form Completed — a simple Yes/blank flag set by
   // processIntakeFormSubmission_() in Forms.js (via the onFormSubmit
   // dispatcher) when the intake Google Form is submitted.
-  const vHeaderCell = sheet.getRange('V1');
-  if (!vHeaderCell.getValue()) vHeaderCell.setValue('Intake Form Completed');
+  const wHeaderCell = sheet.getRange('W1');
+  if (!wHeaderCell.getValue()) wHeaderCell.setValue('Intake Form Completed');
 
-  // Column W header: Pre-Inspection Form Completed — a simple Yes/blank flag
+  // Column X header: Pre-Inspection Form Completed — a simple Yes/blank flag
   // set by processInspectionFormSubmission_() in Forms.js (via the
   // onFormSubmit dispatcher). Column already exists in the sandbox sheet;
   // this only fills in the header text if it is blank.
-  const wHeaderCell = sheet.getRange('W1');
-  if (!wHeaderCell.getValue()) wHeaderCell.setValue('Pre-Inspection Form Completed');
-
-  // Column X header: Post-Inspection Form Completed — same pattern as W.
   const xHeaderCell = sheet.getRange('X1');
-  if (!xHeaderCell.getValue()) xHeaderCell.setValue('Post-Inspection Form Completed');
+  if (!xHeaderCell.getValue()) xHeaderCell.setValue('Pre-Inspection Form Completed');
 
-  // Column Y header: Suspicious Timing Warning Sent — a simple Yes/blank
+  // Column Y header: Post-Inspection Form Completed — same pattern as X.
+  const yHeaderCell = sheet.getRange('Y1');
+  if (!yHeaderCell.getValue()) yHeaderCell.setValue('Post-Inspection Form Completed');
+
+  // Column Z header: Suspicious Timing Warning Sent — a simple Yes/blank
   // flag set by sendSuspiciousInspectionTimingWarning_() in Reminders.js,
   // once per booking, after the manager has been warned that the pre-trip
   // and post-trip inspection forms were submitted unusually close together.
-  const yHeaderCell = sheet.getRange('Y1');
-  if (!yHeaderCell.getValue()) yHeaderCell.setValue('Suspicious Timing Warning Sent');
+  const zHeaderCell = sheet.getRange('Z1');
+  if (!zHeaderCell.getValue()) zHeaderCell.setValue('Suspicious Timing Warning Sent');
 
-  Logger.log('Sheet schema applied: Column R = Vehicle Type, Column S = Location (dropdowns), ' +
-             'Column U = Customer Approval Notified, Column V = Intake Form Completed, ' +
-             'Column W = Pre-Inspection Form Completed, Column X = Post-Inspection Form Completed, ' +
-             'Column Y = Suspicious Timing Warning Sent.');
+  Logger.log('Sheet schema applied: Column M = Additional Driver Name, Column N = Additional Driver Email, ' +
+             'Column S = Vehicle Type, Column T = Location (dropdowns), ' +
+             'Column V = Customer Approval Notified, Column W = Intake Form Completed, ' +
+             'Column X = Pre-Inspection Form Completed, Column Y = Post-Inspection Form Completed, ' +
+             'Column Z = Suspicious Timing Warning Sent.');
 }

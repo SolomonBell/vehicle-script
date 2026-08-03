@@ -82,9 +82,9 @@ These are business/operational decisions, not code changes — resolve them befo
 4. **Run `validateConfig()`** from the editor — confirm no missing/invalid numeric properties.
 5. **Run `testSheetConnection()` and `testCalendarConfigs()`** — confirm the production Sheet and
    calendars are reachable.
-6. **Run `setupTriggers()`** — creates all five triggers and applies sheet schema (column R/S
-   dropdowns, U/V/W/X headers).
-7. **Confirm column O has manual dropdown validation** (`Approved - Free` / `Approved - Paid` /
+6. **Run `setupTriggers()`** — creates all five triggers and applies sheet schema (M/N headers,
+   column S/T dropdowns, V/W/X/Y/Z headers).
+7. **Confirm column P has manual dropdown validation** (`Approved - Free` / `Approved - Paid` /
    `Denied`) — this is not created automatically by `setupSheetSchema()`.
 8. **Deploy as a Web App** (Deploy → New deployment → Web app; Execute as: Me; Who has access:
    Anyone). Copy the deployment URL.

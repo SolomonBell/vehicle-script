@@ -114,6 +114,17 @@ Role names in DocuSeal templates must match exactly what the script sends:
 - Single driver: `Driver #1`, `Reliable Storage Manager`
 - Two drivers: `Driver #1`, `Driver #2`, `Reliable Storage Manager`
 
+**Template selection** (`sendLeaseViaDocuSeal()` in `src/DocuSeal.js`) is based on column N
+(Additional Driver Email): blank, missing, or the placeholder `'No Second Email'` selects
+`DOCUSEAL_TEMPLATE_ONE_DRIVER` and submits only `Driver #1` (+ the manager, if configured); any
+other (real) value selects `DOCUSEAL_TEMPLATE_TWO_DRIVERS` and adds a `Driver #2` submitter using
+the *real* name from column M and email from column N — there is no hardcoded placeholder name.
+Because every DocuSeal send is gated on column W (Intake Form Completed) already being `Yes` (see
+`isDocuSealEligible()`), and intake validation requires a nonblank name whenever it writes a
+nonblank email (see "Additional-driver branch" above), a two-driver send should never reach
+DocuSeal with a real email but a blank name for any row that went through the validated intake
+flow.
+
 ### Intake Form (Form 1)
 
 | Property key         | What it is                                      |
@@ -148,7 +159,7 @@ the correct booking row" below.
 
 ### Location-specific senders
 
-Each active location has its own sending email address and Twilio phone number. Every customer-facing email and SMS for a booking is sent from the address and number associated with that booking's location (column S). The global `FROM_EMAIL` is used only by `alertAdmin()`. All booking SMS messages are sent from the location-specific `PHONE_<LOCATION>` number returned by `getLocationConfig()`.
+Each active location has its own sending email address and Twilio phone number. Every customer-facing email and SMS for a booking is sent from the address and number associated with that booking's location (column T). The global `FROM_EMAIL` is used only by `alertAdmin()`. All booking SMS messages are sent from the location-specific `PHONE_<LOCATION>` number returned by `getLocationConfig()`.
 
 | Property key           | What it is                                                             |
 |------------------------|------------------------------------------------------------------------|
@@ -175,7 +186,7 @@ The helper function `getLocationConfig(location)` in `Helpers.js` is the single 
 
 Sheet tab must be named `Bookings` (exact, case-sensitive).
 
-Row 1 headers (columns A–Y). Columns R, S, U, V, W, X, and Y are written by
+Row 1 headers (columns A–Z). Columns S, T, V, W, X, Y, and Z are written by
 `syncCalendarBookings()` / `setupSheetSchema()` as noted below:
 
 | Col | Header                  | Written by         |
@@ -192,47 +203,48 @@ Row 1 headers (columns A–Y). Columns R, S, U, V, W, X, and Y are written by
 | J   | Lease Sent              | markDepositPaid / processIntakeFormSubmission_ / sendLeaseToNewBookings |
 | K   | 24hr Sent               | processReminders   |
 | L   | Post-Rental Sent        | processReminders   |
-| M   | Second Driver Email     | syncCalendarBookings |
-| N   | Lease Signed            | markLeaseSigned (webhook) |
-| O   | Rental Approved         | **Manager only** — script never writes this |
-| P   | Approval Notified At    | checkRentalEligibility |
-| Q   | Approval Reminder Count | checkRentalEligibility |
-| R   | Vehicle Type            | syncCalendarBookings (from CALENDAR_CONFIGS) |
-| S   | Location                | syncCalendarBookings (from CALENDAR_CONFIGS) |
-| T   | DocuSeal Submission ID  | markDepositPaid / processIntakeFormSubmission_ / sendLeaseToNewBookings (via sendLeaseViaDocuSeal) |
-| U   | Customer Approval Notified | checkRentalEligibility (via notifyCustomerOfApproval) |
-| V   | Intake Form Completed   | processIntakeFormSubmission_, called from onFormSubmit (installable trigger — see below) |
-| W   | Pre-Inspection Form Completed | processInspectionFormSubmission_, called from onFormSubmit (installable trigger — see below); value is `"Yes <date/time>"`, not a bare `Yes` |
-| X   | Post-Inspection Form Completed | processInspectionFormSubmission_, called from onFormSubmit (installable trigger — see below); value is `"Yes <date/time>"`, not a bare `Yes` |
-| Y   | Suspicious Timing Warning Sent | processReminders (via sendSuspiciousInspectionTimingWarning_) |
+| M   | Additional Driver Name  | processIntakeFormSubmission_ (blank until a validated "Yes" additional-driver answer) |
+| N   | Additional Driver Email | syncCalendarBookings (initial fallback) / processIntakeFormSubmission_ (authoritative once submitted) |
+| O   | Lease Signed            | markLeaseSigned (webhook) |
+| P   | Rental Approved         | **Manager only** — script never writes this |
+| Q   | Approval Notified At    | checkRentalEligibility |
+| R   | Approval Reminder Count | checkRentalEligibility |
+| S   | Vehicle Type            | syncCalendarBookings (from CALENDAR_CONFIGS) |
+| T   | Location                | syncCalendarBookings (from CALENDAR_CONFIGS) |
+| U   | DocuSeal Submission ID  | markDepositPaid / processIntakeFormSubmission_ / sendLeaseToNewBookings (via sendLeaseViaDocuSeal) |
+| V   | Customer Approval Notified | checkRentalEligibility (via notifyCustomerOfApproval) |
+| W   | Intake Form Completed   | processIntakeFormSubmission_, called from onFormSubmit (installable trigger — see below) |
+| X   | Pre-Inspection Form Completed | processInspectionFormSubmission_, called from onFormSubmit (installable trigger — see below); value is `"Yes <date/time>"`, not a bare `Yes` |
+| Y   | Post-Inspection Form Completed | processInspectionFormSubmission_, called from onFormSubmit (installable trigger — see below); value is `"Yes <date/time>"`, not a bare `Yes` |
+| Z   | Suspicious Timing Warning Sent | processReminders (via sendSuspiciousInspectionTimingWarning_) |
 
-**Column U** is a simple `Yes`/blank flag, same pattern as I/J/K/L. It tracks whether the
+**Column V** is a simple `Yes`/blank flag, same pattern as I/J/K/L. It tracks whether the
 customer has been sent the one-time "your rental is approved" notification, so the notification
 is never sent twice.
 
 **Manager approval alone does not trigger the customer email.** `checkRentalEligibility` only
-sends the customer notification once column N (Lease Signed) is also `Yes`. If the manager sets
-column O before the lease is signed, the approval value simply waits in the sheet — manager
+sends the customer notification once column O (Lease Signed) is also `Yes`. If the manager sets
+column P before the lease is signed, the approval value simply waits in the sheet — manager
 reminders stop immediately, but the customer email is not sent until a later run of
-`checkRentalEligibility` sees column N updated by the DocuSeal signed webhook
+`checkRentalEligibility` sees column O updated by the DocuSeal signed webhook
 (`markLeaseSigned`). See [Approval reminder behavior](#approval-reminder-behavior-v7) below.
 
-> **Why not reuse columns P/Q instead of adding U?** P (Approval Notified At) and Q (Approval
+> **Why not reuse columns Q/R instead of adding V?** Q (Approval Notified At) and R (Approval
 > Reminder Count) are the *manager* reminder loop's own state — they record when the manager was
-> last asked to approve and how many times. `checkRentalEligibility` stops touching P/Q the
+> last asked to approve and how many times. `checkRentalEligibility` stops touching Q/R the
 > moment a row is approved (see the code comments), so they freeze at whatever value they held
 > when the manager acted — a useful historical record of the manager's response time that would
-> be destroyed by overloading them with a second, unrelated meaning. Repurposing Q in particular
+> be destroyed by overloading them with a second, unrelated meaning. Repurposing R in particular
 > (e.g. a special value meaning "customer notified") would make a single number mean two
 > different things depending on context, which is exactly the kind of ambiguous state this
 > column avoids. No other existing column (I/J/K/L/N) represents "customer told about the
-> approval decision" either — each already has its own distinct, unambiguous meaning. Column U
+> approval decision" either — each already has its own distinct, unambiguous meaning. Column V
 > is therefore necessary, not a convenience.
 
-**Column V** is also a simple `Yes`/blank flag. It is the only reliable signal that the intake
+**Column W** is also a simple `Yes`/blank flag. It is the only reliable signal that the intake
 form was actually *submitted* — column I (Intake Sent) only means the pre-filled link was
 emailed to the customer, not that they filled it out. `markDepositPaid`, `processIntakeFormSubmission_`,
-and `sendLeaseToNewBookings` all require column V = `Yes` (in addition to column G = `Yes`)
+and `sendLeaseToNewBookings` all require column W = `Yes` (in addition to column G = `Yes`)
 before sending the DocuSeal lease, so the deposit and the intake form can arrive in either order
 and the lease is still only ever sent once. It is written only inside `processIntakeFormSubmission_()`,
 which `onFormSubmit()` (the installed trigger — see "Trigger setup" below) calls only after Google
@@ -251,8 +263,8 @@ which the script could observe it.
 > tab's history. The event-driven flag does the matching work exactly once, at submission time,
 > for the cost of one row write — no matter how large the response sheets grow.
 
-**Columns W and X** track whether the pre-trip and post-trip inspection forms were actually
-*submitted*, like U and V, but unlike those two they are not a bare `Yes`/blank flag — each holds
+**Columns X and Y** track whether the pre-trip and post-trip inspection forms were actually
+*submitted*, like V and W, but unlike those two they are not a bare `Yes`/blank flag — each holds
 `"Yes " + formatDateTimeShort(submittedAt)` (e.g. `Yes 8/2/2026 9:15 AM`), combining the completion
 flag and the actual form-submission time in one cell (`formatInspectionCompletionValue()` in
 `src/Helpers.js`). The timestamp comes from the response sheet's own Google-Forms-generated
@@ -261,21 +273,21 @@ flag and the actual form-submission time in one cell (`formatInspectionCompletio
 happens to process the event. Both columns are written only inside
 `processInspectionFormSubmission_()`, the inspection form's equivalent of
 `processIntakeFormSubmission_()`, also called only from `onFormSubmit()`. The two columns are
-tracked completely independently: a pre-trip submission only ever writes W, a post-trip submission
-only ever writes X, and each is idempotent on its own — a resubmission of an already-completed
+tracked completely independently: a pre-trip submission only ever writes X, a post-trip submission
+only ever writes Y, and each is idempotent on its own — a resubmission of an already-completed
 inspection is a silent no-op, not an error and not a duplicate write (recognized by
 `isInspectionCompletionValueSet_()`, which treats any value with a `Yes` prefix as done, regardless
 of the timestamp text that follows it — see below).
 
-**Column W now gates the post-trip reminder's timing.** `processReminders` reads W back via
+**Column X now gates the post-trip reminder's timing.** `processReminders` reads X back via
 `parseInspectionCompletionTimestamp_()` (`src/Helpers.js`) and sends the post-trip reminder on the
 first run at least one hour after that recorded completion time (`isPostTripReminderEligible()`) —
 see the `Reminders.js — Engine 3` entry in [README.md's Source File
-Reference](../README.md#5-source-file-reference). Column X is not read anywhere else in the code
+Reference](../README.md#5-source-file-reference). Column Y is not read anywhere else in the code
 except by the suspicious-timing check described next — it otherwise only records completion. See
 "Matching an inspection submission to the correct booking row" below for the matching details.
 
-**Column Y (Suspicious Timing Warning Sent)** is a simple `Yes`/blank flag, same pattern as
+**Column Z (Suspicious Timing Warning Sent)** is a simple `Yes`/blank flag, same pattern as
 U/V. Once both W and X hold a parseable completion timestamp, `processReminders` computes the
 elapsed time between them (`getInspectionElapsedMinutes()` in `src/Helpers.js`) and, if it is less
 than `CONFIG.SUSPICIOUS_INSPECTION_WINDOW_MINUTES` (`isSuspiciousInspectionTiming()`, also
@@ -307,7 +319,7 @@ controlled fallback, and only when it is itself unambiguous — i.e. exactly one
 row exists for that email overall. If two or more do, the result is `ambiguous`, not an arbitrary
 pick. On `ambiguous` or `not_found`, `processIntakeFormSubmission_()` writes nothing to the sheet
 and sends no DocuSeal lease — it only logs a warning naming the submission's email so it can be
-resolved manually. Already-completed rows (column V = `Yes`) are never eligible and can never
+resolved manually. Already-completed rows (column W = `Yes`) are never eligible and can never
 cause or block a match.
 
 **No unique booking identifier is carried through the intake form.** `buildIntakeUrl()` only
@@ -323,6 +335,35 @@ That is intentional and by design: rather than guess which booking the submissio
 processes nothing for it — no column write, no DocuSeal submission — logging a warning naming the
 submission's email so it can be resolved manually instead. This is the accepted tradeoff of not
 carrying a unique identifier through the form: safe-but-occasionally-manual, never silently wrong.
+
+### Additional-driver branch (columns M/N)
+
+The redesigned intake form asks three additional questions after the core driver-1 fields:
+`Will there be an additional authorized driver?` (Yes/No), `Additional Driver Full Name`, and
+`Additional Driver Email Address` (exact question titles — see `INTAKE_RESPONSE_ADDITIONAL_DRIVER_*`
+constants in `src/Forms.js`). Their answers are read by `extractIntakeSubmissionFields()` and
+validated by `validateAdditionalDriverSubmission_()`, both in `src/Forms.js`, before
+`processIntakeFormSubmission_()` writes anything.
+
+**"No" answer:** always valid. Column M (Additional Driver Name) is cleared to blank and column N
+(Additional Driver Email) is reset to the placeholder `'No Second Email'` — this also overwrites
+any earlier Calendar-description-derived fallback value `syncCalendarBookings()` may have put in
+column N, since the intake form is the authoritative source once submitted.
+
+**"Yes" answer:** requires, in order — a nonblank `Additional Driver Full Name`, a nonblank
+`Additional Driver Email Address`, a syntactically valid email format
+(`isValidEmailFormat_()` in `src/Helpers.js`), and an additional-driver email that is *not* the
+same as the primary customer's email (case-insensitive). Any failure is reported as a specific
+machine-readable reason (`missing-name`, `missing-email`, `invalid-email-format`,
+`duplicate-email`) and an unrecognized/missing Yes-or-No answer itself is reported as
+`unrecognized-answer`.
+
+**Never guessed, never partially applied.** If validation fails for any reason, columns M, N, and
+W (Intake Form Completed) are **all** left untouched and `alertAdmin()` is called with the reason
+and the raw submitted answer — the booking is treated the same as "not yet usably submitted"
+rather than silently completed with missing or bad Driver #2 identity data. Column W is only ever
+set to `Yes` after the additional-driver branch has been validated and (if applicable) written
+successfully.
 
 ### Matching an inspection submission to the correct booking row
 
@@ -358,14 +399,14 @@ with the inspection type, submitter email, and rental date (when known) — this
 specifically for inspection because, unlike intake, there is no other point later in the flow
 where a missed inspection completion would surface on its own.
 
-**Column O** must have a data-validation dropdown restricted to:
+**Column P** must have a data-validation dropdown restricted to:
 - `Approved - Free`
 - `Approved - Paid`
 - `Denied`
 
-The script never writes to column O. Only the manager does.
+The script never writes to column P. Only the manager does.
 
-**Columns R and S** have dropdown validation applied automatically by `setupSheetSchema()`. The dropdown values are derived directly from `CALENDAR_CONFIGS`, so adding a new calendar config entry automatically updates the dropdowns.
+**Columns S and T** have dropdown validation applied automatically by `setupSheetSchema()`. The dropdown values are derived directly from `CALENDAR_CONFIGS`, so adding a new calendar config entry automatically updates the dropdowns.
 
 ## Trigger setup
 
@@ -508,6 +549,26 @@ Pipedream sits between external services (Stripe and DocuSeal) and Apps Script. 
   ```
 - **Setup:** Register this Pipedream workflow's URL in DocuSeal as the webhook endpoint
 
+> **KNOWN LIMITATION — two-driver lease completion (not fixed by the additional-driver migration).**
+> `markLeaseSigned()` (`src/Webhooks.js`) marks column O (Lease Signed) = `Yes` on the FIRST
+> `lease_signed` webhook that matches a row, regardless of how many signers the booking actually
+> requires. This is correct for a one-driver booking, but for a two-driver booking (column N holds
+> a real email) it is not sufficient — whichever driver signs first marks the whole lease "signed"
+> even though the other required driver has not yet signed. This was investigated during the
+> additional-driver migration and intentionally left unresolved: `doPost()` reads an optional
+> `data.signerRole` field, but it is **not** part of the documented, guaranteed payload above (or
+> in README.md's equivalent example) — building per-role completion tracking on an unverified field
+> would mean either silently trusting an unconfirmed value or risking breakage of the
+> currently-working one-driver case. Fixing this safely requires one of:
+> (a) changing this Pipedream step to reliably include the submitter's role (exactly matching the
+> DocuSeal template's role strings — `Driver #1` / `Driver #2` / `Reliable Storage Manager`) in
+> every `lease_signed` POST, so `markLeaseSigned()` can require both driver roles to have
+> independently reported completion before writing column O for a two-driver row; or
+> (b) adding a new Apps Script call to DocuSeal's own submission-status endpoint, keyed by
+> `submissionId`, to authoritatively confirm every required submitter has completed before writing
+> column O. Neither is implemented here — this is next-step work for whoever owns the Pipedream
+> workflow.
+
 ## Webhook shared secret setup
 
 The shared secret prevents arbitrary POST requests from triggering side effects in `doPost`.
@@ -563,16 +624,16 @@ Expected: matching row's Lease Signed column (N) set to Yes.
 The reminder interval and cap are Script Properties, not fixed values — see
 `HOURS_BETWEEN_APPROVAL_REMINDERS` and `MAX_APPROVAL_REMINDERS` above. The state machine:
 
-- Q = 0: no notification sent yet → sends initial email → sets P = now, Q = 1
-- 1 ≤ Q < MAX_APPROVAL_REMINDERS, hours since P ≥ HOURS_BETWEEN_APPROVAL_REMINDERS: sends reminder → increments Q
-- Q = MAX_APPROVAL_REMINDERS, hours since P ≥ HOURS_BETWEEN_APPROVAL_REMINDERS: escalates to ADMIN_EMAIL → sets Q = MAX_APPROVAL_REMINDERS + 1 (permanent skip)
-- Q > MAX_APPROVAL_REMINDERS: row is silently skipped forever
-- Manager sets column O to resolve; script skips all resolved rows for the reminder loop
+- R = 0: no notification sent yet → sends initial email → sets Q = now, R = 1
+- 1 ≤ R < MAX_APPROVAL_REMINDERS, hours since Q ≥ HOURS_BETWEEN_APPROVAL_REMINDERS: sends reminder → increments R
+- R = MAX_APPROVAL_REMINDERS, hours since Q ≥ HOURS_BETWEEN_APPROVAL_REMINDERS: escalates to ADMIN_EMAIL → sets R = MAX_APPROVAL_REMINDERS + 1 (permanent skip)
+- R > MAX_APPROVAL_REMINDERS: row is silently skipped forever
+- Manager sets column P to resolve; script skips all resolved rows for the reminder loop
 
 **Audited and confirmed correct.** This state machine was traced end-to-end against the actual
-`checkRentalEligibility_()` implementation: Q is read with `Number(data[i][16]) || 0` (blank,
+`checkRentalEligibility_()` implementation: R is read with `Number(data[i][17]) || 0` (blank,
 numeric, and numeric-string values are all interpreted correctly), every write targets
-`getRange(i + 1, 17)` using the same row index the row was read from (no cross-row writes), and Q
+`getRange(i + 1, 18)` using the same row index the row was read from (no cross-row writes), and R
 is written only *after* the manager email succeeds (inside the `try`, after `sendEmailHtml`) — a
 failed send is retried on the next run rather than silently counted. No SMS is sent for approval
 reminders, so there is no "one attempt vs. two channels" ambiguity to resolve. No bug was found;
@@ -581,15 +642,15 @@ to confirm this (blank/numeric/numeric-string counts, correct increment, correct
 stopping at the intended maximum, and one booking's row never affecting another's in the same
 run).
 
-This state machine (P/Q) governs only the manager reminder loop and stops the moment column O is
+This state machine (Q/R) governs only the manager reminder loop and stops the moment column P is
 set. It does not govern the customer notification. The customer's one-time "your rental is
-approved" email is a separate check: once column O is `Approved - Free` or `Approved - Paid`,
-`checkRentalEligibility` sends it only when column N (Lease Signed) is also `Yes` and column U is
+approved" email is a separate check: once column P is `Approved - Free` or `Approved - Paid`,
+`checkRentalEligibility` sends it only when column O (Lease Signed) is also `Yes` and column V is
 not already `Yes`. If the lease has not been signed yet, the row is skipped and re-checked on
-every subsequent 5-minute run until the DocuSeal signed webhook sets column N — there is no
+every subsequent 5-minute run until the DocuSeal signed webhook sets column O — there is no
 separate reminder loop or timeout for this wait. `checkRentalEligibility` acquires
 `LockService.getScriptLock()` before each run (same pattern as `processReminders`) so an
-overlapping execution cannot read column U before a prior run finishes writing it, which
+overlapping execution cannot read column V before a prior run finishes writing it, which
 prevents a duplicate send of the customer email.
 
 ## Manual immediate inspection sends
@@ -631,14 +692,14 @@ Neither function is wired to any trigger or reachable from any customer-facing s
 default **15**) is the threshold `processReminders()` uses to warn the manager when a booking's
 pre-trip and post-trip inspection forms were completed that many minutes apart **or less** — the
 boundary is inclusive, so a submission exactly at the threshold still triggers the warning (see
-`isSuspiciousInspectionTiming()` in `src/Helpers.js`, and column Y in [Google Sheet
+`isSuspiciousInspectionTiming()` in `src/Helpers.js`, and column Z in [Google Sheet
 setup](#google-sheet-setup) above). 15 minutes was chosen as a reasonable default: long enough that
 even a very short, legitimate rental plausibly involves driving somewhere and back between
 completing the two forms, short enough that it only flags submissions that are implausibly close
 together. Adjust it in Script Properties if a location's real usage pattern calls for a different
 value — no code change is required.
 
-The warning is sent at most once per booking (column Y), is manager-only, is worded neutrally
+The warning is sent at most once per booking (column Z), is manager-only, is worded neutrally
 ("may be worth a look" / "does not mean anything is wrong"), never contains a customer-facing form
 link, and never blocks or alters anything else in the workflow. See
 `sendSuspiciousInspectionTimingWarning_()` in `src/Reminders.js` for the exact email content, and

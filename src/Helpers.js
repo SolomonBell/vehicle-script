@@ -52,6 +52,16 @@ function extractPhone(text) {
   return '+' + digits;
 }
 
+// Syntactic email-format check -- reuses the same pattern already applied to
+// Calendar-description text in extractPrimaryEmail() / extractSecondDriverEmail()
+// above, generalized into a standalone helper so it can validate a standalone
+// answer string directly. Used by validateAdditionalDriverSubmission_()
+// (Forms.js) to reject an unusable Additional Driver Email Address answer
+// before it is ever written to column N.
+function isValidEmailFormat_(value) {
+  return typeof value === 'string' && /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test(value.trim());
+}
+
 // Coerce a value to a valid Date, or throw a descriptive error naming the bad
 // value. Guards the formatters below against non-Date inputs (e.g. a start time
 // that arrives as a string), which previously surfaced as the opaque
@@ -213,7 +223,7 @@ function createStripeCheckoutSession(vehicleType, clientReferenceId, customerEma
 }
 
 // Returns true only when the deposit has cleared AND the intake form has
-// actually been completed (column V — set by processIntakeFormSubmission_(), not by
+// actually been completed (column W — set by processIntakeFormSubmission_(), not by
 // Intake Sent/column I, which only means the intake link was emailed) AND
 // the lease has not already been sent. Deliberately order-independent: it
 // does not matter whether the deposit or the intake form completes first,
@@ -223,13 +233,13 @@ function isDocuSealEligible(depositPaid, intakeCompleted, leaseSent) {
 }
 
 // Returns true only when the manager has approved the rental (paid or free),
-// the lease has actually been signed (column N -- not merely sent), and the
+// the lease has actually been signed (column O -- not merely sent), and the
 // customer has not already been sent the one-time approval notification
-// (column U). Denied and blank/pending approval values return false, and so
+// (column V). Denied and blank/pending approval values return false, and so
 // does an approved-but-not-yet-signed row: the manager's approval value may
 // sit in the sheet for as long as it takes the DocuSeal signed webhook to
-// update column N -- this deliberately does not fire early just because
-// column O already has an approved value. Used by checkRentalEligibility()
+// update column O -- this deliberately does not fire early just because
+// column P already has an approved value. Used by checkRentalEligibility()
 // to decide whether notifyCustomerOfApproval() should run for a given row.
 function shouldNotifyCustomerOfApproval(approved, leaseSigned, customerNotified) {
   return (approved === 'Approved - Free' || approved === 'Approved - Paid') &&
@@ -344,7 +354,7 @@ function getLocationConfig(location) {
   if (!cfg) {
     Logger.log('ERROR: getLocationConfig — unknown location "' + (location || '') + '". ' +
                'Valid locations: ' + Object.keys(MAP).join(', ') + '.');
-    throw new Error('Unknown location "' + (location || '') + '". Check column S and CALENDAR_CONFIGS.');
+    throw new Error('Unknown location "' + (location || '') + '". Check column T and CALENDAR_CONFIGS.');
   }
   return cfg;
 }

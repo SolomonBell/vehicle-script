@@ -61,13 +61,14 @@ function syncCalendarBookings() {
           '',                               // J: Lease Sent
           '',                               // K: 24hr Sent
           '',                               // L: Post-Rental Sent
-          secondEmail || 'No Second Email', // M: Second Driver Email
-          '',                               // N: Lease Signed
-          '',                               // O: Rental Approved (manager only)
-          '',                               // P: Approval Notified At
-          '',                               // Q: Approval Reminder Count
-          calCfg.vehicleType,               // R: Vehicle Type
-          calCfg.location,                  // S: Location
+          '',                               // M: Additional Driver Name -- unknown until the intake form is submitted; the Calendar description never carries a name, only (at most) an email
+          secondEmail || 'No Second Email', // N: Additional Driver Email -- initial fallback from the Calendar description; the intake form is authoritative once submitted (see processIntakeFormSubmission_() in Forms.js)
+          '',                               // O: Lease Signed
+          '',                               // P: Rental Approved (manager only)
+          '',                               // Q: Approval Notified At
+          '',                               // R: Approval Reminder Count
+          calCfg.vehicleType,               // S: Vehicle Type
+          calCfg.location,                  // T: Location
         ]);
 
         // Welcome SMS — keep to one action (deposit link); intake form is in the email
