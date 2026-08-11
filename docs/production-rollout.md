@@ -39,8 +39,11 @@ All of the following must be true before starting the cutover in §4:
       either real elapsed time or the manual time-shift technique described there) and passed
 - [ ] Cancellation, reschedule, and per-location DocuSeal manager signer (Tests 15–17 in
       [docs/testing-plan.md](testing-plan.md)) have each been exercised live in the sandbox and
-      passed — development-time Node/GAS-shim testing alone does not satisfy this
-- [ ] `runAllSandboxConfigurationTests()` passes with no failures in the sandbox project
+      passed — a real Calendar edit/delete and a real DocuSeal signing flow, not just the
+      configuration/unit-test suite below
+- [x] `runAllSandboxConfigurationTests()` passes with no failures in the sandbox project — **done;
+      49/49 passed in the real Apps Script sandbox.** This validates the underlying logic is wired
+      correctly; it does not by itself satisfy the item above.
 - [ ] The known limitations in [README.md §21](../README.md#21-known-limitations-and-future-work)
       have been reviewed and explicitly accepted as acceptable for initial production rollout, or
       addressed — in particular the lease-sending race condition and the webhook first-match-wins

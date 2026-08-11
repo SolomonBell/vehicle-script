@@ -70,18 +70,32 @@ and [docs/testing-plan.md](docs/testing-plan.md) for the acceptance-test checkli
 - Intake completion tracking (`onFormSubmit` → column W)
 - Trigger installation (`setupTriggers()` creates all five triggers correctly)
 
+**Confirmed at the sandbox configuration/unit-test level:** the full `runAllSandboxConfigurationTests()`
+suite (49 tests, including every cancellation/reschedule and per-location DocuSeal manager-signer
+test) has been run in the real Apps Script sandbox environment and passed completely. This confirms
+the underlying logic is implemented and wired correctly — it does **not** by itself confirm the live
+end-to-end behavior in the list below, which still requires a real Calendar edit/delete, a real
+DocuSeal signing flow, or a real elapsed-time trigger to observe.
+
 **Still awaiting final operational validation** (implemented and believed correct from code
-review, but not yet confirmed by a live sandbox run):
+review and the sandbox test suite, but not yet confirmed by a live end-to-end sandbox run):
 - Automatic 24-hour reminder firing on schedule
 - Manager 24-hour greeting/summary (including the new location-specific greeting)
 - Pre-trip inspection completion update (column X, with actual form-submission timestamp)
 - Post-trip reminder firing exactly one hour after pre-trip inspection completion
 - Manager post-trip notice
 - Post-trip inspection completion update (column Y, with actual form-submission timestamp)
+- Automatic cancellation detection (a calendar event deleted → column AA) and manual cancellation
+  (a value typed into column AA)
+- Reschedule detection (a calendar event's time edited → columns E/F/AC/K/L, and X/Z when the
+  pre-trip inspection was already complete)
+- Per-location DocuSeal manager co-signer selection, against the real DocuSeal API, for all four
+  locations
 
 Do not treat the items in the second list as passed. They require a booking to actually reach the
-24-hour and post-rental windows (or a manually time-shifted test row) before they can be marked
-validated — see [docs/testing-plan.md](docs/testing-plan.md).
+24-hour and post-rental windows (or a manually time-shifted test row), a real calendar edit/delete,
+or a real DocuSeal signing flow, before they can be marked validated — see
+[docs/testing-plan.md](docs/testing-plan.md).
 
 ### Active sites
 
@@ -1965,7 +1979,7 @@ triggers.
 ### Quick start
 
 ```
-1. runAllSandboxConfigurationTests()           — run first; validates entire config (30 tests)
+1. runAllSandboxConfigurationTests()           — run first; validates entire config (49 tests)
 2. testCalendarConfigs()                       — confirm calendar connectivity
 3. testSyncCalendarBookingsNoNotifications()   — add rows without sending messages
 4. Then test the full webhook flow with curl (see Sandbox section)
@@ -2054,6 +2068,45 @@ triggers.
 | `testSuspiciousInspectionTimingCalculations()` | Pure test of `getInspectionElapsedMinutes()`, `isSuspiciousInspectionTiming()`, and `formatElapsedMinutes()` (`Helpers.js`): elapsed-time calculation, missing/malformed timestamps, the inclusive threshold boundary (outside is not suspicious; exactly at and inside are both suspicious), post-trip earlier than pre-trip, and elapsed-time formatting (including the negative-value note). |
 | `testSendSuspiciousInspectionTimingWarningFlagBehavior()` | Stubs `sendEmailHtml` (restored in `finally`) and a fake sheet to verify `sendSuspiciousInspectionTimingWarning_()` only writes column Z after a successful manager email — a failed send or a missing `MANAGER_EMAIL` writes nothing, so the row is retried on the next run and the warning is never sent twice. |
 
+### Additional-driver tests
+
+| Function | What it verifies |
+|---|---|
+| `testValidateAdditionalDriverSubmission()` | Pure test of `validateAdditionalDriverSubmission_()` (`Forms.js`): the "No" branch is always valid; the "Yes" branch requires, in order, a nonblank name, a nonblank email, a syntactically valid email format, and an email different from the primary customer's — each failure mode returns its own machine-readable reason. |
+| `testExtractIntakeAdditionalDriverFields()` | Pure test of the additional-driver portion of `extractIntakeSubmissionFields()` (`Forms.js`): a "Yes"/"No" answer normalizes correctly regardless of case/whitespace, an unrecognized answer normalizes to `null`, and the raw answer is preserved for admin-alert context. |
+| `testProcessIntakeFormSubmissionAdditionalDriverWrite()` | Stubs `getSheet`, `alertAdmin`, and `sendLeaseViaDocuSeal` to verify `processIntakeFormSubmission_()`'s M/N/W write behavior end to end: the "No" branch clears M and resets N to the placeholder; the "Yes" branch writes the real name/email; every validation failure mode withholds all three writes and alerts the admin instead of guessing. |
+
+### DocuSeal template, schema, and signing tests
+
+| Function | What it verifies |
+|---|---|
+| `testDocuSealEligibility()` | Pure test of `isDocuSealEligible()` (`Helpers.js`): requires deposit paid AND intake completed AND lease not already sent, order-independent. |
+| `testSendLeaseViaDocuSealTemplateSelection()` | Stubs `UrlFetchApp.fetch` to verify `sendLeaseViaDocuSeal()`: a blank or placeholder `additionalDriverEmail` selects the single-driver template with no Driver #2 submitter; a real one selects the two-driver template with a real (never placeholder) Driver #2 name/email; the `Reliable Storage Manager` submitter uses `locCfg.email` (`EMAIL_<LOCATION>`), not the global `CONFIG.MANAGER_EMAIL`. |
+| `testSendLeaseViaDocuSealPerLocationManagerEmail()` | Stubs `UrlFetchApp.fetch` and all four `EMAIL_<LOCATION>` values to verify each of the four active locations resolves to its own `Reliable Storage Manager` submitter email — not a shared or global address. |
+| `testSetupSheetSchemaHeaderPositions()` | Stubs `getSheet` with a fake A1-addressable sheet to verify `setupSheetSchema()` writes the correct header text at the correct cell for every managed column, M through AC. |
+| `testCalendarAppendRowLayout()` | Pure test confirming the 20-value A–T array `syncCalendarBookings()` appends matches the documented column layout, including the Calendar-derived Additional Driver Email fallback and the "No Second Email" placeholder. |
+| `testMarkLeaseSignedDuplicateWebhookSafety()` | Stubs `getSheet` with a fake sheet whose writes mutate the same in-memory data a second call reads, to verify `markLeaseSigned()` is idempotent on both the submissionId and email-fallback matching paths — a duplicate webhook writes column O only once. |
+| `testTwoDriverSigningHandledByPipedream()` | Confirms `markLeaseSigned()` marks a row signed on the first matching call with no per-role logic of its own — the manager/non-final-driver/`submission.completed` filtering is Pipedream's responsibility, not this function's, per "Final signing-completion logic" in `docs/setup-notes.md`. |
+
+### Cancellation and reschedule tests
+
+| Function | What it verifies |
+|---|---|
+| `testIsRescheduleDetected()` | Pure test of `isRescheduleDetected()` (`CancelReschedule.js`): the 60-second tolerance is strict (`>`, not `>=`) in both directions, NaN timestamps never count as a reschedule, and a custom tolerance is honored. |
+| `testHandleRescheduleColumnUpdates()` | Stubs `sendSms`/`sendEmailHtml`/`alertAdmin` to verify `handleReschedule_()`: E/F/AC update and K/L clear on a normal reschedule; X and Z also clear when the pre-trip inspection was already complete; an already-cancelled row (AA set) is left untouched; a row whose post-trip inspection is already complete (Y set) is left untouched and escalated to `alertAdmin()` instead of auto-processed. |
+| `testRunCancellationDetectionForLocationScoping()` | Stubs `sendSms`/`sendEmailHtml` to verify a cancellation pass scoped to one location's calendar can never mark a different location's row cancelled, even though that row's Event ID is (of course) also absent from the first location's fetched events. |
+| `testCancellationNotificationDeliveryAndIdempotency()` | Stubs `sendSms`/`sendEmailHtml` to verify column AB (Cancel Notified) is written only after at least one customer channel actually delivers — a total outage leaves it blank for retry — plus idempotency on a fully-handled row and correct behavior for a manually-typed (non-Date) AA value. |
+
+### Cancelled-row guard tests
+
+| Function | What it verifies |
+|---|---|
+| `testCancelledRowSkipsLeaseSending()` | Stubs `getSheet` and `sendLeaseViaDocuSeal` to verify `sendLeaseToNewBookings()` skips a cancelled row and still sends for an otherwise-identical non-cancelled row (proving the guard is specific to column AA). |
+| `testCancelledRowSkipsApprovalProcessing()` | Stubs `getSheet` and `sendEmailHtml` to verify `checkRentalEligibility_()` skips both the manager approval-reminder loop and the one-time customer approval notice for a cancelled row. |
+| `testCancelledRowGuardsReminders()` | Stubs `getSheet`/`sendEmailHtml`/`sendSms` to verify `processReminders()` skips the pre-trip and post-trip reminder branches for a cancelled row, while confirming the suspicious-timing-warning branch is intentionally **not** guarded by cancellation and still fires. |
+| `testMarkDepositPaidCancelledSplitGuard()` | Stubs `getSheet`, `sendEmailHtml`, and `sendLeaseViaDocuSeal` to verify `markDepositPaid()` still records G/H (financial history) unconditionally on a cancelled row, while gating the customer confirmation message and the DocuSeal send. |
+| `testProcessIntakeFormSubmissionCancelledSplitGuard()` | Same split-guard pattern as above, for `processIntakeFormSubmission_()`'s M/N/W recording versus its embedded DocuSeal send. |
+
 ### Immediate inspection send tests
 
 | Function | What it does |
@@ -2070,7 +2123,7 @@ booking row's real contact info, for an authorized resend or an early-return pos
 
 | Function | What it does |
 |---|---|
-| `runAllSandboxConfigurationTests()` | Runs 30 tests in sequence: `validateConfig`, `testSheetConnection`, `testCalendarConfigs`, `testMissingCalendarConfig`, `testVehicleTypeAndLocationMapping`, `testStripeConfiguration`, `testDepositAmounts`, `testDocuSealPropertyNames`, `testExtractDocuSealSubmissionId`, `testSendGridConfiguration`, `testTwilioConfiguration`, `testLocationSenderConfig`, `testApprovalNotificationEligibility`, `testDocuSealEligibility`, `testEmailTemplateStrings`, `testIntakeFormSubmitRowMatching`, `testExtractIntakeSubmissionFields`, `testInspectionFormSubmitRowMatching`, `testExtractInspectionSubmissionFields`, `testFormSubmitDispatcher`, `testPreTripReminderEligibility`, `testSendPreTripReminderFlagBehavior`, `testInspectionEmailsExcludeManagerFromRecipients`, `testInspectionCompletionFormatting`, `testPostTripReminderEligibility`, `testSendPostTripReminderFlagBehavior`, `testApprovalReminderCountBehavior`, `testSuspiciousInspectionTimingCalculations`, `testSendSuspiciousInspectionTimingWarningFlagBehavior`, `testTriggerRegistrationIsWellFormed`. Logs a clear header before starting and a completion banner when all pass. |
+| `runAllSandboxConfigurationTests()` | Runs all 49 tests registered in its `tests` array (the array itself is the authoritative, current list — this section documents each test by category below rather than duplicating that list here, which is what let this count drift stale in the past). Logs a clear header before starting and a completion banner when all pass. Confirmed passing end-to-end in the real Apps Script sandbox environment (not just this repo's local/static checks). |
 
 ### Standalone manual tests (not in runner)
 

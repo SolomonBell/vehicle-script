@@ -3875,7 +3875,7 @@ function testTwoDriverSigningHandledByPipedream() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 45: Reschedule detection tolerance (isRescheduleDetected) [CONFIG]
+// TEST 46: Reschedule detection tolerance (isRescheduleDetected) [CONFIG]
 // Pure function, no sheet reads, no external calls. Verifies the 60-second
 // jitter tolerance is strict (> not >=) in both directions, NaN timestamps
 // never count as a reschedule, and a custom tolerance is honored.
@@ -3909,7 +3909,7 @@ function testIsRescheduleDetected() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 46: Reschedule column-update behavior (handleReschedule_) [CONFIG]
+// TEST 47: Reschedule column-update behavior (handleReschedule_) [CONFIG]
 // Verifies: normal reschedule updates E/F/K/L/AC and leaves X/Z alone when
 // X was already blank; a reschedule where X (Pre-Inspection Form Completed)
 // was already set also resets X and Z, per the business decision that the
@@ -4024,7 +4024,7 @@ function testHandleRescheduleColumnUpdates() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 47: Cancellation detection is strictly location-scoped
+// TEST 48: Cancellation detection is strictly location-scoped
 // (runCancellationDetectionForLocation_) [CONFIG]
 // Verifies a cancellation pass scoped to one location's calendar can never
 // mark a DIFFERENT location's row cancelled, even though that other row's
@@ -4110,7 +4110,7 @@ function testRunCancellationDetectionForLocationScoping() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 48: Cancellation notification delivery gating and idempotency
+// TEST 49: Cancellation notification delivery gating and idempotency
 // (runCancellationDetectionForLocation_ / sendCancellationNotice_) [CONFIG]
 // Verifies AB (Cancel Notified) is written ONLY after at least one customer
 // channel actually delivers -- a total SendGrid+Twilio outage must not
@@ -4244,7 +4244,7 @@ function testCancellationNotificationDeliveryAndIdempotency() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 49: Per-location DocuSeal manager submitter, all four locations
+// TEST 50: Per-location DocuSeal manager submitter, all four locations
 // (sendLeaseViaDocuSeal / getLocationConfig) [CONFIG]
 // Verifies each of the four active locations resolves to its OWN
 // EMAIL_<LOCATION> value (locCfg.email) as the 'Reliable Storage Manager'

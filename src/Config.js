@@ -25,6 +25,7 @@
 //   V: Customer Approval Notified   W: Intake Form Completed
 //   X: Pre-Inspection Form Completed   Y: Post-Inspection Form Completed
 //   Z: Suspicious Timing Warning Sent
+//   AA: Cancelled            AB: Cancel Notified     AC: Rescheduled At
 // ============================================================
 // CHANGES IN v7:
 //   - Approval reminder loop reworked. Script no longer writes

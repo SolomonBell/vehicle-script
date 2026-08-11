@@ -52,15 +52,25 @@ confirmed by an actual sandbox run reaching these conditions:
 | Reschedule exceptional path when the post-trip inspection is already complete (Y set) | Test 16 |
 | Per-location DocuSeal manager co-signer selection (all four locations) | Test 17 |
 
-**Development-time verification performed, but not yet run live:** the cancellation/reschedule
-engine and per-location DocuSeal manager email were exercised against a hand-built Node.js
-Apps-Script shim during development (not the real Apps Script runtime) — every relevant unit and
-regression test passed there. This is not a substitute for the item below and does not move
-anything into the "Validated" table above.
+**Confirmed at the sandbox configuration/unit-test level:** `runAllSandboxConfigurationTests()`
+(49 tests, including every cancellation/reschedule and per-location DocuSeal manager-signer test)
+has been run in the real Apps Script sandbox environment and completed with:
 
-- [ ] Run `runAllSandboxConfigurationTests()` from the actual Apps Script editor in the sandbox
-      project and confirm all tests pass (49 tests as of this writing — see the regression
-      checklist at the end of this document)
+```
+===== Running Sandbox Configuration Tests (49 tests) =====
+...
+===== All Sandbox Configuration Tests Completed Successfully =====
+```
+
+This confirms the underlying logic — column updates, location scoping, delivery gating,
+idempotency, per-location signer selection, cancelled-row guards — is implemented and wired
+correctly in the real Apps Script runtime, not just in the hand-built Node.js shim used during
+development. **It does not, by itself, satisfy any item in the table above or in Tests 15–17
+below** — those require an actual Calendar event edit/delete, an actual DocuSeal signing flow, or
+actual elapsed time, none of which a configuration/unit test exercises.
+
+- [x] Run `runAllSandboxConfigurationTests()` from the actual Apps Script editor in the sandbox
+      project and confirm all tests pass — **done; 49/49 passed**
 
 Do not report any item in the second table as "passed" until it has actually been exercised —
 either by waiting for a real booking to reach the 24-hour window and, separately, a real hour to
@@ -594,10 +604,12 @@ details.
 - [ ] A thrown read error skips new-booking/reschedule/cancellation processing for that location
       only, and `alertAdmin()` fires
 
-**Status:** PENDING — Not yet validated live. Node/GAS-shim testing during development covered
-the underlying logic (`runCancellationDetectionForLocation_`, location scoping, delivery gating,
-idempotency) — see `src/SandboxTests.js` — but this has not yet been exercised against a real
-Google Calendar and a real sandbox sheet.
+**Status:** PENDING — not yet validated end to end against a real Google Calendar and a real
+sandbox sheet. The underlying logic (`runCancellationDetectionForLocation_`, location scoping,
+delivery gating, idempotency — see `src/SandboxTests.js`) has passed both during development and
+in the real Apps Script sandbox via `runAllSandboxConfigurationTests()` (49/49) — that confirms
+the code is wired correctly, not that a real calendar delete has been observed producing a real
+cancellation.
 
 ---
 
@@ -647,10 +659,11 @@ Google Calendar and a real sandbox sheet.
 - [ ] A row already marked Cancelled (column AA) is never reschedule-detected, even if its
       calendar event's time changes
 
-**Status:** PENDING — Not yet validated live. Node/GAS-shim testing during development covered
-`isRescheduleDetected()`'s tolerance boundaries and `handleReschedule_()`'s column-update logic —
-see `src/SandboxTests.js` — but this has not yet been exercised against a real Google Calendar
-event edit.
+**Status:** PENDING — not yet validated end to end against a real Google Calendar event edit.
+`isRescheduleDetected()`'s tolerance boundaries and `handleReschedule_()`'s column-update logic
+(see `src/SandboxTests.js`) have passed both during development and in the real Apps Script
+sandbox via `runAllSandboxConfigurationTests()` (49/49) — that confirms the code is wired
+correctly, not that a real calendar time-edit has been observed producing a real reschedule.
 
 **Live-UAT note:** whether Google Calendar Appointment Schedules preserves the same Event ID when
 a *customer* reschedules through the booking page itself (as opposed to a manager editing the
@@ -676,10 +689,12 @@ same address already used to send that location's customer-facing mail is the in
       location's own** `EMAIL_<LOCATION>` value — not a single shared address, and not the global
       `CONFIG.MANAGER_EMAIL`
 
-**Status:** PENDING — Not yet validated live. Node/GAS-shim testing during development covered all
-four locations' submitter selection — see `src/SandboxTests.js`
-(`testSendLeaseViaDocuSealPerLocationManagerEmail`) — but this has not yet been exercised against
-the real DocuSeal API in the sandbox.
+**Status:** PENDING — not yet validated end to end against the real DocuSeal API in the sandbox.
+All four locations' submitter selection (see `src/SandboxTests.js`,
+`testSendLeaseViaDocuSealPerLocationManagerEmail`) has passed both during development and in the
+real Apps Script sandbox via `runAllSandboxConfigurationTests()` (49/49) — that confirms the code
+is wired correctly, not that a real DocuSeal lease has actually been signed by the correct
+per-location address.
 
 ---
 
