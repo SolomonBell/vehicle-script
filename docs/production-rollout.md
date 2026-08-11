@@ -74,12 +74,10 @@ These are business/operational decisions, not code changes — resolve them befo
    deposit amounts.
 4. **Manager/admin recipients:** confirm `MANAGER_EMAIL`, `MANAGER_PHONE`, `ADMIN_EMAIL`, and the
    per-location `EMAIL_<LOCATION>`/`PHONE_<LOCATION>` values are the real production addresses and
-   numbers, not sandbox test values. **Also confirm all four `MANAGER_EMAIL_<LOCATION>`
-   properties** (`MANAGER_EMAIL_BAINBRIDGE`, `MANAGER_EMAIL_POULSBO`, `MANAGER_EMAIL_PORT_ORCHARD`,
-   `MANAGER_EMAIL_FAIRGROUNDS`) — these are the DocuSeal co-signer for each location and are
-   separate from `EMAIL_<LOCATION>` (a sending identity, not a signer) and from the global
-   `MANAGER_EMAIL` (used for everything else). If any is missing, `sendLeaseViaDocuSeal()` fails
-   closed for that location's leases rather than sending a lease without the required signer.
+   numbers, not sandbox test values. **`EMAIL_<LOCATION>` is also the DocuSeal manager co-signer
+   destination for that location** — there is no separate manager-email property — so confirm each
+   `EMAIL_<LOCATION>` is the address that should actually be signing leases at that location, not
+   just an address that looks right for outbound customer mail.
 5. **Site-tab formulas:** if the production spreadsheet has manually-maintained per-location
    `QUERY`/`FILTER` tabs (see [README §6 "Location tabs and QUERY
    formulas"](../README.md#location-tabs-and-query-formulas)), confirm they reference **column T**
@@ -141,7 +139,7 @@ test) booking through the entire flow, watching the Executions log at each step:
    approval-reminder timing. (`POST_RENTAL_HOURS` has been removed entirely and no longer affects
    post-trip reminder timing — see [docs/testing-plan.md](testing-plan.md) Test 9.)
 8. Confirm the lease's `Reliable Storage Manager` submitter uses that booking's location's own
-   `MANAGER_EMAIL_<LOCATION>` value (Test 17).
+   `EMAIL_<LOCATION>` value, not a shared or global address (Test 17).
 9. If feasible, exercise a real cancellation (delete the test booking's calendar event, or type a
    value into column AA) and a real reschedule (edit the test booking's calendar time) to confirm
    Tests 15–16 also succeed against the production Sheet and Calendar.

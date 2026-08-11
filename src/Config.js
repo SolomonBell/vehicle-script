@@ -86,6 +86,10 @@ const CONFIG = {
   // Each active location has its own sending email address and Twilio phone number.
   // All customer-facing and manager-facing messages for a booking use the sender
   // for that booking's location (column T). FROM_EMAIL is used only by alertAdmin().
+  // EMAIL_<LOCATION> is also the DocuSeal "Reliable Storage Manager" co-signer
+  // destination for that location (confirmed with Andrew) -- see
+  // sendLeaseViaDocuSeal() in DocuSeal.js. There is no separate manager-email
+  // property; do not reintroduce one.
   EMAIL_BAINBRIDGE:   PROPS.EMAIL_BAINBRIDGE,
   PHONE_BAINBRIDGE:   PROPS.PHONE_BAINBRIDGE,
   EMAIL_POULSBO:      PROPS.EMAIL_POULSBO,
@@ -94,20 +98,6 @@ const CONFIG = {
   PHONE_PORT_ORCHARD: PROPS.PHONE_PORT_ORCHARD,
   EMAIL_FAIRGROUNDS:  PROPS.EMAIL_FAIRGROUNDS,
   PHONE_FAIRGROUNDS:  PROPS.PHONE_FAIRGROUNDS,
-
-  // ---- Location-specific DocuSeal co-signer (Reliable Storage Manager) ---
-  // Distinct from EMAIL_<LOCATION> above, which is only the SendGrid
-  // From/Reply-To sending identity for that location's customer-facing mail.
-  // These are the actual manager mailbox that must review and co-sign every
-  // lease at that location as the DocuSeal "Reliable Storage Manager"
-  // submitter. See sendLeaseViaDocuSeal() in DocuSeal.js. Global
-  // CONFIG.MANAGER_EMAIL is unchanged and still used everywhere else
-  // (approval requests, reminders, new-booking notices, the BCC on
-  // customer emails) — only the DocuSeal co-signer became per-location.
-  MANAGER_EMAIL_BAINBRIDGE:   PROPS.MANAGER_EMAIL_BAINBRIDGE,
-  MANAGER_EMAIL_POULSBO:      PROPS.MANAGER_EMAIL_POULSBO,
-  MANAGER_EMAIL_PORT_ORCHARD: PROPS.MANAGER_EMAIL_PORT_ORCHARD,
-  MANAGER_EMAIL_FAIRGROUNDS:  PROPS.MANAGER_EMAIL_FAIRGROUNDS,
 
   // ---- DocuSeal (e-signature) ---------------------------------
   DOCUSEAL_KEY:                  PROPS.DOCUSEAL_API_KEY,

@@ -849,9 +849,9 @@ time — deposit, lease, and approval status are untouched, except that if the p
 was already completed, it's cleared so it can be redone for the new date.
 
 **Does every location's manager sign leases with the same address?**
-No — each location has its own configured signer for DocuSeal, separate from the address that
-sends your location's customer emails/texts. You don't need to do anything differently as a
-result; this is configuration the system administrator manages.
+No — each location signs with its own address, and it's the same address your location's customer
+emails and texts already come from (not a separate signer address). You don't need to do anything
+differently as a result; this is configuration the system administrator manages.
 
 ---
 

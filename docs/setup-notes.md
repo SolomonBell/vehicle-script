@@ -110,17 +110,17 @@ Calendars with an unset property are silently skipped at sync time. You can add 
 | `DOCUSEAL_API_KEY`                | DocuSeal API key (X-Auth-Token)                |
 | `DOCUSEAL_TEMPLATE_ONE_DRIVER`    | Template ID for single-driver lease (numeric)  |
 | `DOCUSEAL_TEMPLATE_TWO_DRIVERS`   | Template ID for two-driver lease (numeric)     |
-| `MANAGER_EMAIL_BAINBRIDGE`        | Bainbridge's manager — `Reliable Storage Manager` co-signer |
-| `MANAGER_EMAIL_POULSBO`           | Poulsbo's manager — co-signer |
-| `MANAGER_EMAIL_PORT_ORCHARD`      | Port Orchard's manager — co-signer |
-| `MANAGER_EMAIL_FAIRGROUNDS`       | Fairgrounds' manager — co-signer |
 
-The manager co-signer is **per location**, resolved via `getLocationConfig(location).managerEmail`
-— distinct from the global `MANAGER_EMAIL` above (still used everywhere else: BCC, approval,
-reminders, new-booking notices) and from `EMAIL_<LOCATION>` (the SendGrid sending identity for
-that location, not a signer). If a location's `MANAGER_EMAIL_<LOCATION>` is unset,
-`sendLeaseViaDocuSeal()` fails closed — no lease is sent, `alertAdmin()` fires with the location
-and customer context, and a clear error is thrown. There is no `MANAGER_PHONE_<LOCATION>`.
+**There is no separate manager-email property for DocuSeal.** The manager co-signer is **per
+location**, resolved via `getLocationConfig(location).email` — the same `EMAIL_<LOCATION>` value
+already listed under "Location-specific senders" below. Confirmed with Andrew: the address that
+already sends that location's customer-facing mail is also the intended DocuSeal signer
+destination, not a distinct manager mailbox. This is distinct only from the global `MANAGER_EMAIL`
+above (still used everywhere else: BCC, approval, reminders, new-booking notices). Because
+`EMAIL_<LOCATION>` is already a required property validated by `testLocationSenderConfig()`,
+there is no separate fail-closed check for the DocuSeal signer specifically — a blank value would
+surface as a generic DocuSeal API rejection, the same as any other malformed submitter. There is
+no `MANAGER_PHONE_<LOCATION>`.
 
 Role names in DocuSeal templates must match exactly what the script sends:
 - Single driver: `Driver #1`, `Reliable Storage Manager`
@@ -171,7 +171,7 @@ the correct booking row" below.
 
 ### Location-specific senders
 
-Each active location has its own sending email address and Twilio phone number. Every customer-facing email and SMS for a booking is sent from the address and number associated with that booking's location (column T). The global `FROM_EMAIL` is used only by `alertAdmin()`. All booking SMS messages are sent from the location-specific `PHONE_<LOCATION>` number returned by `getLocationConfig()`.
+Each active location has its own sending email address and Twilio phone number. Every customer-facing email and SMS for a booking is sent from the address and number associated with that booking's location (column T). The global `FROM_EMAIL` is used only by `alertAdmin()`. All booking SMS messages are sent from the location-specific `PHONE_<LOCATION>` number returned by `getLocationConfig()`. `EMAIL_<LOCATION>` also doubles as the DocuSeal "Reliable Storage Manager" co-signer destination for that location — see [DocuSeal (e-signature)](#docuseal-e-signature) above.
 
 | Property key           | What it is                                                             |
 |------------------------|------------------------------------------------------------------------|

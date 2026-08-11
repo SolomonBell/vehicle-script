@@ -1179,7 +1179,7 @@ Script Property — no separate spreadsheet, and no additional Script Property, 
 
 ## 8. Script Properties Reference
 
-All 54 Script Properties must be set in **Apps Script → Project Settings → Script Properties**.
+All 50 Script Properties must be set in **Apps Script → Project Settings → Script Properties**.
 No value ever belongs in source code.
 
 ### Identity and routing
@@ -1294,18 +1294,14 @@ All eight properties are required. Missing or malformed values are caught by `te
 
 ### DocuSeal manager co-signer (per location)
 
-| Property | What it is | Format |
-|---|---|---|
-| `MANAGER_EMAIL_BAINBRIDGE` | Bainbridge's manager — DocuSeal "Reliable Storage Manager" co-signer | Email address |
-| `MANAGER_EMAIL_POULSBO` | Poulsbo's manager — DocuSeal co-signer | Email address |
-| `MANAGER_EMAIL_PORT_ORCHARD` | Port Orchard's manager — DocuSeal co-signer | Email address |
-| `MANAGER_EMAIL_FAIRGROUNDS` | Fairgrounds' manager — DocuSeal co-signer | Email address |
-
-Distinct from `EMAIL_<LOCATION>` above, which is only the SendGrid sending identity for that
-location's customer-facing mail — these are the actual manager mailbox that must review and
-co-sign every lease at that location. `sendLeaseViaDocuSeal()` (`DocuSeal.js`) **fails closed** if
-a location's value is missing: the lease is not sent, `alertAdmin()` is called with the location
-and customer context, and a clear error is logged and thrown. There is no `MANAGER_PHONE_<LOCATION>`
+There is no separate manager-email property for DocuSeal. **`EMAIL_<LOCATION>` above is also the
+DocuSeal "Reliable Storage Manager" co-signer destination for that location** — confirmed with
+Andrew that the same address already used to send that location's customer-facing mail is the
+intended signer. `sendLeaseViaDocuSeal()` (`DocuSeal.js`) uses `locCfg.email` (from
+`getLocationConfig()`) directly for the manager submitter, exactly as every other per-location
+message does — no separate configuration path, and no fail-closed check specific to this value
+(it relies on the same required-property validation `EMAIL_<LOCATION>` already has via
+`testLocationSenderConfig()`). There is no `MANAGER_EMAIL_<LOCATION>` or `MANAGER_PHONE_<LOCATION>`
 — manager SMS everywhere else in the system, and the global `CONFIG.MANAGER_EMAIL` used for
 approval requests, reminders, new-booking notices, and the customer-email BCC, are unchanged.
 
@@ -2393,11 +2389,13 @@ Duplicates can happen in two scenarios:
    - Two drivers: `Driver #1`, `Driver #2`, `Reliable Storage Manager`
 3. Check the Executions log for `sendLeaseViaDocuSeal` — any HTTP 4xx/5xx from DocuSeal will
    appear as `DocuSeal error:` followed by the response body.
-4. Confirm `MANAGER_EMAIL_<LOCATION>` is set for the booking's location — the manager is added as
-   a co-signer on every lease from that location's own value, not the global `MANAGER_EMAIL`. If
-   it's missing, `sendLeaseViaDocuSeal()` fails closed: no lease is sent, and `alertAdmin()` fires
-   with the location and customer context instead of the submitters array silently omitting the
-   manager role.
+4. Confirm `EMAIL_<LOCATION>` is set for the booking's location — the manager is added as a
+   co-signer on every lease using that location's own `EMAIL_<LOCATION>` value (`locCfg.email`),
+   not the global `MANAGER_EMAIL`. There is no separate manager-email property or fail-closed
+   check for this specifically — it relies on the same required-property validation
+   `EMAIL_<LOCATION>` already has (`testLocationSenderConfig()`); if it's somehow blank, the
+   manager submitter would be sent with a blank email and DocuSeal itself would reject it, which
+   surfaces as the generic `DocuSeal error:` case in step 3 above.
 
 ### Column U (DocuSeal Submission ID) is blank after lease sent
 

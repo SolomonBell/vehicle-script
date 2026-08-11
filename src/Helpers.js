@@ -339,19 +339,19 @@ function formatElapsedMinutes(minutes) {
   return minutes < 0 ? text + ' (post-trip was recorded before pre-trip)' : text;
 }
 
-// Returns { email, phone, managerEmail } for the given booking location.
-// email/phone are the from-address and from-number to use for all emails and
-// SMS related to that booking. managerEmail is the location's DocuSeal
-// co-signer (Reliable Storage Manager submitter) — distinct from email
-// above, which is only a SendGrid sending identity. Throws if the location
-// is not one of the four active locations so the caller's catch block can
-// alert the admin. Never falls back to a different location.
+// Returns { email, phone } for the given booking location — the from-address and
+// from-number to use for all emails and SMS related to that booking. email is
+// also the DocuSeal "Reliable Storage Manager" co-signer destination for that
+// location (see sendLeaseViaDocuSeal() in DocuSeal.js) — there is no separate
+// manager-email property. Throws if the location is not one of the four active
+// locations so the caller's catch block can alert the admin. Never falls back
+// to a different location.
 function getLocationConfig(location) {
   const MAP = {
-    'Bainbridge':   { email: CONFIG.EMAIL_BAINBRIDGE,   phone: CONFIG.PHONE_BAINBRIDGE,   managerEmail: CONFIG.MANAGER_EMAIL_BAINBRIDGE   },
-    'Poulsbo':      { email: CONFIG.EMAIL_POULSBO,       phone: CONFIG.PHONE_POULSBO,      managerEmail: CONFIG.MANAGER_EMAIL_POULSBO      },
-    'Port Orchard': { email: CONFIG.EMAIL_PORT_ORCHARD,  phone: CONFIG.PHONE_PORT_ORCHARD, managerEmail: CONFIG.MANAGER_EMAIL_PORT_ORCHARD },
-    'Fairgrounds':  { email: CONFIG.EMAIL_FAIRGROUNDS,   phone: CONFIG.PHONE_FAIRGROUNDS,  managerEmail: CONFIG.MANAGER_EMAIL_FAIRGROUNDS  },
+    'Bainbridge':   { email: CONFIG.EMAIL_BAINBRIDGE,   phone: CONFIG.PHONE_BAINBRIDGE   },
+    'Poulsbo':      { email: CONFIG.EMAIL_POULSBO,       phone: CONFIG.PHONE_POULSBO      },
+    'Port Orchard': { email: CONFIG.EMAIL_PORT_ORCHARD,  phone: CONFIG.PHONE_PORT_ORCHARD },
+    'Fairgrounds':  { email: CONFIG.EMAIL_FAIRGROUNDS,   phone: CONFIG.PHONE_FAIRGROUNDS  },
   };
   const cfg = MAP[location];
   if (!cfg) {

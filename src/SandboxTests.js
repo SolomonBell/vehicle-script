@@ -3065,33 +3065,16 @@ function testLocationSenderConfig() {
   }
 
   const LOCATIONS = [
-    { name: 'Bainbridge',   emailKey: 'EMAIL_BAINBRIDGE',   phoneKey: 'PHONE_BAINBRIDGE',   managerEmailKey: 'MANAGER_EMAIL_BAINBRIDGE'   },
-    { name: 'Poulsbo',      emailKey: 'EMAIL_POULSBO',       phoneKey: 'PHONE_POULSBO',      managerEmailKey: 'MANAGER_EMAIL_POULSBO'      },
-    { name: 'Port Orchard', emailKey: 'EMAIL_PORT_ORCHARD',  phoneKey: 'PHONE_PORT_ORCHARD', managerEmailKey: 'MANAGER_EMAIL_PORT_ORCHARD' },
-    { name: 'Fairgrounds',  emailKey: 'EMAIL_FAIRGROUNDS',   phoneKey: 'PHONE_FAIRGROUNDS',  managerEmailKey: 'MANAGER_EMAIL_FAIRGROUNDS'  },
+    { name: 'Bainbridge',   emailKey: 'EMAIL_BAINBRIDGE',   phoneKey: 'PHONE_BAINBRIDGE'   },
+    { name: 'Poulsbo',      emailKey: 'EMAIL_POULSBO',       phoneKey: 'PHONE_POULSBO'      },
+    { name: 'Port Orchard', emailKey: 'EMAIL_PORT_ORCHARD',  phoneKey: 'PHONE_PORT_ORCHARD' },
+    { name: 'Fairgrounds',  emailKey: 'EMAIL_FAIRGROUNDS',   phoneKey: 'PHONE_FAIRGROUNDS'  },
   ];
 
-  // ---- Per-location DocuSeal manager email — a missing value is expected
-  // and informational (same pattern as testCalendarConfigs() for an unset
-  // calendarId), not a hard failure: it is legitimate for this rollout step
-  // to not be complete yet, and sendLeaseViaDocuSeal() already fails closed
-  // and alerts the admin at send time if it's still missing then. A value
-  // that IS set but does not look like an email address is a real failure.
-  LOCATIONS.forEach(function(loc) {
-    const managerEmailVal = CONFIG[loc.managerEmailKey];
-    if (!managerEmailVal || managerEmailVal.trim() === '') {
-      Logger.log('MISSING [' + loc.name + ']: ' + loc.managerEmailKey + ' is not set in Script Properties ' +
-                 '-- sendLeaseViaDocuSeal() will fail closed and alert the admin for this location until it is.');
-    } else if (!looksLikeEmail(managerEmailVal)) {
-      Logger.log('FAIL [' + loc.name + ']: ' + loc.managerEmailKey + ' does not look like an email address (got "' + managerEmailVal + '").');
-      failed++;
-    } else {
-      Logger.log('OK [' + loc.name + ']: ' + loc.managerEmailKey + ' is set and looks like an email address.');
-      passed++;
-    }
-  });
-
   // ---- Check each property is set and in the correct format ----
+  // EMAIL_<LOCATION> also doubles as the DocuSeal "Reliable Storage Manager"
+  // co-signer destination (see sendLeaseViaDocuSeal(), DocuSeal.js) -- there
+  // is no separate manager-email property to check here.
   LOCATIONS.forEach(function(loc) {
     const emailVal = CONFIG[loc.emailKey];
     const phoneVal = CONFIG[loc.phoneKey];
@@ -3577,7 +3560,7 @@ function testSendLeaseViaDocuSealTemplateSelection() {
     DOCUSEAL_TEMPLATE_SINGLE:      CONFIG.DOCUSEAL_TEMPLATE_SINGLE,
     DOCUSEAL_TEMPLATE_TWO_DRIVERS: CONFIG.DOCUSEAL_TEMPLATE_TWO_DRIVERS,
     MANAGER_EMAIL:                 CONFIG.MANAGER_EMAIL,
-    MANAGER_EMAIL_BAINBRIDGE:      CONFIG.MANAGER_EMAIL_BAINBRIDGE,
+    EMAIL_BAINBRIDGE:              CONFIG.EMAIL_BAINBRIDGE,
     FROM_NAME:                     CONFIG.FROM_NAME,
     COMPANY_NAME:                  CONFIG.COMPANY_NAME,
     DOCUSEAL_KEY:                  CONFIG.DOCUSEAL_KEY,
@@ -3585,8 +3568,8 @@ function testSendLeaseViaDocuSealTemplateSelection() {
 
   CONFIG.DOCUSEAL_TEMPLATE_SINGLE      = 111;
   CONFIG.DOCUSEAL_TEMPLATE_TWO_DRIVERS = 222;
-  CONFIG.MANAGER_EMAIL                 = 'manager@example.com'; // global -- no longer used by sendLeaseViaDocuSeal, kept to prove that
-  CONFIG.MANAGER_EMAIL_BAINBRIDGE      = 'bainbridge-manager@example.com'; // per-location DocuSeal co-signer, all calls below use location='Bainbridge'
+  CONFIG.MANAGER_EMAIL                 = 'manager@example.com'; // global -- not used by sendLeaseViaDocuSeal, kept to prove that
+  CONFIG.EMAIL_BAINBRIDGE              = 'bainbridge@reliablestorage.com'; // locCfg.email -- also the DocuSeal co-signer destination; all calls below use location='Bainbridge'
   CONFIG.FROM_NAME                     = 'Reliable Storage';
   CONFIG.COMPANY_NAME                  = 'Reliable Storage';
   CONFIG.DOCUSEAL_KEY                  = 'test-key';
@@ -3629,17 +3612,17 @@ function testSendLeaseViaDocuSealTemplateSelection() {
     const driverOne = lastPayload.submitters.filter(function(s) { return s.role === 'Driver #1'; })[0];
     check('Driver #1 submitter uses the real primary name/email', driverOne && driverOne.name === 'Jane Doe' && driverOne.email === 'jane@example.com');
 
-    // ---- Manager submitter uses the PER-LOCATION email, not the global one ----
+    // ---- Manager submitter uses the PER-LOCATION email (locCfg.email), not the global one ----
     const manager = lastPayload.submitters.filter(function(s) { return s.role === 'Reliable Storage Manager'; })[0];
     check('Reliable Storage Manager submitter is present', !!manager);
-    check('Manager submitter uses locCfg.managerEmail (MANAGER_EMAIL_BAINBRIDGE), not the old global CONFIG.MANAGER_EMAIL',
-          manager && manager.email === 'bainbridge-manager@example.com' && manager.email !== CONFIG.MANAGER_EMAIL);
+    check('Manager submitter uses locCfg.email (EMAIL_BAINBRIDGE), not the global CONFIG.MANAGER_EMAIL',
+          manager && manager.email === 'bainbridge@reliablestorage.com' && manager.email !== CONFIG.MANAGER_EMAIL);
   } finally {
     UrlFetchApp.fetch = realFetch;
     CONFIG.DOCUSEAL_TEMPLATE_SINGLE      = realConfig.DOCUSEAL_TEMPLATE_SINGLE;
     CONFIG.DOCUSEAL_TEMPLATE_TWO_DRIVERS = realConfig.DOCUSEAL_TEMPLATE_TWO_DRIVERS;
     CONFIG.MANAGER_EMAIL                 = realConfig.MANAGER_EMAIL;
-    CONFIG.MANAGER_EMAIL_BAINBRIDGE      = realConfig.MANAGER_EMAIL_BAINBRIDGE;
+    CONFIG.EMAIL_BAINBRIDGE              = realConfig.EMAIL_BAINBRIDGE;
     CONFIG.FROM_NAME                     = realConfig.FROM_NAME;
     CONFIG.COMPANY_NAME                  = realConfig.COMPANY_NAME;
     CONFIG.DOCUSEAL_KEY                  = realConfig.DOCUSEAL_KEY;
@@ -3967,7 +3950,7 @@ function testHandleRescheduleColumnUpdates() {
     return row;
   }
 
-  const fakeLocCfg = { email: 'sender@example.com', phone: '+12065550100', managerEmail: 'mgr@example.com' };
+  const fakeLocCfg = { email: 'sender@example.com', phone: '+12065550100' };
   const newStart   = new Date('2026-08-02T10:00:00');
   const newEnd     = new Date('2026-08-02T14:00:00');
 
@@ -4261,70 +4244,15 @@ function testCancellationNotificationDeliveryAndIdempotency() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 49: Missing per-location DocuSeal manager email fails closed
-// (sendLeaseViaDocuSeal) [CONFIG]
-// Verifies that when a location's MANAGER_EMAIL_<LOCATION> is unset,
-// sendLeaseViaDocuSeal() throws before ever calling UrlFetchApp.fetch (no
-// lease is created), and alertAdmin() is called with location/customer
-// context -- the required Reliable Storage Manager signer must never be
-// silently omitted.
-// ---------------------------------------------------------------------------
-function testSendLeaseViaDocuSealMissingManagerEmailFailsClosed() {
-  let passed = 0;
-  let failed = 0;
-
-  function check(label, condition) {
-    if (condition) { Logger.log('OK: ' + label); passed++; }
-    else { Logger.log('FAIL: ' + label); failed++; }
-  }
-
-  const realFetch                  = UrlFetchApp.fetch;
-  const realManagerEmailBainbridge = CONFIG.MANAGER_EMAIL_BAINBRIDGE;
-  const realAlertAdmin             = alertAdmin;
-
-  let fetchCalled = false;
-  let alertCount  = 0;
-
-  UrlFetchApp.fetch = function() {
-    fetchCalled = true;
-    return { getResponseCode: function() { return 200; }, getContentText: function() { return '[]'; } };
-  };
-  alertAdmin = function() { alertCount++; };
-  CONFIG.MANAGER_EMAIL_BAINBRIDGE = ''; // simulate not-yet-configured for this location
-
-  try {
-    let threw = false;
-    try {
-      sendLeaseViaDocuSeal('Jane Doe', 'jane@example.com', '', '', new Date(), new Date(), 'Cargo Van', 'Bainbridge');
-    } catch (e) {
-      threw = true;
-    }
-
-    check('missing manager email -- sendLeaseViaDocuSeal throws (fails closed)', threw === true);
-    check('missing manager email -- UrlFetchApp.fetch is NEVER called (no lease created)', fetchCalled === false);
-    check('missing manager email -- alertAdmin called with location/customer context', alertCount === 1);
-  } finally {
-    UrlFetchApp.fetch               = realFetch;
-    CONFIG.MANAGER_EMAIL_BAINBRIDGE = realManagerEmailBainbridge;
-    alertAdmin                      = realAlertAdmin;
-  }
-
-  check('UrlFetchApp.fetch restored', UrlFetchApp.fetch === realFetch);
-  check('alertAdmin restored', alertAdmin === realAlertAdmin);
-
-  Logger.log(failed === 0
-    ? 'All ' + passed + ' DocuSeal missing-manager-email fail-closed checks passed.'
-    : passed + ' passed, ' + failed + ' failed.');
-  return failed;
-}
-
-// ---------------------------------------------------------------------------
-// TEST 50: Per-location DocuSeal manager submitter, all four locations
+// TEST 49: Per-location DocuSeal manager submitter, all four locations
 // (sendLeaseViaDocuSeal / getLocationConfig) [CONFIG]
-// Verifies each of the four active locations resolves to its OWN configured
-// manager email as the 'Reliable Storage Manager' submitter, not a shared
-// global value. Stubs UrlFetchApp.fetch; restores all four MANAGER_EMAIL_*
-// values (and template/key CONFIG) in a finally block.
+// Verifies each of the four active locations resolves to its OWN
+// EMAIL_<LOCATION> value (locCfg.email) as the 'Reliable Storage Manager'
+// submitter, not a shared global value and not a separate manager-specific
+// property -- confirmed with Andrew that the existing per-location sending
+// addresses are also the intended DocuSeal signer destinations. Stubs
+// UrlFetchApp.fetch; restores all four EMAIL_* values (and template/key
+// CONFIG) in a finally block.
 // ---------------------------------------------------------------------------
 function testSendLeaseViaDocuSealPerLocationManagerEmail() {
   let passed = 0;
@@ -4337,19 +4265,19 @@ function testSendLeaseViaDocuSealPerLocationManagerEmail() {
 
   const realFetch = UrlFetchApp.fetch;
   const realConfig = {
-    MANAGER_EMAIL_BAINBRIDGE:      CONFIG.MANAGER_EMAIL_BAINBRIDGE,
-    MANAGER_EMAIL_POULSBO:         CONFIG.MANAGER_EMAIL_POULSBO,
-    MANAGER_EMAIL_PORT_ORCHARD:    CONFIG.MANAGER_EMAIL_PORT_ORCHARD,
-    MANAGER_EMAIL_FAIRGROUNDS:     CONFIG.MANAGER_EMAIL_FAIRGROUNDS,
+    EMAIL_BAINBRIDGE:              CONFIG.EMAIL_BAINBRIDGE,
+    EMAIL_POULSBO:                 CONFIG.EMAIL_POULSBO,
+    EMAIL_PORT_ORCHARD:            CONFIG.EMAIL_PORT_ORCHARD,
+    EMAIL_FAIRGROUNDS:             CONFIG.EMAIL_FAIRGROUNDS,
     DOCUSEAL_TEMPLATE_SINGLE:      CONFIG.DOCUSEAL_TEMPLATE_SINGLE,
     DOCUSEAL_TEMPLATE_TWO_DRIVERS: CONFIG.DOCUSEAL_TEMPLATE_TWO_DRIVERS,
     DOCUSEAL_KEY:                  CONFIG.DOCUSEAL_KEY,
   };
 
-  CONFIG.MANAGER_EMAIL_BAINBRIDGE      = 'bainbridge-mgr@example.com';
-  CONFIG.MANAGER_EMAIL_POULSBO         = 'poulsbo-mgr@example.com';
-  CONFIG.MANAGER_EMAIL_PORT_ORCHARD    = 'portorchard-mgr@example.com';
-  CONFIG.MANAGER_EMAIL_FAIRGROUNDS     = 'fairgrounds-mgr@example.com';
+  CONFIG.EMAIL_BAINBRIDGE              = 'bainbridge@reliablestorage.com';
+  CONFIG.EMAIL_POULSBO                 = 'poulsbo@reliablestorage.com';
+  CONFIG.EMAIL_PORT_ORCHARD            = 'portorchard@reliablestorage.com';
+  CONFIG.EMAIL_FAIRGROUNDS             = 'fairgrounds@reliablestorage.com';
   CONFIG.DOCUSEAL_TEMPLATE_SINGLE      = 111;
   CONFIG.DOCUSEAL_TEMPLATE_TWO_DRIVERS = 222;
   CONFIG.DOCUSEAL_KEY                  = 'test-key';
@@ -4361,25 +4289,25 @@ function testSendLeaseViaDocuSealPerLocationManagerEmail() {
   };
 
   const CASES = [
-    { location: 'Bainbridge',   expected: 'bainbridge-mgr@example.com' },
-    { location: 'Poulsbo',      expected: 'poulsbo-mgr@example.com' },
-    { location: 'Port Orchard', expected: 'portorchard-mgr@example.com' },
-    { location: 'Fairgrounds',  expected: 'fairgrounds-mgr@example.com' },
+    { location: 'Bainbridge',   expected: 'bainbridge@reliablestorage.com' },
+    { location: 'Poulsbo',      expected: 'poulsbo@reliablestorage.com' },
+    { location: 'Port Orchard', expected: 'portorchard@reliablestorage.com' },
+    { location: 'Fairgrounds',  expected: 'fairgrounds@reliablestorage.com' },
   ];
 
   try {
     CASES.forEach(function(c) {
       sendLeaseViaDocuSeal('Jane Doe', 'jane@example.com', '', '', new Date(), new Date(), 'Cargo Van', c.location);
       const manager = lastPayload.submitters.filter(function(s) { return s.role === 'Reliable Storage Manager'; })[0];
-      check(c.location + ' -- manager submitter email is the correct per-location value',
+      check(c.location + ' -- manager submitter email is that location\'s EMAIL_<LOCATION> value',
             manager && manager.email === c.expected);
     });
   } finally {
     UrlFetchApp.fetch                    = realFetch;
-    CONFIG.MANAGER_EMAIL_BAINBRIDGE      = realConfig.MANAGER_EMAIL_BAINBRIDGE;
-    CONFIG.MANAGER_EMAIL_POULSBO         = realConfig.MANAGER_EMAIL_POULSBO;
-    CONFIG.MANAGER_EMAIL_PORT_ORCHARD    = realConfig.MANAGER_EMAIL_PORT_ORCHARD;
-    CONFIG.MANAGER_EMAIL_FAIRGROUNDS     = realConfig.MANAGER_EMAIL_FAIRGROUNDS;
+    CONFIG.EMAIL_BAINBRIDGE              = realConfig.EMAIL_BAINBRIDGE;
+    CONFIG.EMAIL_POULSBO                 = realConfig.EMAIL_POULSBO;
+    CONFIG.EMAIL_PORT_ORCHARD            = realConfig.EMAIL_PORT_ORCHARD;
+    CONFIG.EMAIL_FAIRGROUNDS             = realConfig.EMAIL_FAIRGROUNDS;
     CONFIG.DOCUSEAL_TEMPLATE_SINGLE      = realConfig.DOCUSEAL_TEMPLATE_SINGLE;
     CONFIG.DOCUSEAL_TEMPLATE_TWO_DRIVERS = realConfig.DOCUSEAL_TEMPLATE_TWO_DRIVERS;
     CONFIG.DOCUSEAL_KEY                  = realConfig.DOCUSEAL_KEY;
@@ -4889,7 +4817,7 @@ function testProcessIntakeFormSubmissionCancelledSplitGuard() {
 // in a finally block.
 // ---------------------------------------------------------------------------
 function runAllSandboxConfigurationTests() {
-  Logger.log('===== Running Sandbox Configuration Tests (50 tests) =====');
+  Logger.log('===== Running Sandbox Configuration Tests (49 tests) =====');
 
   const tests = [
     validateConfig,
@@ -4935,7 +4863,6 @@ function runAllSandboxConfigurationTests() {
     testHandleRescheduleColumnUpdates,
     testRunCancellationDetectionForLocationScoping,
     testCancellationNotificationDeliveryAndIdempotency,
-    testSendLeaseViaDocuSealMissingManagerEmailFailsClosed,
     testSendLeaseViaDocuSealPerLocationManagerEmail,
     testCancelledRowSkipsLeaseSending,
     testCancelledRowSkipsApprovalProcessing,

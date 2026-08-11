@@ -16,23 +16,12 @@
 // expected to disagree about whether a second driver exists.
 // ============================================================
 function sendLeaseViaDocuSeal(name, email, additionalDriverName, additionalDriverEmail, startTime, endTime, vehicleType, location) {
-  // Fail closed: a lease must never be created without the required
-  // Reliable Storage Manager co-signer. getLocationConfig() throws for an
-  // unrecognized location, same as every other caller of this function.
+  // getLocationConfig() throws for an unrecognized location, same as every
+  // other caller of this function -- that is the only location validation
+  // this function needs. EMAIL_<LOCATION> (locCfg.email below) is a required
+  // Script Property already validated by testLocationSenderConfig(); there
+  // is no separate manager-email configuration path to invent here.
   const locCfg = getLocationConfig(location);
-  if (!locCfg.managerEmail) {
-    const msg = 'sendLeaseViaDocuSeal: no manager email configured for location "' + location +
-      '" (see MANAGER_EMAIL_<LOCATION> in Script Properties) -- refusing to send a lease without ' +
-      'the required Reliable Storage Manager signer.';
-    Logger.log(msg);
-    alertAdmin('DocuSeal lease blocked -- missing manager email for ' + location,
-      'Location: ' + location + '\n' +
-      'Customer: ' + name + ' (' + email + ')\n\n' +
-      'No manager e-mail is configured for this location (see MANAGER_EMAIL_<LOCATION> in Script ' +
-      'Properties). The lease was NOT sent -- it would be missing the required manager co-signer. ' +
-      'Set the missing Script Property and resend.');
-    throw new Error(msg);
-  }
 
   const hasTwoDrivers = additionalDriverEmail &&
                         additionalDriverEmail !== 'No Second Email' &&
@@ -79,12 +68,14 @@ function sendLeaseViaDocuSeal(name, email, additionalDriverName, additionalDrive
     });
   }
 
-  // Manager must sign both template types. locCfg.managerEmail is guaranteed
-  // non-blank here -- the fail-closed check at the top of this function
-  // already threw before building any submitters if it were missing.
+  // Manager must sign both template types. Uses the same per-location
+  // sending identity (locCfg.email) as every other message for this
+  // location -- confirmed with Andrew that the existing EMAIL_<LOCATION>
+  // addresses are also the intended DocuSeal signer destinations, not a
+  // separate manager-specific property.
   submitters.push({
     role:  'Reliable Storage Manager', // must match DocuSeal template role name exactly
-    email: locCfg.managerEmail,
+    email: locCfg.email,
     name:  CONFIG.FROM_NAME,
   });
 

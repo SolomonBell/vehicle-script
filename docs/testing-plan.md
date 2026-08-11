@@ -51,7 +51,6 @@ confirmed by an actual sandbox run reaching these conditions:
 | Reschedule re-arming X/Z when the pre-trip inspection was already complete | Test 16 |
 | Reschedule exceptional path when the post-trip inspection is already complete (Y set) | Test 16 |
 | Per-location DocuSeal manager co-signer selection (all four locations) | Test 17 |
-| Per-location DocuSeal manager co-signer fail-closed behavior when unconfigured | Test 17 |
 
 **Development-time verification performed, but not yet run live:** the cancellation/reschedule
 engine and per-location DocuSeal manager email were exercised against a hand-built Node.js
@@ -60,7 +59,7 @@ regression test passed there. This is not a substitute for the item below and do
 anything into the "Validated" table above.
 
 - [ ] Run `runAllSandboxConfigurationTests()` from the actual Apps Script editor in the sandbox
-      project and confirm all tests pass (50 tests as of this writing — see the regression
+      project and confirm all tests pass (49 tests as of this writing — see the regression
       checklist at the end of this document)
 
 Do not report any item in the second table as "passed" until it has actually been exercised —
@@ -73,8 +72,8 @@ together (Test 13), as described in those tests.
 
 ## Prerequisites
 
-- [ ] All Script Properties set (see [`docs/setup-notes.md`](setup-notes.md)), including the four
-      per-location `MANAGER_EMAIL_<LOCATION>` DocuSeal co-signer properties
+- [ ] All Script Properties set (see [`docs/setup-notes.md`](setup-notes.md)) — the DocuSeal
+      manager co-signer uses the existing `EMAIL_<LOCATION>` properties, no separate property
 - [ ] Bookings sheet exists with correct headers (A–AC)
 - [ ] Column P has dropdown validation (`Approved - Free` / `Approved - Paid` / `Denied`)
 - [ ] `setupTriggers()` has been run and created all five triggers: `syncCalendarBookings`,
@@ -662,31 +661,25 @@ the calendar) is the one this feature is designed around and reliably preserves 
 
 ## Test 17: Per-location DocuSeal manager co-signer
 
+There is no separate manager-email Script Property. The DocuSeal "Reliable Storage Manager"
+co-signer uses each location's existing `EMAIL_<LOCATION>` value — confirmed with Andrew that the
+same address already used to send that location's customer-facing mail is the intended signer.
+
 **What to do:**
-1. Confirm `MANAGER_EMAIL_BAINBRIDGE`, `MANAGER_EMAIL_POULSBO`, `MANAGER_EMAIL_PORT_ORCHARD`, and
-   `MANAGER_EMAIL_FAIRGROUNDS` are all set in Script Properties
+1. Confirm `EMAIL_BAINBRIDGE`, `EMAIL_POULSBO`, `EMAIL_PORT_ORCHARD`, and `EMAIL_FAIRGROUNDS` are
+   all set in Script Properties (they already are — required for every other per-location message)
 2. Send a lease (via any of the three lease-sending paths) for a booking at each of the four
    locations
 
 **Expected results:**
 - [ ] Each location's lease submitters include a `Reliable Storage Manager` entry using **that
-      location's own** `MANAGER_EMAIL_<LOCATION>` value — not a single shared address, and not the
-      global `CONFIG.MANAGER_EMAIL`
-
-**Fail-closed check:**
-1. Temporarily clear one location's `MANAGER_EMAIL_<LOCATION>` Script Property
-2. Attempt to send a lease for a booking at that location
-
-**Expected results:**
-- [ ] No lease is sent (no DocuSeal API call is made)
-- [ ] `alertAdmin()` fires, identifying the location and customer
-- [ ] Restore the Script Property afterward
+      location's own** `EMAIL_<LOCATION>` value — not a single shared address, and not the global
+      `CONFIG.MANAGER_EMAIL`
 
 **Status:** PENDING — Not yet validated live. Node/GAS-shim testing during development covered all
-four locations' submitter selection and the fail-closed path — see `src/SandboxTests.js`
-(`testSendLeaseViaDocuSealPerLocationManagerEmail`,
-`testSendLeaseViaDocuSealMissingManagerEmailFailsClosed`) — but this has not yet been exercised
-against the real DocuSeal API in the sandbox.
+four locations' submitter selection — see `src/SandboxTests.js`
+(`testSendLeaseViaDocuSealPerLocationManagerEmail`) — but this has not yet been exercised against
+the real DocuSeal API in the sandbox.
 
 ---
 
@@ -721,7 +714,8 @@ against the real DocuSeal API in the sandbox.
 - [ ] `markDepositPaid` (`Webhooks.js`) and `processIntakeFormSubmission_` (`Forms.js`) still
       record their historical facts (G/H, and M/N/W respectively) unconditionally, gating only the
       customer message / DocuSeal send on cancellation status
-- [ ] `sendLeaseViaDocuSeal` (`DocuSeal.js`) still fails closed (throws, alerts admin, no
-      `UrlFetchApp.fetch` call) when a location's `MANAGER_EMAIL_<LOCATION>` is unset
+- [ ] `sendLeaseViaDocuSeal` (`DocuSeal.js`) still uses `locCfg.email` (`EMAIL_<LOCATION>`) for the
+      `Reliable Storage Manager` submitter — not `CONFIG.MANAGER_EMAIL` and not a separate
+      `MANAGER_EMAIL_<LOCATION>` property, which does not exist
 - [ ] Run `runAllSandboxConfigurationTests()` from `SandboxTests.js` and confirm all tests pass
-      (50 as of this writing)
+      (49 as of this writing)

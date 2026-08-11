@@ -216,13 +216,15 @@ manual edits to Q are the most common cause (see §4 below for the one supported
    completed — it calls `alertAdmin()` instead and leaves the row untouched. Check `ADMIN_EMAIL`
    for a "Reschedule detected on a completed booking" alert.
 
-### "The DocuSeal lease didn't send — missing manager signer"
+### "The DocuSeal lease didn't send — manager signer looks wrong or missing"
 
-Check Executions for `DocuSeal lease blocked -- missing manager email for <location>`. This means
-`sendLeaseViaDocuSeal()` fails closed when a location's `MANAGER_EMAIL_<LOCATION>` Script Property
-is unset — no lease is created, and `alertAdmin()` fires with the location and customer context.
-Set the missing property (Project Settings → Script Properties) and resend via whichever of the
-three lease-sending paths applies (or wait for the next automatic pass).
+There is no separate manager-email property to check — the `Reliable Storage Manager` submitter
+uses that location's `EMAIL_<LOCATION>` value (`locCfg.email`), the same address that sends the
+location's customer-facing mail. Confirm the correct `EMAIL_<LOCATION>` is set (Project Settings →
+Script Properties) — `testLocationSenderConfig()` already treats this as a required property. If
+it's genuinely blank, DocuSeal will reject the submission and it will surface as a generic
+`DocuSeal error:` in the Executions log (see "The DocuSeal lease is not sending" in
+[README §20](../README.md#20-troubleshooting)), not a distinct fail-closed alert.
 
 ---
 
