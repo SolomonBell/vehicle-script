@@ -3065,11 +3065,31 @@ function testLocationSenderConfig() {
   }
 
   const LOCATIONS = [
-    { name: 'Bainbridge',   emailKey: 'EMAIL_BAINBRIDGE',   phoneKey: 'PHONE_BAINBRIDGE'   },
-    { name: 'Poulsbo',      emailKey: 'EMAIL_POULSBO',       phoneKey: 'PHONE_POULSBO'      },
-    { name: 'Port Orchard', emailKey: 'EMAIL_PORT_ORCHARD',  phoneKey: 'PHONE_PORT_ORCHARD' },
-    { name: 'Fairgrounds',  emailKey: 'EMAIL_FAIRGROUNDS',   phoneKey: 'PHONE_FAIRGROUNDS'  },
+    { name: 'Bainbridge',   emailKey: 'EMAIL_BAINBRIDGE',   phoneKey: 'PHONE_BAINBRIDGE',   managerEmailKey: 'MANAGER_EMAIL_BAINBRIDGE'   },
+    { name: 'Poulsbo',      emailKey: 'EMAIL_POULSBO',       phoneKey: 'PHONE_POULSBO',      managerEmailKey: 'MANAGER_EMAIL_POULSBO'      },
+    { name: 'Port Orchard', emailKey: 'EMAIL_PORT_ORCHARD',  phoneKey: 'PHONE_PORT_ORCHARD', managerEmailKey: 'MANAGER_EMAIL_PORT_ORCHARD' },
+    { name: 'Fairgrounds',  emailKey: 'EMAIL_FAIRGROUNDS',   phoneKey: 'PHONE_FAIRGROUNDS',  managerEmailKey: 'MANAGER_EMAIL_FAIRGROUNDS'  },
   ];
+
+  // ---- Per-location DocuSeal manager email — a missing value is expected
+  // and informational (same pattern as testCalendarConfigs() for an unset
+  // calendarId), not a hard failure: it is legitimate for this rollout step
+  // to not be complete yet, and sendLeaseViaDocuSeal() already fails closed
+  // and alerts the admin at send time if it's still missing then. A value
+  // that IS set but does not look like an email address is a real failure.
+  LOCATIONS.forEach(function(loc) {
+    const managerEmailVal = CONFIG[loc.managerEmailKey];
+    if (!managerEmailVal || managerEmailVal.trim() === '') {
+      Logger.log('MISSING [' + loc.name + ']: ' + loc.managerEmailKey + ' is not set in Script Properties ' +
+                 '-- sendLeaseViaDocuSeal() will fail closed and alert the admin for this location until it is.');
+    } else if (!looksLikeEmail(managerEmailVal)) {
+      Logger.log('FAIL [' + loc.name + ']: ' + loc.managerEmailKey + ' does not look like an email address (got "' + managerEmailVal + '").');
+      failed++;
+    } else {
+      Logger.log('OK [' + loc.name + ']: ' + loc.managerEmailKey + ' is set and looks like an email address.');
+      passed++;
+    }
+  });
 
   // ---- Check each property is set and in the correct format ----
   LOCATIONS.forEach(function(loc) {
@@ -3557,6 +3577,7 @@ function testSendLeaseViaDocuSealTemplateSelection() {
     DOCUSEAL_TEMPLATE_SINGLE:      CONFIG.DOCUSEAL_TEMPLATE_SINGLE,
     DOCUSEAL_TEMPLATE_TWO_DRIVERS: CONFIG.DOCUSEAL_TEMPLATE_TWO_DRIVERS,
     MANAGER_EMAIL:                 CONFIG.MANAGER_EMAIL,
+    MANAGER_EMAIL_BAINBRIDGE:      CONFIG.MANAGER_EMAIL_BAINBRIDGE,
     FROM_NAME:                     CONFIG.FROM_NAME,
     COMPANY_NAME:                  CONFIG.COMPANY_NAME,
     DOCUSEAL_KEY:                  CONFIG.DOCUSEAL_KEY,
@@ -3564,7 +3585,8 @@ function testSendLeaseViaDocuSealTemplateSelection() {
 
   CONFIG.DOCUSEAL_TEMPLATE_SINGLE      = 111;
   CONFIG.DOCUSEAL_TEMPLATE_TWO_DRIVERS = 222;
-  CONFIG.MANAGER_EMAIL                 = 'manager@example.com';
+  CONFIG.MANAGER_EMAIL                 = 'manager@example.com'; // global -- no longer used by sendLeaseViaDocuSeal, kept to prove that
+  CONFIG.MANAGER_EMAIL_BAINBRIDGE      = 'bainbridge-manager@example.com'; // per-location DocuSeal co-signer, all calls below use location='Bainbridge'
   CONFIG.FROM_NAME                     = 'Reliable Storage';
   CONFIG.COMPANY_NAME                  = 'Reliable Storage';
   CONFIG.DOCUSEAL_KEY                  = 'test-key';
@@ -3606,11 +3628,18 @@ function testSendLeaseViaDocuSealTemplateSelection() {
     // ---- Driver #1 always carries the real primary name/email --------------
     const driverOne = lastPayload.submitters.filter(function(s) { return s.role === 'Driver #1'; })[0];
     check('Driver #1 submitter uses the real primary name/email', driverOne && driverOne.name === 'Jane Doe' && driverOne.email === 'jane@example.com');
+
+    // ---- Manager submitter uses the PER-LOCATION email, not the global one ----
+    const manager = lastPayload.submitters.filter(function(s) { return s.role === 'Reliable Storage Manager'; })[0];
+    check('Reliable Storage Manager submitter is present', !!manager);
+    check('Manager submitter uses locCfg.managerEmail (MANAGER_EMAIL_BAINBRIDGE), not the old global CONFIG.MANAGER_EMAIL',
+          manager && manager.email === 'bainbridge-manager@example.com' && manager.email !== CONFIG.MANAGER_EMAIL);
   } finally {
     UrlFetchApp.fetch = realFetch;
     CONFIG.DOCUSEAL_TEMPLATE_SINGLE      = realConfig.DOCUSEAL_TEMPLATE_SINGLE;
     CONFIG.DOCUSEAL_TEMPLATE_TWO_DRIVERS = realConfig.DOCUSEAL_TEMPLATE_TWO_DRIVERS;
     CONFIG.MANAGER_EMAIL                 = realConfig.MANAGER_EMAIL;
+    CONFIG.MANAGER_EMAIL_BAINBRIDGE      = realConfig.MANAGER_EMAIL_BAINBRIDGE;
     CONFIG.FROM_NAME                     = realConfig.FROM_NAME;
     CONFIG.COMPANY_NAME                  = realConfig.COMPANY_NAME;
     CONFIG.DOCUSEAL_KEY                  = realConfig.DOCUSEAL_KEY;
@@ -3676,6 +3705,9 @@ function testSetupSheetSchemaHeaderPositions() {
     'X1': 'Pre-Inspection Form Completed',
     'Y1': 'Post-Inspection Form Completed',
     'Z1': 'Suspicious Timing Warning Sent',
+    'AA1': 'Cancelled',
+    'AB1': 'Cancel Notified',
+    'AC1': 'Rescheduled At',
   };
 
   Object.keys(EXPECTED).forEach(function(a1) {
@@ -3859,6 +3891,959 @@ function testTwoDriverSigningHandledByPipedream() {
   return failed;
 }
 
+// ---------------------------------------------------------------------------
+// TEST 45: Reschedule detection tolerance (isRescheduleDetected) [CONFIG]
+// Pure function, no sheet reads, no external calls. Verifies the 60-second
+// jitter tolerance is strict (> not >=) in both directions, NaN timestamps
+// never count as a reschedule, and a custom tolerance is honored.
+// ---------------------------------------------------------------------------
+function testIsRescheduleDetected() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) { Logger.log('OK: ' + label); passed++; }
+    else { Logger.log('FAIL: ' + label); failed++; }
+  }
+
+  const base = new Date('2026-08-01T10:00:00').getTime();
+
+  check('61 seconds later -- reschedule detected', isRescheduleDetected(base, base + 61000) === true);
+  check('exactly 60 seconds later -- NOT a reschedule (strict >)', isRescheduleDetected(base, base + 60000) === false);
+  check('59 seconds later -- NOT a reschedule', isRescheduleDetected(base, base + 59000) === false);
+  check('61 seconds earlier (negative delta) -- reschedule detected', isRescheduleDetected(base, base - 61000) === true);
+  check('exactly 60 seconds earlier -- NOT a reschedule', isRescheduleDetected(base, base - 60000) === false);
+  check('zero delta -- NOT a reschedule', isRescheduleDetected(base, base) === false);
+  check('NaN old timestamp -- NOT a reschedule (never guesses)', isRescheduleDetected(NaN, base + 100000) === false);
+  check('NaN new timestamp -- NOT a reschedule', isRescheduleDetected(base, NaN) === false);
+  check('custom tolerance respected (5000ms tolerance, 6000ms delta -- detected)', isRescheduleDetected(base, base + 6000, 5000) === true);
+  check('custom tolerance respected (5000ms tolerance, 4000ms delta -- not detected)', isRescheduleDetected(base, base + 4000, 5000) === false);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' isRescheduleDetected checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+  return failed;
+}
+
+// ---------------------------------------------------------------------------
+// TEST 46: Reschedule column-update behavior (handleReschedule_) [CONFIG]
+// Verifies: normal reschedule updates E/F/K/L/AC and leaves X/Z alone when
+// X was already blank; a reschedule where X (Pre-Inspection Form Completed)
+// was already set also resets X and Z, per the business decision that the
+// inspection lifecycle must restart for the new date; an already-cancelled
+// row (AA set) is untouched; a row whose post-trip inspection is already
+// complete (Y set) is treated as exceptional -- no state changed, no notice
+// sent, alertAdmin() called instead. Stubs sendSms/sendEmailHtml/alertAdmin;
+// restores all three in a finally block even if an assertion fails.
+// ---------------------------------------------------------------------------
+function testHandleRescheduleColumnUpdates() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) { Logger.log('OK: ' + label); passed++; }
+    else { Logger.log('FAIL: ' + label); failed++; }
+  }
+
+  function fakeSheet() {
+    const writes = [];
+    return {
+      writes: writes,
+      getRange: function(row, col) {
+        return { setValue: function(value) { writes.push({ row: row, col: col, value: value }); } };
+      }
+    };
+  }
+
+  function buildRow(overrides) {
+    const row = new Array(29).fill('');
+    row[1]  = 'Test Customer';
+    row[2]  = 'customer@example.com';
+    row[3]  = '+12065551234';
+    row[4]  = new Date('2026-08-01T10:00:00'); // E: Start Time
+    row[18] = 'Cargo Van';
+    row[19] = 'Bainbridge';
+    Object.keys(overrides || {}).forEach(function(k) { row[k] = overrides[k]; });
+    return row;
+  }
+
+  const fakeLocCfg = { email: 'sender@example.com', phone: '+12065550100', managerEmail: 'mgr@example.com' };
+  const newStart   = new Date('2026-08-02T10:00:00');
+  const newEnd     = new Date('2026-08-02T14:00:00');
+
+  const realSendSms       = sendSms;
+  const realSendEmailHtml = sendEmailHtml;
+  const realAlertAdmin    = alertAdmin;
+  let alertCount = 0;
+
+  sendSms       = function() {};
+  sendEmailHtml = function() {};
+  alertAdmin    = function() { alertCount++; };
+
+  try {
+    // ---- Normal reschedule, X blank ----
+    (function normalReschedule() {
+      const sheet = fakeSheet();
+      const row = buildRow({});
+      handleReschedule_(sheet, 1, row, newStart, newEnd, fakeLocCfg);
+
+      check('E (row 2, col 5) updated to new start', sheet.writes.some(function(w) { return w.row === 2 && w.col === 5 && w.value === newStart; }));
+      check('F (row 2, col 6) updated to new end', sheet.writes.some(function(w) { return w.row === 2 && w.col === 6 && w.value === newEnd; }));
+      check('K (col 11) cleared', sheet.writes.some(function(w) { return w.row === 2 && w.col === 11 && w.value === ''; }));
+      check('L (col 12) cleared', sheet.writes.some(function(w) { return w.row === 2 && w.col === 12 && w.value === ''; }));
+      check('AC (col 29) stamped with a Date', sheet.writes.some(function(w) { return w.row === 2 && w.col === 29 && w.value instanceof Date; }));
+      check('X (col 24) NOT touched when it was already blank', !sheet.writes.some(function(w) { return w.col === 24; }));
+      check('Z (col 26) NOT touched when X was already blank', !sheet.writes.some(function(w) { return w.col === 26; }));
+    })();
+
+    // ---- X already completed -- X and Z must also reset ----
+    (function preTripAlreadyCompleteReschedule() {
+      const sheet = fakeSheet();
+      const row = buildRow({ 23: 'Yes 2026-08-01T09:00:00', 25: 'Yes' }); // X set, Z set
+      handleReschedule_(sheet, 1, row, newStart, newEnd, fakeLocCfg);
+
+      check('X (col 24) cleared when pre-trip inspection was already complete', sheet.writes.some(function(w) { return w.row === 2 && w.col === 24 && w.value === ''; }));
+      check('Z (col 26) cleared when pre-trip inspection was already complete', sheet.writes.some(function(w) { return w.row === 2 && w.col === 26 && w.value === ''; }));
+      check('K (col 11) still cleared too', sheet.writes.some(function(w) { return w.row === 2 && w.col === 11 && w.value === ''; }));
+    })();
+
+    // ---- Already cancelled -- no-op ----
+    (function cancelledRowIgnored() {
+      const sheet = fakeSheet();
+      const row = buildRow({ 26: new Date() }); // AA: Cancelled
+      handleReschedule_(sheet, 1, row, newStart, newEnd, fakeLocCfg);
+      check('cancelled row -- no writes at all', sheet.writes.length === 0);
+    })();
+
+    // ---- Post-trip already complete -- exceptional, manual review ----
+    (function postTripCompleteEscalates() {
+      const sheet = fakeSheet();
+      const row = buildRow({ 24: 'Yes 2026-07-15T09:00:00' }); // Y: Post-Inspection Form Completed
+      const alertCountBefore = alertCount;
+      handleReschedule_(sheet, 1, row, newStart, newEnd, fakeLocCfg);
+      check('post-trip-complete row -- no writes at all (row left unchanged)', sheet.writes.length === 0);
+      check('post-trip-complete row -- alertAdmin called exactly once', alertCount === alertCountBefore + 1);
+    })();
+  } finally {
+    sendSms       = realSendSms;
+    sendEmailHtml = realSendEmailHtml;
+    alertAdmin    = realAlertAdmin;
+  }
+
+  check('sendSms restored', sendSms === realSendSms);
+  check('sendEmailHtml restored', sendEmailHtml === realSendEmailHtml);
+  check('alertAdmin restored', alertAdmin === realAlertAdmin);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' handleReschedule_ column-update checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+  return failed;
+}
+
+// ---------------------------------------------------------------------------
+// TEST 47: Cancellation detection is strictly location-scoped
+// (runCancellationDetectionForLocation_) [CONFIG]
+// Verifies a cancellation pass scoped to one location's calendar can never
+// mark a DIFFERENT location's row cancelled, even though that other row's
+// Event ID is (of course) also absent from this location's fetched events --
+// scoping is enforced via row[19] === calCfg.location, independent of
+// currentIds. Stubs sendSms/sendEmailHtml so no real messages are sent.
+// ---------------------------------------------------------------------------
+function testRunCancellationDetectionForLocationScoping() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) { Logger.log('OK: ' + label); passed++; }
+    else { Logger.log('FAIL: ' + label); failed++; }
+  }
+
+  function fakeMutatingSheet(rows) {
+    const header = new Array(29).fill('');
+    const data = [header].concat(rows);
+    const writes = [];
+    return {
+      writes: writes,
+      getDataRange: function() { return { getValues: function() { return data; } }; },
+      getRange: function(row, col) {
+        return { setValue: function(value) { data[row - 1][col - 1] = value; writes.push({ row: row, col: col, value: value }); } };
+      }
+    };
+  }
+
+  function buildRow(location, eventId, startTime) {
+    const row = new Array(29).fill('');
+    row[0]  = eventId;
+    row[1]  = 'Test Customer ' + eventId;
+    row[2]  = 'customer-' + eventId + '@example.com';
+    row[3]  = 'No Phone';
+    row[4]  = startTime;
+    row[18] = 'Cargo Van';
+    row[19] = location;
+    return row;
+  }
+
+  const now          = new Date();
+  const future        = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const futureStart   = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000);
+
+  const bainbridgeRow = buildRow('Bainbridge', 'evt-bainbridge-gone', futureStart);
+  // A Poulsbo row's Event ID is, of course, also never present in Bainbridge's
+  // fetched events (it's a different calendar entirely) -- this row must NOT
+  // be cancelled by a Bainbridge-scoped pass.
+  const poulsboRow    = buildRow('Poulsbo', 'evt-poulsbo-still-active', futureStart);
+
+  const sheet  = fakeMutatingSheet([bainbridgeRow, poulsboRow]);
+  const calCfg = { location: 'Bainbridge' };
+  // Bainbridge's own fetched events do not include evt-bainbridge-gone (simulating a calendar delete).
+  const bainbridgeEvents = [{ getId: function() { return 'some-other-still-active-bainbridge-event'; } }];
+
+  const realSendSms       = sendSms;
+  const realSendEmailHtml = sendEmailHtml;
+  sendSms       = function() {};
+  sendEmailHtml = function() {};
+
+  try {
+    runCancellationDetectionForLocation_(sheet, calCfg, bainbridgeEvents, now, future);
+
+    check('Bainbridge row (missing from Bainbridge calendar) IS cancelled (AA, row 2 col 27)',
+          sheet.writes.some(function(w) { return w.row === 2 && w.col === 27 && w.value instanceof Date; }));
+    check('Bainbridge row notified (AB, row 2 col 28) after a delivered notice',
+          sheet.writes.some(function(w) { return w.row === 2 && w.col === 28 && w.value === 'Yes'; }));
+    check('Poulsbo row is NEVER touched by a Bainbridge-scoped cancellation pass (no writes to row 3)',
+          !sheet.writes.some(function(w) { return w.row === 3; }));
+  } finally {
+    sendSms       = realSendSms;
+    sendEmailHtml = realSendEmailHtml;
+  }
+
+  check('sendSms restored', sendSms === realSendSms);
+  check('sendEmailHtml restored', sendEmailHtml === realSendEmailHtml);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' cancellation location-scoping checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+  return failed;
+}
+
+// ---------------------------------------------------------------------------
+// TEST 48: Cancellation notification delivery gating and idempotency
+// (runCancellationDetectionForLocation_ / sendCancellationNotice_) [CONFIG]
+// Verifies AB (Cancel Notified) is written ONLY after at least one customer
+// channel actually delivers -- a total SendGrid+Twilio outage must not
+// permanently mark a row notified -- and that repeat runs are idempotent
+// (a fully-handled row is not re-processed; a manually-cancelled row that
+// hasn't reached the calendar yet still gets notified without needing an
+// auto-detected delete).
+// ---------------------------------------------------------------------------
+function testCancellationNotificationDeliveryAndIdempotency() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) { Logger.log('OK: ' + label); passed++; }
+    else { Logger.log('FAIL: ' + label); failed++; }
+  }
+
+  function fakeMutatingSheet(rows) {
+    const header = new Array(29).fill('');
+    const data = [header].concat(rows);
+    const writes = [];
+    return {
+      writes: writes,
+      getDataRange: function() { return { getValues: function() { return data; } }; },
+      getRange: function(row, col) {
+        return { setValue: function(value) { data[row - 1][col - 1] = value; writes.push({ row: row, col: col, value: value }); } };
+      }
+    };
+  }
+
+  function buildRow(overrides) {
+    const row = new Array(29).fill('');
+    row[0]  = 'evt-cancel-test';
+    row[1]  = 'Test Customer';
+    row[2]  = 'customer@example.com';
+    row[3]  = '+12065551234';
+    row[4]  = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
+    row[18] = 'Cargo Van';
+    row[19] = 'Bainbridge';
+    Object.keys(overrides || {}).forEach(function(k) { row[k] = overrides[k]; });
+    return row;
+  }
+
+  const now    = new Date();
+  const future = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const calCfg = { location: 'Bainbridge' };
+  const noEvents = []; // successful read where this row's event is genuinely gone
+
+  const realSendSms       = sendSms;
+  const realSendEmailHtml = sendEmailHtml;
+
+  try {
+    // ---- Both channels fail -- AA is set (auto-detected), AB is NOT ----
+    (function bothChannelsFail() {
+      sendSms       = function() { throw new Error('simulated Twilio outage'); };
+      sendEmailHtml = function() { throw new Error('simulated SendGrid outage'); };
+
+      const row   = buildRow({});
+      const sheet = fakeMutatingSheet([row]);
+      runCancellationDetectionForLocation_(sheet, calCfg, noEvents, now, future);
+
+      check('AA (col 27) stamped even though notification failed', sheet.writes.some(function(w) { return w.col === 27; }));
+      check('AB (col 28) NOT written when both channels fail', !sheet.writes.some(function(w) { return w.col === 28; }));
+    })();
+
+    // ---- Repeat run, still failing -- idempotent, retried, still no AB ----
+    (function repeatRunStillFailingRemainsIdempotent() {
+      sendSms       = function() { throw new Error('simulated Twilio outage'); };
+      sendEmailHtml = function() { throw new Error('simulated SendGrid outage'); };
+
+      const row   = buildRow({ 26: new Date() }); // AA already set from a prior cycle
+      const sheet = fakeMutatingSheet([row]);
+      runCancellationDetectionForLocation_(sheet, calCfg, noEvents, now, future);
+
+      check('AA not re-stamped a second time (already cancelled)', !sheet.writes.some(function(w) { return w.col === 27; }));
+      check('AB still not written -- retried and failed again, not permanently given up', !sheet.writes.some(function(w) { return w.col === 28; }));
+    })();
+
+    // ---- Once a channel succeeds, AB is finally written ----
+    (function eventuallyDelivered() {
+      sendSms       = function() { throw new Error('simulated Twilio outage'); };
+      sendEmailHtml = function() { /* succeeds */ };
+
+      const row   = buildRow({ 26: new Date() }); // cancelled, not yet notified
+      const sheet = fakeMutatingSheet([row]);
+      runCancellationDetectionForLocation_(sheet, calCfg, noEvents, now, future);
+
+      check('AB (col 28) written "Yes" once a channel delivers', sheet.writes.some(function(w) { return w.col === 28 && w.value === 'Yes'; }));
+    })();
+
+    // ---- Fully handled row -- idempotent no-op, no further send attempted ----
+    (function fullyHandledRowIsNoOp() {
+      let called = false;
+      sendSms       = function() { called = true; };
+      sendEmailHtml = function() { called = true; };
+
+      const row   = buildRow({ 26: new Date(), 27: 'Yes' }); // AA and AB both already set
+      const sheet = fakeMutatingSheet([row]);
+      runCancellationDetectionForLocation_(sheet, calCfg, noEvents, now, future);
+
+      check('fully-handled row -- no further writes', sheet.writes.length === 0);
+      check('fully-handled row -- no notification re-attempted', called === false);
+    })();
+
+    // ---- Manual cancellation (AA typed by a manager) still notifies, even
+    //      when the event is still present on the calendar (not auto-detected) ----
+    (function manualCancellationStillNotifies() {
+      sendSms       = function() { throw new Error('no phone on file in this case'); };
+      sendEmailHtml = function() { /* succeeds */ };
+
+      const row = buildRow({ 26: 'cancelled by manager' }); // AA manually typed, not a Date
+      const stillPresentEvents = [{ getId: function() { return 'evt-cancel-test'; } }];
+      const sheet = fakeMutatingSheet([row]);
+      runCancellationDetectionForLocation_(sheet, calCfg, stillPresentEvents, now, future);
+
+      check('manual cancellation -- AA not overwritten', !sheet.writes.some(function(w) { return w.col === 27; }));
+      check('manual cancellation -- notice still sent, AB written', sheet.writes.some(function(w) { return w.col === 28 && w.value === 'Yes'; }));
+    })();
+  } finally {
+    sendSms       = realSendSms;
+    sendEmailHtml = realSendEmailHtml;
+  }
+
+  check('sendSms restored', sendSms === realSendSms);
+  check('sendEmailHtml restored', sendEmailHtml === realSendEmailHtml);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' cancellation delivery/idempotency checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+  return failed;
+}
+
+// ---------------------------------------------------------------------------
+// TEST 49: Missing per-location DocuSeal manager email fails closed
+// (sendLeaseViaDocuSeal) [CONFIG]
+// Verifies that when a location's MANAGER_EMAIL_<LOCATION> is unset,
+// sendLeaseViaDocuSeal() throws before ever calling UrlFetchApp.fetch (no
+// lease is created), and alertAdmin() is called with location/customer
+// context -- the required Reliable Storage Manager signer must never be
+// silently omitted.
+// ---------------------------------------------------------------------------
+function testSendLeaseViaDocuSealMissingManagerEmailFailsClosed() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) { Logger.log('OK: ' + label); passed++; }
+    else { Logger.log('FAIL: ' + label); failed++; }
+  }
+
+  const realFetch                  = UrlFetchApp.fetch;
+  const realManagerEmailBainbridge = CONFIG.MANAGER_EMAIL_BAINBRIDGE;
+  const realAlertAdmin             = alertAdmin;
+
+  let fetchCalled = false;
+  let alertCount  = 0;
+
+  UrlFetchApp.fetch = function() {
+    fetchCalled = true;
+    return { getResponseCode: function() { return 200; }, getContentText: function() { return '[]'; } };
+  };
+  alertAdmin = function() { alertCount++; };
+  CONFIG.MANAGER_EMAIL_BAINBRIDGE = ''; // simulate not-yet-configured for this location
+
+  try {
+    let threw = false;
+    try {
+      sendLeaseViaDocuSeal('Jane Doe', 'jane@example.com', '', '', new Date(), new Date(), 'Cargo Van', 'Bainbridge');
+    } catch (e) {
+      threw = true;
+    }
+
+    check('missing manager email -- sendLeaseViaDocuSeal throws (fails closed)', threw === true);
+    check('missing manager email -- UrlFetchApp.fetch is NEVER called (no lease created)', fetchCalled === false);
+    check('missing manager email -- alertAdmin called with location/customer context', alertCount === 1);
+  } finally {
+    UrlFetchApp.fetch               = realFetch;
+    CONFIG.MANAGER_EMAIL_BAINBRIDGE = realManagerEmailBainbridge;
+    alertAdmin                      = realAlertAdmin;
+  }
+
+  check('UrlFetchApp.fetch restored', UrlFetchApp.fetch === realFetch);
+  check('alertAdmin restored', alertAdmin === realAlertAdmin);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' DocuSeal missing-manager-email fail-closed checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+  return failed;
+}
+
+// ---------------------------------------------------------------------------
+// TEST 50: Per-location DocuSeal manager submitter, all four locations
+// (sendLeaseViaDocuSeal / getLocationConfig) [CONFIG]
+// Verifies each of the four active locations resolves to its OWN configured
+// manager email as the 'Reliable Storage Manager' submitter, not a shared
+// global value. Stubs UrlFetchApp.fetch; restores all four MANAGER_EMAIL_*
+// values (and template/key CONFIG) in a finally block.
+// ---------------------------------------------------------------------------
+function testSendLeaseViaDocuSealPerLocationManagerEmail() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) { Logger.log('OK: ' + label); passed++; }
+    else { Logger.log('FAIL: ' + label); failed++; }
+  }
+
+  const realFetch = UrlFetchApp.fetch;
+  const realConfig = {
+    MANAGER_EMAIL_BAINBRIDGE:      CONFIG.MANAGER_EMAIL_BAINBRIDGE,
+    MANAGER_EMAIL_POULSBO:         CONFIG.MANAGER_EMAIL_POULSBO,
+    MANAGER_EMAIL_PORT_ORCHARD:    CONFIG.MANAGER_EMAIL_PORT_ORCHARD,
+    MANAGER_EMAIL_FAIRGROUNDS:     CONFIG.MANAGER_EMAIL_FAIRGROUNDS,
+    DOCUSEAL_TEMPLATE_SINGLE:      CONFIG.DOCUSEAL_TEMPLATE_SINGLE,
+    DOCUSEAL_TEMPLATE_TWO_DRIVERS: CONFIG.DOCUSEAL_TEMPLATE_TWO_DRIVERS,
+    DOCUSEAL_KEY:                  CONFIG.DOCUSEAL_KEY,
+  };
+
+  CONFIG.MANAGER_EMAIL_BAINBRIDGE      = 'bainbridge-mgr@example.com';
+  CONFIG.MANAGER_EMAIL_POULSBO         = 'poulsbo-mgr@example.com';
+  CONFIG.MANAGER_EMAIL_PORT_ORCHARD    = 'portorchard-mgr@example.com';
+  CONFIG.MANAGER_EMAIL_FAIRGROUNDS     = 'fairgrounds-mgr@example.com';
+  CONFIG.DOCUSEAL_TEMPLATE_SINGLE      = 111;
+  CONFIG.DOCUSEAL_TEMPLATE_TWO_DRIVERS = 222;
+  CONFIG.DOCUSEAL_KEY                  = 'test-key';
+
+  let lastPayload = null;
+  UrlFetchApp.fetch = function(url, options) {
+    lastPayload = JSON.parse(options.payload);
+    return { getResponseCode: function() { return 200; }, getContentText: function() { return JSON.stringify([{ id: 1, submission_id: 999 }]); } };
+  };
+
+  const CASES = [
+    { location: 'Bainbridge',   expected: 'bainbridge-mgr@example.com' },
+    { location: 'Poulsbo',      expected: 'poulsbo-mgr@example.com' },
+    { location: 'Port Orchard', expected: 'portorchard-mgr@example.com' },
+    { location: 'Fairgrounds',  expected: 'fairgrounds-mgr@example.com' },
+  ];
+
+  try {
+    CASES.forEach(function(c) {
+      sendLeaseViaDocuSeal('Jane Doe', 'jane@example.com', '', '', new Date(), new Date(), 'Cargo Van', c.location);
+      const manager = lastPayload.submitters.filter(function(s) { return s.role === 'Reliable Storage Manager'; })[0];
+      check(c.location + ' -- manager submitter email is the correct per-location value',
+            manager && manager.email === c.expected);
+    });
+  } finally {
+    UrlFetchApp.fetch                    = realFetch;
+    CONFIG.MANAGER_EMAIL_BAINBRIDGE      = realConfig.MANAGER_EMAIL_BAINBRIDGE;
+    CONFIG.MANAGER_EMAIL_POULSBO         = realConfig.MANAGER_EMAIL_POULSBO;
+    CONFIG.MANAGER_EMAIL_PORT_ORCHARD    = realConfig.MANAGER_EMAIL_PORT_ORCHARD;
+    CONFIG.MANAGER_EMAIL_FAIRGROUNDS     = realConfig.MANAGER_EMAIL_FAIRGROUNDS;
+    CONFIG.DOCUSEAL_TEMPLATE_SINGLE      = realConfig.DOCUSEAL_TEMPLATE_SINGLE;
+    CONFIG.DOCUSEAL_TEMPLATE_TWO_DRIVERS = realConfig.DOCUSEAL_TEMPLATE_TWO_DRIVERS;
+    CONFIG.DOCUSEAL_KEY                  = realConfig.DOCUSEAL_KEY;
+  }
+
+  check('UrlFetchApp.fetch restored', UrlFetchApp.fetch === realFetch);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' per-location DocuSeal manager email checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+  return failed;
+}
+
+// ---------------------------------------------------------------------------
+// TEST 51: Cancelled rows are skipped by lease sending
+// (sendLeaseToNewBookings) [CONFIG]
+// ---------------------------------------------------------------------------
+function testCancelledRowSkipsLeaseSending() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) { Logger.log('OK: ' + label); passed++; }
+    else { Logger.log('FAIL: ' + label); failed++; }
+  }
+
+  function buildRow(overrides) {
+    const row = new Array(29).fill('');
+    row[1]  = 'Test Customer';
+    row[2]  = 'customer@example.com';
+    row[4]  = new Date();
+    row[5]  = new Date();
+    row[6]  = 'Yes';             // G: Deposit Paid
+    row[9]  = '';                // J: Lease Sent
+    row[15] = 'Approved - Free'; // P: Rental Approved
+    row[18] = 'Cargo Van';
+    row[19] = 'Bainbridge';
+    row[22] = 'Yes';             // W: Intake Form Completed
+    Object.keys(overrides || {}).forEach(function(k) { row[k] = overrides[k]; });
+    return row;
+  }
+
+  function fakeReadOnlySheet(rows) {
+    const header = new Array(29).fill('');
+    const data = [header].concat(rows);
+    return {
+      getDataRange: function() { return { getValues: function() { return data; } }; },
+      getRange: function() { return { setValue: function() {} }; }
+    };
+  }
+
+  const realGetSheet             = getSheet;
+  const realSendLeaseViaDocuSeal = sendLeaseViaDocuSeal;
+  let leaseCallCount = 0;
+  sendLeaseViaDocuSeal = function() { leaseCallCount++; return { id: 1, submission_id: 999 }; };
+
+  try {
+    (function cancelledRowSkipped() {
+      leaseCallCount = 0;
+      const row = buildRow({ 26: new Date() }); // AA: Cancelled
+      getSheet = function() { return fakeReadOnlySheet([row]); };
+      sendLeaseToNewBookings();
+      check('cancelled row -- sendLeaseViaDocuSeal NOT called', leaseCallCount === 0);
+    })();
+
+    (function notCancelledRowStillSent() {
+      leaseCallCount = 0;
+      const row = buildRow({});
+      getSheet = function() { return fakeReadOnlySheet([row]); };
+      sendLeaseToNewBookings();
+      check('otherwise-identical non-cancelled row -- sendLeaseViaDocuSeal IS called (guard is specific)', leaseCallCount === 1);
+    })();
+  } finally {
+    getSheet             = realGetSheet;
+    sendLeaseViaDocuSeal = realSendLeaseViaDocuSeal;
+  }
+
+  check('getSheet restored', getSheet === realGetSheet);
+  check('sendLeaseViaDocuSeal restored', sendLeaseViaDocuSeal === realSendLeaseViaDocuSeal);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' cancelled-row lease-sending guard checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+  return failed;
+}
+
+// ---------------------------------------------------------------------------
+// TEST 52: Cancelled rows are skipped by approval processing
+// (checkRentalEligibility_ / notifyCustomerOfApproval) [CONFIG]
+// Covers both the manager approval-reminder loop and the one-time customer
+// "your rental is approved" notice.
+// ---------------------------------------------------------------------------
+function testCancelledRowSkipsApprovalProcessing() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) { Logger.log('OK: ' + label); passed++; }
+    else { Logger.log('FAIL: ' + label); failed++; }
+  }
+
+  function buildRow(overrides) {
+    const row = new Array(29).fill('');
+    row[1]  = 'Test Customer';
+    row[2]  = 'customer@example.com';
+    row[3]  = 'No Phone';
+    row[4]  = new Date();
+    row[8]  = 'Yes'; // I: Intake Sent
+    row[18] = 'Cargo Van';
+    row[19] = 'Bainbridge';
+    Object.keys(overrides || {}).forEach(function(k) { row[k] = overrides[k]; });
+    return row;
+  }
+
+  function fakeReadOnlySheet(rows) {
+    const header = new Array(29).fill('');
+    const data = [header].concat(rows);
+    return {
+      getDataRange: function() { return { getValues: function() { return data; } }; },
+      getRange: function(row, col) { return { setValue: function(v) { data[row - 1][col - 1] = v; } }; }
+    };
+  }
+
+  const realGetSheet      = getSheet;
+  const realSendEmailHtml = sendEmailHtml;
+  let emailCallCount = 0;
+  sendEmailHtml = function() { emailCallCount++; };
+
+  try {
+    (function cancelledSkipsManagerReminder() {
+      emailCallCount = 0;
+      const row = buildRow({ 26: new Date(), 15: '' }); // AA cancelled, P blank/pending
+      getSheet = function() { return fakeReadOnlySheet([row]); };
+      checkRentalEligibility_();
+      check('cancelled + pending approval -- no manager reminder email sent', emailCallCount === 0);
+    })();
+
+    (function notCancelledStillSendsManagerReminder() {
+      emailCallCount = 0;
+      const row = buildRow({ 15: '' });
+      getSheet = function() { return fakeReadOnlySheet([row]); };
+      checkRentalEligibility_();
+      check('non-cancelled pending approval -- manager reminder IS sent (guard is specific)', emailCallCount === 1);
+    })();
+
+    (function cancelledSkipsCustomerApprovalNotice() {
+      emailCallCount = 0;
+      const row = buildRow({ 26: new Date(), 15: 'Approved - Free', 14: 'Yes', 21: '' });
+      getSheet = function() { return fakeReadOnlySheet([row]); };
+      checkRentalEligibility_();
+      check('cancelled + approved + signed -- no "your rental is approved" customer notice sent', emailCallCount === 0);
+    })();
+
+    (function notCancelledStillSendsCustomerNotice() {
+      emailCallCount = 0;
+      const row = buildRow({ 15: 'Approved - Free', 14: 'Yes', 21: '' });
+      getSheet = function() { return fakeReadOnlySheet([row]); };
+      checkRentalEligibility_();
+      check('non-cancelled approved + signed -- customer approval notice IS sent (guard is specific)', emailCallCount === 1);
+    })();
+  } finally {
+    getSheet      = realGetSheet;
+    sendEmailHtml = realSendEmailHtml;
+  }
+
+  check('getSheet restored', getSheet === realGetSheet);
+  check('sendEmailHtml restored', sendEmailHtml === realSendEmailHtml);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' cancelled-row approval-processing guard checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+  return failed;
+}
+
+// ---------------------------------------------------------------------------
+// TEST 53: Cancelled rows are skipped by pre-trip/post-trip reminders, but
+// the suspicious-timing warning is intentionally NOT guarded by cancellation
+// (processReminders) [CONFIG]
+// ---------------------------------------------------------------------------
+function testCancelledRowGuardsReminders() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) { Logger.log('OK: ' + label); passed++; }
+    else { Logger.log('FAIL: ' + label); failed++; }
+  }
+
+  function buildRow(overrides) {
+    const now = Date.now();
+    const row = new Array(29).fill('');
+    row[1]  = 'Test Customer';
+    row[2]  = 'customer@example.com';
+    row[3]  = 'No Phone';
+    row[4]  = new Date(now + 20 * 60 * 60 * 1000); // Start Time -- inside the pre-trip window
+    row[5]  = new Date(now + 24 * 60 * 60 * 1000); // End Time
+    row[6]  = 'Yes';             // G: Deposit Paid
+    row[15] = 'Approved - Free'; // P: Rental Approved
+    row[18] = 'Cargo Van';
+    row[19] = 'Bainbridge';
+    Object.keys(overrides || {}).forEach(function(k) { row[k] = overrides[k]; });
+    return row;
+  }
+
+  function fakeReadOnlySheet(rows) {
+    const header = new Array(29).fill('');
+    const data = [header].concat(rows);
+    return {
+      getDataRange: function() { return { getValues: function() { return data; } }; },
+      getRange: function(row, col) { return { setValue: function(v) { data[row - 1][col - 1] = v; } }; }
+    };
+  }
+
+  const realGetSheet      = getSheet;
+  const realSendEmailHtml = sendEmailHtml;
+  const realSendSms       = sendSms;
+  const realConfig = {
+    MANAGER_EMAIL: CONFIG.MANAGER_EMAIL,
+    SUSPICIOUS_INSPECTION_WINDOW_MINUTES: CONFIG.SUSPICIOUS_INSPECTION_WINDOW_MINUTES,
+  };
+  CONFIG.MANAGER_EMAIL = 'manager@example.com';
+  CONFIG.SUSPICIOUS_INSPECTION_WINDOW_MINUTES = 15;
+
+  let emailCallCount = 0;
+  sendEmailHtml = function() { emailCallCount++; };
+  sendSms       = function() {};
+
+  try {
+    (function cancelledSkipsPreTrip() {
+      emailCallCount = 0;
+      const row = buildRow({ 26: new Date() }); // AA: Cancelled
+      getSheet = function() { return fakeReadOnlySheet([row]); };
+      processReminders();
+      check('cancelled row in pre-trip window -- no pre-trip reminder email sent', emailCallCount === 0);
+    })();
+
+    (function notCancelledStillSendsPreTrip() {
+      emailCallCount = 0;
+      const row = buildRow({});
+      getSheet = function() { return fakeReadOnlySheet([row]); };
+      processReminders();
+      check('non-cancelled row in pre-trip window -- pre-trip reminder IS sent (customer + manager summary)', emailCallCount === 2);
+    })();
+
+    (function cancelledRowStillGetsSuspiciousTimingWarning() {
+      emailCallCount = 0;
+      const preAt  = new Date(Date.now() - 2 * 60 * 60 * 1000);
+      const postAt = new Date(preAt.getTime() + 5 * 60 * 1000); // 5 minutes apart -- suspicious
+      const row = buildRow({
+        26: new Date(),                              // AA: Cancelled
+        23: 'Yes ' + preAt.toISOString(),             // X: Pre-Inspection Form Completed
+        24: 'Yes ' + postAt.toISOString(),            // Y: Post-Inspection Form Completed
+        25: '',                                       // Z: Suspicious Timing Warning Sent -- not yet sent
+        4:  new Date(Date.now() - 6 * 60 * 60 * 1000), // Start Time -- in the past
+        5:  new Date(Date.now() - 4 * 60 * 60 * 1000), // End Time
+      });
+      getSheet = function() { return fakeReadOnlySheet([row]); };
+      processReminders();
+      check('cancelled row with suspiciously-close inspections -- warning is still sent (intentionally not guarded, see audit)',
+            emailCallCount === 1);
+    })();
+  } finally {
+    getSheet      = realGetSheet;
+    sendEmailHtml = realSendEmailHtml;
+    sendSms       = realSendSms;
+    CONFIG.MANAGER_EMAIL = realConfig.MANAGER_EMAIL;
+    CONFIG.SUSPICIOUS_INSPECTION_WINDOW_MINUTES = realConfig.SUSPICIOUS_INSPECTION_WINDOW_MINUTES;
+  }
+
+  check('getSheet restored', getSheet === realGetSheet);
+  check('sendEmailHtml restored', sendEmailHtml === realSendEmailHtml);
+  check('sendSms restored', sendSms === realSendSms);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' cancelled-row reminder-guard checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+  return failed;
+}
+
+// ---------------------------------------------------------------------------
+// TEST 54: markDepositPaid cancelled split-guard (Webhooks.js) [CONFIG]
+// Financial history (G/H) is recorded unconditionally; customer "your
+// rental is proceeding" messaging and the DocuSeal lease send are gated on
+// cancellation status.
+// ---------------------------------------------------------------------------
+function testMarkDepositPaidCancelledSplitGuard() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) { Logger.log('OK: ' + label); passed++; }
+    else { Logger.log('FAIL: ' + label); failed++; }
+  }
+
+  function buildRow(overrides) {
+    const row = new Array(29).fill('');
+    row[0]  = 'evt-deposit-test';
+    row[1]  = 'Test Customer';
+    row[2]  = 'customer@example.com';
+    row[3]  = 'No Phone';
+    row[4]  = new Date();
+    row[5]  = new Date();
+    row[9]  = '';   // J: Lease Sent
+    row[18] = 'Cargo Van';
+    row[19] = 'Bainbridge';
+    row[22] = 'Yes'; // W: Intake Form Completed
+    Object.keys(overrides || {}).forEach(function(k) { row[k] = overrides[k]; });
+    return row;
+  }
+
+  function fakeMutatingSheet(rows) {
+    const header = new Array(29).fill('');
+    const data = [header].concat(rows);
+    const writes = [];
+    return {
+      writes: writes,
+      getDataRange: function() { return { getValues: function() { return data; } }; },
+      getRange: function(row, col) { return { setValue: function(v) { data[row - 1][col - 1] = v; writes.push({ row: row, col: col, value: v }); } }; }
+    };
+  }
+
+  const realGetSheet             = getSheet;
+  const realSendEmailHtml        = sendEmailHtml;
+  const realSendLeaseViaDocuSeal = sendLeaseViaDocuSeal;
+  let emailCallCount = 0;
+  let leaseCallCount = 0;
+  sendEmailHtml        = function() { emailCallCount++; };
+  sendLeaseViaDocuSeal = function() { leaseCallCount++; return { id: 1, submission_id: 999 }; };
+
+  try {
+    (function cancelledDepositStillRecorded() {
+      emailCallCount = 0; leaseCallCount = 0;
+      const row = buildRow({ 26: new Date() }); // AA: Cancelled
+      const sheet = fakeMutatingSheet([row]);
+      getSheet = function() { return sheet; };
+
+      markDepositPaid('customer@example.com', 50, null);
+
+      check('cancelled booking -- G (Deposit Paid, row 2 col 7) still recorded', sheet.writes.some(function(w) { return w.row === 2 && w.col === 7 && w.value === 'Yes'; }));
+      check('cancelled booking -- H (Stripe Amount, row 2 col 8) still recorded', sheet.writes.some(function(w) { return w.row === 2 && w.col === 8 && w.value === 50; }));
+      check('cancelled booking -- no customer confirmation email sent', emailCallCount === 0);
+      check('cancelled booking -- no DocuSeal lease sent', leaseCallCount === 0);
+    })();
+
+    (function notCancelledStillProcessesNormally() {
+      emailCallCount = 0; leaseCallCount = 0;
+      const row = buildRow({});
+      const sheet = fakeMutatingSheet([row]);
+      getSheet = function() { return sheet; };
+
+      markDepositPaid('customer@example.com', 50, null);
+
+      check('non-cancelled booking -- confirmation email IS sent', emailCallCount === 1);
+      check('non-cancelled booking -- DocuSeal lease IS sent (guard is specific to cancellation)', leaseCallCount === 1);
+    })();
+  } finally {
+    getSheet             = realGetSheet;
+    sendEmailHtml        = realSendEmailHtml;
+    sendLeaseViaDocuSeal = realSendLeaseViaDocuSeal;
+  }
+
+  check('getSheet restored', getSheet === realGetSheet);
+  check('sendEmailHtml restored', sendEmailHtml === realSendEmailHtml);
+  check('sendLeaseViaDocuSeal restored', sendLeaseViaDocuSeal === realSendLeaseViaDocuSeal);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' markDepositPaid cancelled split-guard checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+  return failed;
+}
+
+// ---------------------------------------------------------------------------
+// TEST 55: processIntakeFormSubmission_ cancelled split-guard (Forms.js) [CONFIG]
+// Intake recording (M/N/W) happens unconditionally; the embedded DocuSeal
+// lease send (when the deposit was already paid) is gated on cancellation.
+// ---------------------------------------------------------------------------
+function testProcessIntakeFormSubmissionCancelledSplitGuard() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) { Logger.log('OK: ' + label); passed++; }
+    else { Logger.log('FAIL: ' + label); failed++; }
+  }
+
+  function fakeMutatingSheet(rows) {
+    const header = new Array(29).fill('');
+    const data = [header].concat(rows);
+    const writes = [];
+    return {
+      writes: writes,
+      getDataRange: function() { return { getValues: function() { return data; } }; },
+      getRange: function(row, col) { return { setValue: function(value) { data[row - 1][col - 1] = value; writes.push({ row: row, col: col, value: value }); } }; }
+    };
+  }
+
+  function fakeBookingRow(email, overrides) {
+    const row = new Array(29).fill('');
+    row[1]  = 'Test Customer';
+    row[2]  = email;
+    row[4]  = new Date('2026-08-01T10:00:00');
+    row[5]  = new Date('2026-08-01T14:00:00');
+    row[6]  = 'Yes'; // G: Deposit Paid -- already paid, so this submission is the second condition to arrive
+    row[9]  = '';    // J: Lease Sent
+    row[18] = 'Cargo Van';
+    row[19] = 'Bainbridge';
+    Object.keys(overrides || {}).forEach(function(k) { row[k] = overrides[k]; });
+    return row;
+  }
+
+  function fakeIntakeEvent(email) {
+    const nv = {};
+    nv[INTAKE_RESPONSE_EMAIL_QUESTION_TITLE] = [email];
+    nv[INTAKE_RESPONSE_ADDITIONAL_DRIVER_QUESTION_TITLE] = ['No'];
+    return {
+      range: { getSheet: function() { return { getName: function() { return INTAKE_RESPONSE_SHEET_NAME; } }; } },
+      namedValues: nv
+    };
+  }
+
+  const realGetSheet             = getSheet;
+  const realSendLeaseViaDocuSeal = sendLeaseViaDocuSeal;
+  let leaseCallCount = 0;
+  sendLeaseViaDocuSeal = function() { leaseCallCount++; return { id: 1, submission_id: 999 }; };
+
+  try {
+    (function cancelledIntakeStillRecorded() {
+      leaseCallCount = 0;
+      const row = fakeBookingRow('cancelled-intake@example.com', { 26: new Date() }); // AA: Cancelled
+      const sheet = fakeMutatingSheet([row]);
+      getSheet = function() { return sheet; };
+
+      processIntakeFormSubmission_(fakeIntakeEvent('cancelled-intake@example.com'));
+
+      check('cancelled booking -- W (Intake Form Completed, col 23) still recorded', sheet.writes.some(function(w) { return w.row === 2 && w.col === 23 && w.value === 'Yes'; }));
+      check('cancelled booking -- M (col 13) still cleared (No-driver branch)', sheet.writes.some(function(w) { return w.row === 2 && w.col === 13 && w.value === ''; }));
+      check('cancelled booking -- N (col 14) still reset to placeholder', sheet.writes.some(function(w) { return w.row === 2 && w.col === 14 && w.value === 'No Second Email'; }));
+      check('cancelled booking -- no DocuSeal lease sent', leaseCallCount === 0);
+    })();
+
+    (function notCancelledStillSendsLease() {
+      leaseCallCount = 0;
+      const row = fakeBookingRow('not-cancelled-intake@example.com', {});
+      const sheet = fakeMutatingSheet([row]);
+      getSheet = function() { return sheet; };
+
+      processIntakeFormSubmission_(fakeIntakeEvent('not-cancelled-intake@example.com'));
+
+      check('non-cancelled booking -- DocuSeal lease IS sent (guard is specific to cancellation)', leaseCallCount === 1);
+    })();
+  } finally {
+    getSheet             = realGetSheet;
+    sendLeaseViaDocuSeal = realSendLeaseViaDocuSeal;
+  }
+
+  check('getSheet restored', getSheet === realGetSheet);
+  check('sendLeaseViaDocuSeal restored', sendLeaseViaDocuSeal === realSendLeaseViaDocuSeal);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' processIntakeFormSubmission_ cancelled split-guard checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+  return failed;
+}
+
 // ============================================================
 // TEST RUNNERS
 // ============================================================
@@ -3904,7 +4889,7 @@ function testTwoDriverSigningHandledByPipedream() {
 // in a finally block.
 // ---------------------------------------------------------------------------
 function runAllSandboxConfigurationTests() {
-  Logger.log('===== Running Sandbox Configuration Tests (39 tests) =====');
+  Logger.log('===== Running Sandbox Configuration Tests (50 tests) =====');
 
   const tests = [
     validateConfig,
@@ -3946,6 +4931,17 @@ function runAllSandboxConfigurationTests() {
     testSetupSheetSchemaHeaderPositions,
     testMarkLeaseSignedDuplicateWebhookSafety,
     testTwoDriverSigningHandledByPipedream,
+    testIsRescheduleDetected,
+    testHandleRescheduleColumnUpdates,
+    testRunCancellationDetectionForLocationScoping,
+    testCancellationNotificationDeliveryAndIdempotency,
+    testSendLeaseViaDocuSealMissingManagerEmailFailsClosed,
+    testSendLeaseViaDocuSealPerLocationManagerEmail,
+    testCancelledRowSkipsLeaseSending,
+    testCancelledRowSkipsApprovalProcessing,
+    testCancelledRowGuardsReminders,
+    testMarkDepositPaidCancelledSplitGuard,
+    testProcessIntakeFormSubmissionCancelledSplitGuard,
   ];
 
   // Every test function above returns the number of failed assertions (0 if

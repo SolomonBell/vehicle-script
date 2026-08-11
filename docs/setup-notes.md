@@ -11,6 +11,7 @@ The Apps Script source is split across multiple files in `src/`. Each file holds
 | `DocuSeal.js` | `sendLeaseViaDocuSeal` |
 | `Webhooks.js` | `doPost`, `doGet`, `markDepositPaid`, `markLeaseSigned` |
 | `CalendarSync.js` | `syncCalendarBookings` |
+| `CancelReschedule.js` | `isRescheduleDetected`, `handleReschedule_`, `runCancellationDetectionForLocation_`, notice senders — called from `syncCalendarBookings` |
 | `Leases.js` | `sendLeaseToNewBookings` |
 | `Approval.js` | `checkRentalEligibility` |
 | `Reminders.js` | `processReminders` |
@@ -109,6 +110,17 @@ Calendars with an unset property are silently skipped at sync time. You can add 
 | `DOCUSEAL_API_KEY`                | DocuSeal API key (X-Auth-Token)                |
 | `DOCUSEAL_TEMPLATE_ONE_DRIVER`    | Template ID for single-driver lease (numeric)  |
 | `DOCUSEAL_TEMPLATE_TWO_DRIVERS`   | Template ID for two-driver lease (numeric)     |
+| `MANAGER_EMAIL_BAINBRIDGE`        | Bainbridge's manager — `Reliable Storage Manager` co-signer |
+| `MANAGER_EMAIL_POULSBO`           | Poulsbo's manager — co-signer |
+| `MANAGER_EMAIL_PORT_ORCHARD`      | Port Orchard's manager — co-signer |
+| `MANAGER_EMAIL_FAIRGROUNDS`       | Fairgrounds' manager — co-signer |
+
+The manager co-signer is **per location**, resolved via `getLocationConfig(location).managerEmail`
+— distinct from the global `MANAGER_EMAIL` above (still used everywhere else: BCC, approval,
+reminders, new-booking notices) and from `EMAIL_<LOCATION>` (the SendGrid sending identity for
+that location, not a signer). If a location's `MANAGER_EMAIL_<LOCATION>` is unset,
+`sendLeaseViaDocuSeal()` fails closed — no lease is sent, `alertAdmin()` fires with the location
+and customer context, and a clear error is thrown. There is no `MANAGER_PHONE_<LOCATION>`.
 
 Role names in DocuSeal templates must match exactly what the script sends:
 - Single driver: `Driver #1`, `Reliable Storage Manager`
@@ -186,8 +198,11 @@ The helper function `getLocationConfig(location)` in `Helpers.js` is the single 
 
 Sheet tab must be named `Bookings` (exact, case-sensitive).
 
-Row 1 headers (columns A–Z). Columns S, T, V, W, X, Y, and Z are written by
-`syncCalendarBookings()` / `setupSheetSchema()` as noted below:
+Row 1 headers (columns A–AC). Columns S, T, V, W, X, Y, Z, AA, AB, and AC are written by
+`syncCalendarBookings()` / `setupSheetSchema()` as noted below. **Location is column T** — if a
+site tab is showing zero rows for a location with visible bookings on the main tab, check whether
+its `QUERY`/`FILTER` formula still references the old pre-migration column S (Vehicle Type moved
+to S and Location to T when the Additional Driver columns M/N were inserted).
 
 | Col | Header                  | Written by         |
 |-----|--------------------------|--------------------|
@@ -217,6 +232,9 @@ Row 1 headers (columns A–Z). Columns S, T, V, W, X, Y, and Z are written by
 | X   | Pre-Inspection Form Completed | processInspectionFormSubmission_, called from onFormSubmit (installable trigger — see below); value is `"Yes <date/time>"`, not a bare `Yes` |
 | Y   | Post-Inspection Form Completed | processInspectionFormSubmission_, called from onFormSubmit (installable trigger — see below); value is `"Yes <date/time>"`, not a bare `Yes` |
 | Z   | Suspicious Timing Warning Sent | processReminders (via sendSuspiciousInspectionTimingWarning_) |
+| AA  | Cancelled               | syncCalendarBookings (via runCancellationDetectionForLocation_, `CancelReschedule.js`) — timestamp, auto-detected or typed manually by a manager |
+| AB  | Cancel Notified         | syncCalendarBookings (via runCancellationDetectionForLocation_) — `Yes`/blank, set only after a delivered notice |
+| AC  | Rescheduled At          | syncCalendarBookings (via handleReschedule_, `CancelReschedule.js`) — timestamp of the most recent reschedule only |
 
 **Column V** is a simple `Yes`/blank flag, same pattern as I/J/K/L. It tracks whether the
 customer has been sent the one-time "your rental is approved" notification, so the notification

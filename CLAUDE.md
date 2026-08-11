@@ -12,6 +12,8 @@ The script lives in Google Apps Script (not Node.js) — it cannot be run locall
 src/                   ← working copy — paste each file into Apps Script
   Config.js            ← PROPS, CONFIG, CALENDAR_CONFIGS
   CalendarSync.js      ← syncCalendarBookings()
+  CancelReschedule.js  ← isRescheduleDetected(), handleReschedule_(),
+                          runCancellationDetectionForLocation_() — called from syncCalendarBookings()
   Notifications.js     ← sendSms(), sendEmailHtml(), alertAdmin()
   Reminders.js         ← processReminders()
   Approval.js          ← checkRentalEligibility(), notifyCustomerOfApproval()
@@ -62,6 +64,17 @@ docs/sandbox-plan.md             ← historical — see README.md §14 for curre
 - Adding a new vehicle type requires updating `CALENDAR_CONFIGS`, the lookup tables in
   `Helpers.js` (`getDepositAmount`, `getStripePriceId`), and `CONFIG` in Config.js.
   Adding a new location that uses an existing vehicle type requires only `CALENDAR_CONFIGS`.
+- Columns AA, AB, AC (Cancelled / Cancel Notified / Rescheduled At) are owned by
+  `CancelReschedule.js`, written only from `syncCalendarBookings()`. AA may also be written
+  directly by a manager (typing any value cancels the row). Do not renumber or move these —
+  they are append-only after Z specifically so they never shift the existing A–Z schema.
+- `CONFIG.MANAGER_EMAIL_<LOCATION>` (per location) is the DocuSeal "Reliable Storage Manager"
+  co-signer, read only in `sendLeaseViaDocuSeal()` via `getLocationConfig(location).managerEmail`.
+  It is distinct from the global `CONFIG.MANAGER_EMAIL` (still used everywhere else — BCC,
+  approval requests/reminders, new-booking notices, cancellation/reschedule manager notices) and
+  from `CONFIG.EMAIL_<LOCATION>` (a SendGrid sending identity, not a signer). Do not conflate
+  these three. If a location's manager email is missing, `sendLeaseViaDocuSeal()` must fail
+  closed (no lease sent, `alertAdmin()` called) — never silently omit the manager submitter.
 
 ## How to deploy
 
@@ -94,7 +107,7 @@ describes a production deployment.
 | Service   | Purpose                        | Config key(s)                                                             |
 |-----------|--------------------------------|---------------------------------------------------------------------------|
 | Stripe    | Deposit payment + webhook      | STRIPE_SECRET_KEY, STRIPE_PRICE_ID_CARGO_VAN, STRIPE_PRICE_ID_MOVING_TRUCK (dynamic Checkout Sessions, capture_method=manual) |
-| DocuSeal  | E-signature lease              | DOCUSEAL_KEY, DOCUSEAL_TEMPLATE_SINGLE, DOCUSEAL_TEMPLATE_TWO_DRIVERS     |
+| DocuSeal  | E-signature lease              | DOCUSEAL_KEY, DOCUSEAL_TEMPLATE_SINGLE, DOCUSEAL_TEMPLATE_TWO_DRIVERS, MANAGER_EMAIL_<LOCATION> (per-location co-signer — fails closed if unset) |
 | SendGrid  | HTML email                     | SENDGRID_KEY, FROM_EMAIL, REPLY_TO_EMAIL                                  |
 | Twilio    | SMS                            | TWILIO_SID, TWILIO_TOKEN (sender number is per-location — PHONE_BAINBRIDGE, PHONE_POULSBO, etc., not a single CONFIG.TWILIO_NUM) |
 | G Calendar| Booking source (multi-site)    | CALENDAR_ID_BAINBRIDGE_CARGO_VAN, CALENDAR_ID_POULSBO_MOVING_TRUCK, etc. |

@@ -37,6 +37,9 @@ All of the following must be true before starting the cutover in §4:
 - [ ] Every item in the "Still awaiting final operational validation" table in
       [docs/testing-plan.md](testing-plan.md) has been exercised at least once (Tests 7–10, using
       either real elapsed time or the manual time-shift technique described there) and passed
+- [ ] Cancellation, reschedule, and per-location DocuSeal manager signer (Tests 15–17 in
+      [docs/testing-plan.md](testing-plan.md)) have each been exercised live in the sandbox and
+      passed — development-time Node/GAS-shim testing alone does not satisfy this
 - [ ] `runAllSandboxConfigurationTests()` passes with no failures in the sandbox project
 - [ ] The known limitations in [README.md §21](../README.md#21-known-limitations-and-future-work)
       have been reviewed and explicitly accepted as acceptable for initial production rollout, or
@@ -71,7 +74,18 @@ These are business/operational decisions, not code changes — resolve them befo
    deposit amounts.
 4. **Manager/admin recipients:** confirm `MANAGER_EMAIL`, `MANAGER_PHONE`, `ADMIN_EMAIL`, and the
    per-location `EMAIL_<LOCATION>`/`PHONE_<LOCATION>` values are the real production addresses and
-   numbers, not sandbox test values.
+   numbers, not sandbox test values. **Also confirm all four `MANAGER_EMAIL_<LOCATION>`
+   properties** (`MANAGER_EMAIL_BAINBRIDGE`, `MANAGER_EMAIL_POULSBO`, `MANAGER_EMAIL_PORT_ORCHARD`,
+   `MANAGER_EMAIL_FAIRGROUNDS`) — these are the DocuSeal co-signer for each location and are
+   separate from `EMAIL_<LOCATION>` (a sending identity, not a signer) and from the global
+   `MANAGER_EMAIL` (used for everything else). If any is missing, `sendLeaseViaDocuSeal()` fails
+   closed for that location's leases rather than sending a lease without the required signer.
+5. **Site-tab formulas:** if the production spreadsheet has manually-maintained per-location
+   `QUERY`/`FILTER` tabs (see [README §6 "Location tabs and QUERY
+   formulas"](../README.md#location-tabs-and-query-formulas)), confirm they reference **column T**
+   (Location), not column S (Vehicle Type) or any other column — this must be checked independently
+   in the production spreadsheet even if it was already fixed in sandbox, since each environment
+   has its own separate Sheet and tabs.
 
 ---
 
@@ -80,7 +94,7 @@ These are business/operational decisions, not code changes — resolve them befo
 1. **Create the production Apps Script project**, bound to the production Google Sheet (or create
    the production Sheet first, then Extensions → Apps Script from it).
 2. **Deploy source code** — `clasp push` (pointed at the production project) or paste each
-   `src/*.js` file manually. All 12 files must be present.
+   `src/*.js` file manually. All 13 files must be present (including `CancelReschedule.js`).
 3. **Set all Script Properties** in the production project per
    [docs/setup-notes.md](setup-notes.md) and [README.md §8](../README.md#8-script-properties-reference),
    using production values resolved in §3 above — never copy sandbox values wholesale.
@@ -88,7 +102,7 @@ These are business/operational decisions, not code changes — resolve them befo
 5. **Run `testSheetConnection()` and `testCalendarConfigs()`** — confirm the production Sheet and
    calendars are reachable.
 6. **Run `setupTriggers()`** — creates all five triggers and applies sheet schema (M/N headers,
-   column S/T dropdowns, V/W/X/Y/Z headers).
+   column S/T dropdowns, V/W/X/Y/Z headers, and AA/AB/AC headers for cancellation/reschedule).
 7. **Confirm column P has manual dropdown validation** (`Approved - Free` / `Approved - Paid` /
    `Denied`) — this is not created automatically by `setupSheetSchema()`.
 8. **Deploy as a Web App** (Deploy → New deployment → Web app; Execute as: Me; Who has access:
@@ -126,8 +140,13 @@ test) booking through the entire flow, watching the Executions log at each step:
    not guarantee an identical production `HOURS_BETWEEN_APPROVAL_REMINDERS` value produces the same
    approval-reminder timing. (`POST_RENTAL_HOURS` has been removed entirely and no longer affects
    post-trip reminder timing — see [docs/testing-plan.md](testing-plan.md) Test 9.)
-8. Only after this full pass succeeds should real customer bookings be allowed to flow through
-   unattended.
+8. Confirm the lease's `Reliable Storage Manager` submitter uses that booking's location's own
+   `MANAGER_EMAIL_<LOCATION>` value (Test 17).
+9. If feasible, exercise a real cancellation (delete the test booking's calendar event, or type a
+   value into column AA) and a real reschedule (edit the test booking's calendar time) to confirm
+   Tests 15–16 also succeed against the production Sheet and Calendar.
+10. Only after this full pass succeeds should real customer bookings be allowed to flow through
+    unattended.
 
 ---
 

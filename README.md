@@ -117,7 +117,7 @@ validated — see [docs/testing-plan.md](docs/testing-plan.md).
 |---|---|
 | Automation runtime | Google Apps Script (V8) |
 | Booking source | Google Calendar (Appointment Schedules) |
-| System of record | Google Sheets (Bookings tab, columns A–Z) |
+| System of record | Google Sheets (Bookings tab, columns A–AC) |
 | E-mail | SendGrid REST API |
 | SMS | Twilio REST API |
 | E-signature | DocuSeal REST API |
@@ -148,7 +148,7 @@ Customer books vehicle via Google Booking
   syncCalendarBookings detects event (every 5 min)
             │
             ▼
-  Row appended to Bookings sheet (columns A–T initialized; U–Z populate later)
+  Row appended to Bookings sheet (columns A–T initialized; U–AC populate later)
             │
             ├──▶  Welcome SMS + email sent to customer
             │       • Stripe Checkout Session URL (unique per booking;
@@ -446,7 +446,7 @@ graph TB
     end
 
     subgraph RECORD["System of Record"]
-        SHEETS[(Google Sheets — Bookings tab\nColumns A-Z)]
+        SHEETS[(Google Sheets — Bookings tab\nColumns A-AC)]
     end
 
     subgraph BRIDGE["Pipedream — Webhook Bridge"]
@@ -937,8 +937,10 @@ to the N1 cell (if blank) — no dropdown validation on either. It writes `Vehic
 cell (if blank) and applies dropdown validation to column S from the unique vehicle types in
 `CALENDAR_CONFIGS`. Same for `Location` in column T. It also fills in the header text (if blank)
 for columns V (`Customer Approval Notified`), W (`Intake Form Completed`), X (`Pre-Inspection Form
-Completed`), Y (`Post-Inspection Form Completed`), and Z (`Suspicious Timing Warning Sent`) — no
-dropdown validation on these, same Yes/blank pattern as G/I/J/K/L/O. Safe to re-run — it only
+Completed`), Y (`Post-Inspection Form Completed`), Z (`Suspicious Timing Warning Sent`), AA
+(`Cancelled`), AB (`Cancel Notified`), and AC (`Rescheduled At`) — no dropdown validation on these,
+same Yes/blank pattern as G/I/J/K/L/O (AA is the one exception — see [Columns AA–AC —
+Cancellation / Reschedule](#columns-aaac--cancellation--reschedule)). Safe to re-run — it only
 writes headers if the cell is currently blank, and always re-applies S/T validation. **Does not
 touch columns A–L or U** — those must be set up manually.
 
@@ -1033,9 +1035,27 @@ unless a lease is resent.
 ### Location tabs and QUERY formulas
 
 The Bookings sheet may have additional per-location tabs that use `QUERY` formulas to filter the
-main Bookings tab by the Location column (S). These tabs are a Google Sheets feature maintained
-separately from the script — the script reads and writes only the main Bookings tab. Adding a new
-location does not automatically create a filtered tab; that must be done manually.
+main Bookings tab by the Location column — **column T**, not column S. (Column S is Vehicle Type;
+Location moved to T when the Additional Driver columns M/N were inserted. If a site tab is showing
+zero rows for a location that clearly has bookings on the main tab, check whether its formula still
+references the old column S — that must be updated to T manually; the script does not maintain
+these tabs.) These tabs are a Google Sheets feature maintained separately from the script — the
+script reads and writes only the main Bookings tab. Adding a new location does not automatically
+create a filtered tab; that must be done manually.
+
+### Columns AA–AC — Cancellation / Reschedule
+
+Added by `setupSheetSchema()` (`Setup.js`), append-only after Z — they do not shift any existing
+A–Z column. See `src/CancelReschedule.js`:
+
+| Col | Field | Written by |
+|---|---|---|
+| AA | Cancelled | Timestamp — auto-detected calendar delete, or typed manually by a manager |
+| AB | Cancel Notified | `Yes`/blank — set only once the one-time cancellation notice has actually delivered |
+| AC | Rescheduled At | Timestamp of the most recent reschedule only (not a history) |
+
+Detection runs as part of `syncCalendarBookings()`, once per location, strictly scoped to that
+location's own rows and its own freshly-fetched calendar events.
 
 ---
 
@@ -1159,7 +1179,7 @@ Script Property — no separate spreadsheet, and no additional Script Property, 
 
 ## 8. Script Properties Reference
 
-All 50 Script Properties must be set in **Apps Script → Project Settings → Script Properties**.
+All 54 Script Properties must be set in **Apps Script → Project Settings → Script Properties**.
 No value ever belongs in source code.
 
 ### Identity and routing
@@ -1272,6 +1292,23 @@ a different location — if it receives a location string that is not one of the
 
 All eight properties are required. Missing or malformed values are caught by `testLocationSenderConfig()`.
 
+### DocuSeal manager co-signer (per location)
+
+| Property | What it is | Format |
+|---|---|---|
+| `MANAGER_EMAIL_BAINBRIDGE` | Bainbridge's manager — DocuSeal "Reliable Storage Manager" co-signer | Email address |
+| `MANAGER_EMAIL_POULSBO` | Poulsbo's manager — DocuSeal co-signer | Email address |
+| `MANAGER_EMAIL_PORT_ORCHARD` | Port Orchard's manager — DocuSeal co-signer | Email address |
+| `MANAGER_EMAIL_FAIRGROUNDS` | Fairgrounds' manager — DocuSeal co-signer | Email address |
+
+Distinct from `EMAIL_<LOCATION>` above, which is only the SendGrid sending identity for that
+location's customer-facing mail — these are the actual manager mailbox that must review and
+co-sign every lease at that location. `sendLeaseViaDocuSeal()` (`DocuSeal.js`) **fails closed** if
+a location's value is missing: the lease is not sent, `alertAdmin()` is called with the location
+and customer context, and a clear error is logged and thrown. There is no `MANAGER_PHONE_<LOCATION>`
+— manager SMS everywhere else in the system, and the global `CONFIG.MANAGER_EMAIL` used for
+approval requests, reminders, new-booking notices, and the customer-email BCC, are unchanged.
+
 ### DocuSeal (e-signature)
 
 | Property | Description | Example | Secret | Required |
@@ -1377,6 +1414,10 @@ Signing roles:
 The role name `Driver #1` is used for the primary customer in **both** templates. The role names
 are hardcoded in `DocuSeal.js`. If a template's role names differ, update the strings in
 `sendLeaseViaDocuSeal`.
+
+The `Reliable Storage Manager` submitter's email is resolved **per the booking's location** —
+see [DocuSeal manager co-signer (per location)](#docuseal-manager-co-signer-per-location) — not a
+single address shared across all four locations.
 
 ### Pre-filled document fields
 
@@ -2352,8 +2393,11 @@ Duplicates can happen in two scenarios:
    - Two drivers: `Driver #1`, `Driver #2`, `Reliable Storage Manager`
 3. Check the Executions log for `sendLeaseViaDocuSeal` — any HTTP 4xx/5xx from DocuSeal will
    appear as `DocuSeal error:` followed by the response body.
-4. Confirm `MANAGER_EMAIL` is set — the manager is added as a co-signer on every lease; if the
-   email is missing, the submitters array will omit the manager role.
+4. Confirm `MANAGER_EMAIL_<LOCATION>` is set for the booking's location — the manager is added as
+   a co-signer on every lease from that location's own value, not the global `MANAGER_EMAIL`. If
+   it's missing, `sendLeaseViaDocuSeal()` fails closed: no lease is sent, and `alertAdmin()` fires
+   with the location and customer context instead of the submitters array silently omitting the
+   manager role.
 
 ### Column U (DocuSeal Submission ID) is blank after lease sent
 
@@ -2456,9 +2500,9 @@ run could, in theory, see the same new booking event (before column A is updated
 duplicate welcome message. In practice, `appendRow` is atomic from the sheet's perspective, but
 the race window exists.
 
-**`setupSheetSchema` manages columns M, N, S, T, V, W, X, Y, and Z only:** Column headers A–L and U
-must be set up manually. If a column is accidentally deleted or renamed, the script will silently
-read the wrong data.
+**`setupSheetSchema` manages columns M, N, S, T, V, W, X, Y, Z, AA, AB, and AC only:** Column
+headers A–L and U must be set up manually. If a column is accidentally deleted or renamed, the
+script will silently read the wrong data.
 
 **Lease email not BCC'd to manager:** DocuSeal sends lease emails directly — they do not pass
 through `sendEmailHtml`. The manager receives a DocuSeal co-signer request instead of a BCC copy.

@@ -19,11 +19,17 @@ function sendLeaseToNewBookings() {
     const location              = data[i][19] || '';  // T: Location
     const intakeCompleted       = data[i][22] || '';  // W: Intake Form Completed
 
-    const approved = data[i][15]; // P: Rental Approved
+    const approved  = data[i][15]; // P: Rental Approved
+    const cancelled = data[i][26]; // AA: Cancelled
     Logger.log('Row ' + (i + 1) + ': G(DepositPaid)="' + depositPaid +
                '", W(IntakeCompleted)="' + intakeCompleted +
                '", J(LeaseSent)="' + leaseSent +
                '", P(Approved)="' + approved + '"');
+
+    if (cancelled) {
+      Logger.log('Row ' + (i + 1) + ': SKIP -- booking is cancelled (column AA)');
+      continue;
+    }
 
     if (approved === 'Denied' || approved === '') {
       Logger.log('Row ' + (i + 1) + ': SKIP — P="' + approved +

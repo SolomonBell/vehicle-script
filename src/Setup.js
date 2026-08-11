@@ -140,9 +140,31 @@ function setupSheetSchema() {
   const zHeaderCell = sheet.getRange('Z1');
   if (!zHeaderCell.getValue()) zHeaderCell.setValue('Suspicious Timing Warning Sent');
 
+  // Column AA header: Cancelled — a timestamp, set either automatically by
+  // the cancellation-detection pass (a previously-synced booking's calendar
+  // event was deleted) or manually by a manager typing any value into this
+  // column directly. Blank until then. See CancelReschedule.js.
+  const aaHeaderCell = sheet.getRange('AA1');
+  if (!aaHeaderCell.getValue()) aaHeaderCell.setValue('Cancelled');
+
+  // Column AB header: Cancel Notified — a simple Yes/blank flag (same
+  // pattern as I/J/K/L/V/W/Z), set only once the one-time cancellation
+  // notice has actually been delivered to the customer via at least one
+  // channel — see runCancellationDetectionForLocation_() in
+  // CancelReschedule.js.
+  const abHeaderCell = sheet.getRange('AB1');
+  if (!abHeaderCell.getValue()) abHeaderCell.setValue('Cancel Notified');
+
+  // Column AC header: Rescheduled At — a timestamp holding only the most
+  // recent reschedule (not a history of every past reschedule), set by
+  // handleReschedule_() in CancelReschedule.js.
+  const acHeaderCell = sheet.getRange('AC1');
+  if (!acHeaderCell.getValue()) acHeaderCell.setValue('Rescheduled At');
+
   Logger.log('Sheet schema applied: Column M = Additional Driver Name, Column N = Additional Driver Email, ' +
              'Column S = Vehicle Type, Column T = Location (dropdowns), ' +
              'Column V = Customer Approval Notified, Column W = Intake Form Completed, ' +
              'Column X = Pre-Inspection Form Completed, Column Y = Post-Inspection Form Completed, ' +
-             'Column Z = Suspicious Timing Warning Sent.');
+             'Column Z = Suspicious Timing Warning Sent, Column AA = Cancelled, ' +
+             'Column AB = Cancel Notified, Column AC = Rescheduled At.');
 }

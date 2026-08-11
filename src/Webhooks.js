@@ -146,9 +146,14 @@ function markDepositPaid(customerEmail, amountPaid, eventId) {
   const leaseSent               = data[i][9];
   const vehicleType             = data[i][18] || '';  // S: Vehicle Type
   const location                = data[i][19] || '';  // T: Location
+  const cancelled                = data[i][26];        // AA: Cancelled
   const locCfg                  = getLocationConfig(location);
 
-  if (leaseSent !== 'Yes' && email !== 'No Email') {
+  // Deposit Paid / Stripe Amount above are recorded unconditionally --
+  // financial history is real regardless of a later cancellation. Only the
+  // customer "your rental is proceeding" messaging and the DocuSeal lease
+  // send below are gated on cancellation status.
+  if (leaseSent !== 'Yes' && email !== 'No Email' && !cancelled) {
     try {
       const firstName       = name.split(' ')[0];
       const intakeCompleted = data[i][22] || ''; // W: Intake Form Completed
@@ -204,6 +209,9 @@ function markDepositPaid(customerEmail, amountPaid, eventId) {
     } catch(e) {
       alertAdmin('markDepositPaid error for ' + email, e.toString());
     }
+  } else if (cancelled) {
+    Logger.log('markDepositPaid: deposit recorded for cancelled booking ' + email +
+               ' -- no confirmation message or lease sent.');
   }
 }
 

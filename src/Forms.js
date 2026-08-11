@@ -593,11 +593,14 @@ function processIntakeFormSubmission_(e) {
                ' (matched by ' + match.precision + ')');
 
     // If the deposit already cleared, this submission is the second of the
-    // two conditions to arrive -- send the lease now.
-    const depositPaid = data[i][6]; // G: Deposit Paid
+    // two conditions to arrive -- send the lease now. A cancelled booking
+    // (column AA) still gets its intake recorded above (M/N/W), but must
+    // never trigger a new DocuSeal lease send.
+    const depositPaid = data[i][6];  // G: Deposit Paid
     const leaseSent    = data[i][9]; // J: Lease Sent
+    const cancelled    = data[i][26]; // AA: Cancelled
     const rowEmail     = (data[i][2] || '').toLowerCase().trim();
-    if (isDocuSealEligible(depositPaid, 'Yes', leaseSent) && rowEmail !== 'no email') {
+    if (isDocuSealEligible(depositPaid, 'Yes', leaseSent) && rowEmail !== 'no email' && !cancelled) {
       try {
         const name        = data[i][1];
         const email       = data[i][2];
@@ -622,6 +625,9 @@ function processIntakeFormSubmission_(e) {
         Logger.log('processIntakeFormSubmission_: DocuSeal send failed for row ' + (i + 1) + ': ' + leaseErr);
         alertAdmin('processIntakeFormSubmission_ DocuSeal error', leaseErr.toString());
       }
+    } else if (cancelled) {
+      Logger.log('processIntakeFormSubmission_: booking ' + data[i][2] +
+                 ' is cancelled -- intake recorded but no lease sent.');
     }
   } catch(err) {
     Logger.log('processIntakeFormSubmission_ error: ' + err.toString());

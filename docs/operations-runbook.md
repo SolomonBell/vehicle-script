@@ -22,7 +22,7 @@ whichever environment you are operating.
 | Question | Where to look |
 |---|---|
 | "Did trigger X run, and did it error?" | Apps Script editor → **Executions** (left sidebar) |
-| "What is the current state of a specific booking?" | The Bookings sheet, that row, columns A–Z |
+| "What is the current state of a specific booking?" | The Bookings sheet, that row, columns A–AC |
 | "Is a Script Property missing or wrong?" | Apps Script editor → **Project Settings → Script Properties** |
 | "Did a webhook arrive?" | Executions log, filter for `doPost` |
 | "Did an admin alert fire?" | `ADMIN_EMAIL` inbox — subject prefixed `[Rental Script]` |
@@ -30,7 +30,7 @@ whichever environment you are operating.
 
 ---
 
-## 2. Reading a booking row (columns A–Z)
+## 2. Reading a booking row (columns A–AC)
 
 Given a row, this is the order the columns are meant to fill in, and what each one means:
 
@@ -50,6 +50,14 @@ Given a row, this is the order the columns are meant to fill in, and what each o
 | L | Post-trip reminder sent, about an hour after X's timestamp | `processReminders` |
 | Y | Customer submitted the post-trip inspection form — value is `Yes <date/time>` | `processInspectionFormSubmission_` (via `onFormSubmit`) |
 | Z | Manager warned that X and Y were submitted unusually close together — informational only, sent at most once | `processReminders` (via `sendSuspiciousInspectionTimingWarning_`) |
+| AA | Cancelled — timestamp if auto-detected, or any value a manager typed by hand | `syncCalendarBookings` (via `runCancellationDetectionForLocation_`, `CancelReschedule.js`), or a manager directly |
+| AB | Cancel Notified — the one-time cancellation notice was delivered | `syncCalendarBookings` (via `runCancellationDetectionForLocation_`) |
+| AC | Rescheduled At — most recent reschedule only | `syncCalendarBookings` (via `handleReschedule_`, `CancelReschedule.js`) |
+
+Once AA is set, every other engine (`sendLeaseToNewBookings`, `checkRentalEligibility`, the
+pre-trip/post-trip branches of `processReminders`, and reschedule detection itself) skips that row
+going forward — see §3 below. The suspicious-timing-warning branch of `processReminders` is
+intentionally the one exception: it is not gated on AA.
 
 If a column that "should" be filled in is blank, work backwards through this table to find the
 first blank one — that is almost always the actual blocker.
@@ -163,6 +171,59 @@ looks wrong for a specific row, capture the row's full column state (especially 
 Executions log for the relevant `checkRentalEligibility` runs before assuming it's a new defect —
 manual edits to Q are the most common cause (see §4 below for the one supported manual override).
 
+### "A booking was cancelled but leases/reminders/approval still went out"
+
+1. Confirm column AA (Cancelled) is actually set on that row — if it's still blank, the
+   cancellation hasn't been detected/applied yet.
+2. Check the timestamp on AA against the timestamp of whatever message went out — a message sent
+   *before* AA was set is expected (the row wasn't cancelled yet at that point), not a bug.
+3. If a message genuinely went out *after* AA was already set, check which engine sent it
+   (`Leases.js`, `Approval.js`, or `Reminders.js`'s pre-trip/post-trip branches) — each has its own
+   `cancelled` guard (`data[i][26]`/`row[26]`); this would be a real regression, not expected
+   behavior. Note that the suspicious-timing-warning branch of `processReminders` is the one
+   intentional exception — it still fires regardless of AA, since it's purely informational.
+4. Remember that historical facts (deposit received, intake submitted, lease signed, inspection
+   submitted) are recorded even on a cancelled row by design — `markDepositPaid` and
+   `processIntakeFormSubmission_` split their side effects: the historical write is unconditional,
+   only the *new* customer message / DocuSeal send is gated on AA. Seeing G/H or W update on an
+   already-cancelled row is expected, not a bug.
+
+### "A cancellation or reschedule notice never arrived"
+
+1. For cancellation: check column AB (Cancel Notified). If AA is set but AB is still blank, the
+   notice failed to send on at least one attempt (check Executions for `Cancellation SMS failed`/
+   `Cancellation email failed` around that time) and will be retried automatically on the next
+   `syncCalendarBookings` run — this mirrors the same "delivered" gating pattern as columns K/L.
+2. For reschedule: there is no separate "notified" flag — AC (Rescheduled At) is stamped as part
+   of the same operation that sends the notice. If AC is set but you suspect the notice didn't
+   send, check Executions for `Reschedule SMS failed`/`Reschedule email failed` around that
+   timestamp; there is no automatic retry for a reschedule notice specifically (the underlying
+   Start Time already matches the calendar by the time it would retry, so the row is no longer
+   detected as a fresh reschedule).
+3. Confirm `CONFIG.MANAGER_EMAIL`/`MANAGER_PHONE` (global, unchanged) are set if the *manager*
+   side of either notice is missing — cancellation/reschedule manager notices use the same global
+   address as every other manager notification, not the per-location DocuSeal signer.
+
+### "A reschedule didn't seem to take effect"
+
+1. Confirm the calendar event's time actually changed by more than about 60 seconds — smaller
+   adjustments are intentionally treated as clock jitter, not a real reschedule
+   (`isRescheduleDetected()`, `CancelReschedule.js`).
+2. Confirm the row isn't already cancelled (column AA) — a cancelled row is never
+   reschedule-detected.
+3. If column Y (Post-Inspection Form Completed) is already set on that row, this is expected: the
+   system deliberately does **not** auto-reschedule a booking whose full rental lifecycle already
+   completed — it calls `alertAdmin()` instead and leaves the row untouched. Check `ADMIN_EMAIL`
+   for a "Reschedule detected on a completed booking" alert.
+
+### "The DocuSeal lease didn't send — missing manager signer"
+
+Check Executions for `DocuSeal lease blocked -- missing manager email for <location>`. This means
+`sendLeaseViaDocuSeal()` fails closed when a location's `MANAGER_EMAIL_<LOCATION>` Script Property
+is unset — no lease is created, and `alertAdmin()` fires with the location and customer context.
+Set the missing property (Project Settings → Script Properties) and resend via whichever of the
+three lease-sending paths applies (or wait for the next automatic pass).
+
 ---
 
 ## 4. Manual recovery actions (things a human may need to do by hand)
@@ -177,12 +238,17 @@ These are legitimate manual interventions — none of them require a code change
 | A row's Location or Vehicle Type is wrong | Correct columns S/T directly — downstream lookups (deposit amount, Stripe Price ID, sender identity) re-resolve from the corrected value on the next run |
 | Ambiguous intake/inspection submission logged but not applied | Manually set the correct completion column (V/W/X) for the correct row after confirming which booking it belongs to |
 | An inspection message needs to be resent, or the post-trip inspection needs to go out immediately (e.g. early return) | Run `sendPreTripInspectionNowForRow(rowNumber)` or `sendPostTripInspectionNowForRow(rowNumber)` (`src/Reminders.js`) manually from the Apps Script editor, using the booking's 1-based sheet row number. This is a real send: it writes K/L and notifies the manager exactly like the automated path, so only do this for a specific, authorized reason. |
+| A booking needs to be cancelled right away, without waiting on the calendar sync | Type any non-blank value into column AA (Cancelled) directly. The next `syncCalendarBookings` run (~5 min) sends the same cancellation notices as an auto-detected calendar delete and stops further processing on that row. |
+| A reschedule needs to be reflected but the calendar event itself can't be edited (rare) | There is no manual override for E/F/AC — the reschedule engine only reacts to an actual calendar Start Time change. Edit the calendar event itself, or escalate if that isn't possible. |
+| A reschedule was blocked because the post-trip inspection (column Y) was already complete | This is intentional (see `docs/setup-notes.md` and `CancelReschedule.js`) — review the booking manually and, if appropriate, correct E/F directly, understanding that doing so does not re-arm K/L/X/Z automatically the way a normal reschedule would. |
 
 **Never do these manually:**
 - Never write to column P programmatically or via a script — it is manager-only by design.
 - Never clear column A (Event ID) to force a resync — this creates a duplicate row for the same
   Calendar event.
 - Never edit Script Properties in the production project while testing in sandbox, or vice versa.
+- Never mark column AB (Cancel Notified) `Yes` by hand before the real notice has sent — this
+  permanently suppresses it, the same risk as the other "sent" flag columns (I/J/K/L/V/W/X/Y/Z).
 
 ---
 

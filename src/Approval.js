@@ -46,9 +46,14 @@ function checkRentalEligibility_() {
     const reminderCount    = Number(data[i][17]) || 0;  // R: Approval Reminder Count
     const leaseSigned      = data[i][14];                // O: Lease Signed
     const customerNotified = data[i][21];                // V: Customer Approval Notified
+    const cancelled        = data[i][26];                // AA: Cancelled
 
     // Skip rows that aren't fully initialized yet
     if (intakeSent !== 'Yes') continue;
+
+    // Cancelled bookings get no further approval processing -- no more
+    // manager reminders, and no "your rental is approved" customer notice.
+    if (cancelled) continue;
 
     // Manager has approved (with or without a fee) -- manager reminders
     // stop here regardless of lease-signature status. The customer is only

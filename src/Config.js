@@ -95,6 +95,20 @@ const CONFIG = {
   EMAIL_FAIRGROUNDS:  PROPS.EMAIL_FAIRGROUNDS,
   PHONE_FAIRGROUNDS:  PROPS.PHONE_FAIRGROUNDS,
 
+  // ---- Location-specific DocuSeal co-signer (Reliable Storage Manager) ---
+  // Distinct from EMAIL_<LOCATION> above, which is only the SendGrid
+  // From/Reply-To sending identity for that location's customer-facing mail.
+  // These are the actual manager mailbox that must review and co-sign every
+  // lease at that location as the DocuSeal "Reliable Storage Manager"
+  // submitter. See sendLeaseViaDocuSeal() in DocuSeal.js. Global
+  // CONFIG.MANAGER_EMAIL is unchanged and still used everywhere else
+  // (approval requests, reminders, new-booking notices, the BCC on
+  // customer emails) — only the DocuSeal co-signer became per-location.
+  MANAGER_EMAIL_BAINBRIDGE:   PROPS.MANAGER_EMAIL_BAINBRIDGE,
+  MANAGER_EMAIL_POULSBO:      PROPS.MANAGER_EMAIL_POULSBO,
+  MANAGER_EMAIL_PORT_ORCHARD: PROPS.MANAGER_EMAIL_PORT_ORCHARD,
+  MANAGER_EMAIL_FAIRGROUNDS:  PROPS.MANAGER_EMAIL_FAIRGROUNDS,
+
   // ---- DocuSeal (e-signature) ---------------------------------
   DOCUSEAL_KEY:                  PROPS.DOCUSEAL_API_KEY,
   DOCUSEAL_TEMPLATE_SINGLE:      Number(PROPS.DOCUSEAL_TEMPLATE_ONE_DRIVER),

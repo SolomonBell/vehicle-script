@@ -44,6 +44,24 @@ confirmed by an actual sandbox run reaching these conditions:
 | Post-trip inspection completion update with actual submission timestamp (column Y) | Test 10 |
 | Suspicious inspection timing warning firing and stopping at one send per booking (column Z) | Test 13 |
 | Immediate inspection send tools (pure test and authorized real send) | Test 14 |
+| Automatic cancellation detection (calendar delete → column AA) | Test 15 |
+| Manual cancellation (typing a value into column AA) | Test 15 |
+| Cancelled-booking guards (lease/approval/reminders/reschedule all stop; historical facts still recorded) | Test 15 |
+| Reschedule detection (Start Time change → E/F/AC update, K/L re-arm) | Test 16 |
+| Reschedule re-arming X/Z when the pre-trip inspection was already complete | Test 16 |
+| Reschedule exceptional path when the post-trip inspection is already complete (Y set) | Test 16 |
+| Per-location DocuSeal manager co-signer selection (all four locations) | Test 17 |
+| Per-location DocuSeal manager co-signer fail-closed behavior when unconfigured | Test 17 |
+
+**Development-time verification performed, but not yet run live:** the cancellation/reschedule
+engine and per-location DocuSeal manager email were exercised against a hand-built Node.js
+Apps-Script shim during development (not the real Apps Script runtime) — every relevant unit and
+regression test passed there. This is not a substitute for the item below and does not move
+anything into the "Validated" table above.
+
+- [ ] Run `runAllSandboxConfigurationTests()` from the actual Apps Script editor in the sandbox
+      project and confirm all tests pass (50 tests as of this writing — see the regression
+      checklist at the end of this document)
 
 Do not report any item in the second table as "passed" until it has actually been exercised —
 either by waiting for a real booking to reach the 24-hour window and, separately, a real hour to
@@ -55,8 +73,9 @@ together (Test 13), as described in those tests.
 
 ## Prerequisites
 
-- [ ] All Script Properties set (see [`docs/setup-notes.md`](setup-notes.md))
-- [ ] Bookings sheet exists with correct headers (A–Y)
+- [ ] All Script Properties set (see [`docs/setup-notes.md`](setup-notes.md)), including the four
+      per-location `MANAGER_EMAIL_<LOCATION>` DocuSeal co-signer properties
+- [ ] Bookings sheet exists with correct headers (A–AC)
 - [ ] Column P has dropdown validation (`Approved - Free` / `Approved - Paid` / `Denied`)
 - [ ] `setupTriggers()` has been run and created all five triggers: `syncCalendarBookings`,
       `checkRentalEligibility`, `sendLeaseToNewBookings`, `processReminders`, `onFormSubmit`
@@ -87,8 +106,8 @@ together (Test 13), as described in those tests.
 - [ ] Manager receives "New booking" SMS
 
 **Check in sheet:** Columns A–I, N, S–T populated (column N holds the Calendar-derived email or
-`No Second Email`; column M stays blank until intake); G, H, J, K, L, O, P, Q, R, U, V, W, X, Y
-all blank.
+`No Second Email`; column M stays blank until intake); G, H, J, K, L, O, P, Q, R, U, V, W, X, Y,
+AA, AB, AC all blank.
 
 **Status:** PASS — Validated.
 
@@ -501,6 +520,176 @@ message):**
 
 ---
 
+## Test 15: Cancellation (automatic and manual)
+
+See `src/CancelReschedule.js` and [docs/setup-notes.md](setup-notes.md) for the implementation
+details.
+
+**Part A — automatic cancellation (calendar delete):**
+
+**What to do:**
+1. Pick a Bookings row with a future Start Time whose calendar event still exists
+2. Delete that calendar event directly in Google Calendar
+3. Wait for the `syncCalendarBookings` trigger (~5 min) or run it manually
+
+**Expected results:**
+- [ ] Column AA (Cancelled) is stamped with a timestamp
+- [ ] Column AB (Cancel Notified) = `Yes` once the notice is delivered
+- [ ] Customer receives a cancellation email and SMS (if phone present), including the change/cancel
+      footer
+- [ ] Manager receives a cancellation notice (email + SMS if `MANAGER_PHONE` is set), via the
+      existing global `CONFIG.MANAGER_EMAIL`/`CONFIG.MANAGER_PHONE` — not a per-location address
+- [ ] Re-running `syncCalendarBookings` again does **not** send a second cancellation notice
+
+**Part B — manual cancellation:**
+
+**What to do:**
+1. Pick any Bookings row with a future Start Time whose calendar event still exists
+2. Type any value into column AA directly in the sheet (it does not need to be `Yes` — any
+   non-blank value counts)
+3. Wait for the `syncCalendarBookings` trigger (~5 min) or run it manually
+
+**Expected results:**
+- [ ] Column AA is **not** overwritten (your manually-typed value is preserved)
+- [ ] The same cancellation notices as Part A are sent, and column AB = `Yes` once delivered
+
+**Part C — location scoping:**
+
+**What to do:**
+1. Confirm that deleting or cancelling a booking at one location never affects a row at a
+   different location, even one whose Start Time is in the same window
+
+**Expected results:**
+- [ ] Only the row(s) belonging to the location whose calendar was actually read are ever
+      evaluated for cancellation
+
+**Part D — cancelled-row guards:**
+
+**What to do, on the now-cancelled row from Part A or B:**
+1. Confirm no further approval reminders are sent (`checkRentalEligibility`)
+2. Confirm no lease is sent if one had not already gone out (`sendLeaseToNewBookings`)
+3. Confirm no pre-trip or post-trip reminder is sent (`processReminders`)
+4. Confirm the row is never reschedule-detected even if its calendar event's time would otherwise
+   qualify
+
+**Expected results:**
+- [ ] All four of the above hold
+- [ ] Historical facts already recorded (deposit paid, intake submitted, lease signed, inspection
+      submissions) are **not** erased or blocked — a webhook or form submission arriving for an
+      already-cancelled row still records the underlying fact (see `markDepositPaid`,
+      `processIntakeFormSubmission_` in the source), it just does not trigger a new customer
+      message or a new DocuSeal lease send
+
+**Part E — empty-calendar safety:**
+
+**What to do:**
+1. Confirm a location whose calendar genuinely has zero upcoming events in the sync window still
+   correctly cancels a row whose event was the last one deleted (this is the case the
+   `events.length === 0` heuristic used to get wrong — see the audit)
+2. Separately, simulate or observe a genuinely failed calendar read (e.g. a temporarily revoked
+   calendar permission) and confirm that location's sync is skipped for that cycle with an admin
+   alert, rather than being treated as "zero bookings"
+
+**Expected results:**
+- [ ] A successfully-read empty calendar still allows cancellation detection to proceed
+- [ ] A thrown read error skips new-booking/reschedule/cancellation processing for that location
+      only, and `alertAdmin()` fires
+
+**Status:** PENDING — Not yet validated live. Node/GAS-shim testing during development covered
+the underlying logic (`runCancellationDetectionForLocation_`, location scoping, delivery gating,
+idempotency) — see `src/SandboxTests.js` — but this has not yet been exercised against a real
+Google Calendar and a real sandbox sheet.
+
+---
+
+## Test 16: Reschedule
+
+**What to do:**
+1. Pick a Bookings row with a future Start Time
+2. Edit that event's start/end time directly in Google Calendar, by more than 60 seconds
+3. Wait for the `syncCalendarBookings` trigger (~5 min) or run it manually
+
+**Expected results:**
+- [ ] Columns E and F update to the new start/end time
+- [ ] Column AC (Rescheduled At) is stamped with a timestamp
+- [ ] Columns K (24hr Sent) and L (Post-Rental Sent) are cleared, if either was already `Yes`
+- [ ] Customer receives a reschedule email and SMS, including the change/cancel footer
+- [ ] Manager receives a reschedule notice, via the existing global manager address
+- [ ] Deposit Paid (G), Lease Sent (J), Lease Signed (O), Rental Approved (P), and DocuSeal
+      Submission ID (U) are all **unchanged**
+
+**Edge case — under 60 seconds:**
+- [ ] Edit the event's time by less than 60 seconds — confirm this is **not** treated as a
+      reschedule (no E/F/AC change, no notice sent)
+
+**Edge case — exactly 60 seconds:**
+- [ ] Edit the event's time by exactly 60 seconds — confirm this also does **not** count (the
+      tolerance is strict `>`, not `>=`)
+
+**Edge case — pre-trip inspection already completed:**
+1. Complete the pre-trip inspection on a row (column X holds `Yes <timestamp>`)
+2. Reschedule that same booking's calendar event by more than 60 seconds
+
+**Expected results:**
+- [ ] Column X is cleared back to blank, in addition to K/L
+- [ ] Column Z (Suspicious Timing Warning Sent) is cleared back to blank if it was already `Yes`
+- [ ] The inspection lifecycle behaves as if starting fresh for the new date
+
+**Edge case — post-trip inspection already completed (Y set):**
+1. Complete both inspections on a row (column Y holds `Yes <timestamp>`)
+2. Reschedule that same booking's calendar event
+
+**Expected results:**
+- [ ] The row is left **completely unchanged** — no E/F/K/L/X/Z/AC write, no customer or manager
+      notice sent
+- [ ] `alertAdmin()` fires instead, identifying the booking for manual review
+
+**Edge case — already-cancelled row:**
+- [ ] A row already marked Cancelled (column AA) is never reschedule-detected, even if its
+      calendar event's time changes
+
+**Status:** PENDING — Not yet validated live. Node/GAS-shim testing during development covered
+`isRescheduleDetected()`'s tolerance boundaries and `handleReschedule_()`'s column-update logic —
+see `src/SandboxTests.js` — but this has not yet been exercised against a real Google Calendar
+event edit.
+
+**Live-UAT note:** whether Google Calendar Appointment Schedules preserves the same Event ID when
+a *customer* reschedules through the booking page itself (as opposed to a manager editing the
+calendar event directly) has not been confirmed. The manager-mediated path above (a human edits
+the calendar) is the one this feature is designed around and reliably preserves the Event ID.
+
+---
+
+## Test 17: Per-location DocuSeal manager co-signer
+
+**What to do:**
+1. Confirm `MANAGER_EMAIL_BAINBRIDGE`, `MANAGER_EMAIL_POULSBO`, `MANAGER_EMAIL_PORT_ORCHARD`, and
+   `MANAGER_EMAIL_FAIRGROUNDS` are all set in Script Properties
+2. Send a lease (via any of the three lease-sending paths) for a booking at each of the four
+   locations
+
+**Expected results:**
+- [ ] Each location's lease submitters include a `Reliable Storage Manager` entry using **that
+      location's own** `MANAGER_EMAIL_<LOCATION>` value — not a single shared address, and not the
+      global `CONFIG.MANAGER_EMAIL`
+
+**Fail-closed check:**
+1. Temporarily clear one location's `MANAGER_EMAIL_<LOCATION>` Script Property
+2. Attempt to send a lease for a booking at that location
+
+**Expected results:**
+- [ ] No lease is sent (no DocuSeal API call is made)
+- [ ] `alertAdmin()` fires, identifying the location and customer
+- [ ] Restore the Script Property afterward
+
+**Status:** PENDING — Not yet validated live. Node/GAS-shim testing during development covered all
+four locations' submitter selection and the fail-closed path — see `src/SandboxTests.js`
+(`testSendLeaseViaDocuSealPerLocationManagerEmail`,
+`testSendLeaseViaDocuSealMissingManagerEmailFailsClosed`) — but this has not yet been exercised
+against the real DocuSeal API in the sandbox.
+
+---
+
 ## Regression checklist after any code change
 
 - [ ] All five trigger functions still exist: `syncCalendarBookings`, `checkRentalEligibility`,
@@ -521,4 +710,18 @@ message):**
 - [ ] `sendPreTripInspectionNowForRow()` / `sendPostTripInspectionNowForRow()` (`Reminders.js`) and
       `testSendPreTripInspection()` / `testSendPostTripInspection()` (`SandboxTests.js`) still
       exist, and the latter two are still absent from `runAllSandboxConfigurationTests()`
+- [ ] Column T is still Location and column S is still Vehicle Type — confirm no column was
+      inserted before either (AA/AB/AC must stay append-only after Z)
+- [ ] Columns AA/AB/AC are only ever written by `syncCalendarBookings()` (via
+      `CancelReschedule.js`), or AA manually by a manager
+- [ ] Cancelled-row guards are still present in `sendLeaseToNewBookings` (`Leases.js`),
+      `checkRentalEligibility_`/`notifyCustomerOfApproval` (`Approval.js`), and the pre-trip/
+      post-trip branches of `processReminders` (`Reminders.js`) — the suspicious-timing warning
+      branch is intentionally **not** guarded by cancellation
+- [ ] `markDepositPaid` (`Webhooks.js`) and `processIntakeFormSubmission_` (`Forms.js`) still
+      record their historical facts (G/H, and M/N/W respectively) unconditionally, gating only the
+      customer message / DocuSeal send on cancellation status
+- [ ] `sendLeaseViaDocuSeal` (`DocuSeal.js`) still fails closed (throws, alerts admin, no
+      `UrlFetchApp.fetch` call) when a location's `MANAGER_EMAIL_<LOCATION>` is unset
 - [ ] Run `runAllSandboxConfigurationTests()` from `SandboxTests.js` and confirm all tests pass
+      (50 as of this writing)

@@ -31,6 +31,7 @@ things at specific points, mainly reviewing and approving each rental.
 6. [Customer Email Summary](#6-customer-email-summary)
 7. [The Bookings Sheet Explained](#7-the-bookings-sheet-explained)
 8. [Manager Approval Process](#8-manager-approval-process)
+8a. [Cancelling and Rescheduling a Booking](#8a-cancelling-and-rescheduling-a-booking)
 9. [Inspection Forms](#9-inspection-forms)
 10. [Daily Manager Checklist](#10-daily-manager-checklist)
 11. [What Managers Do Not Need to Do](#11-what-managers-do-not-need-to-do)
@@ -195,6 +196,8 @@ not a routing decision.
 | **24-hour rental summary** | Manager (email + text) | About a day before the scheduled pickup, once the customer's reminder was actually delivered | Customer, vehicle, location, date/time, whether the lease is signed — does **not** include the pre-trip inspection link, since the blank form is only ever sent to the customer | Review and prepare the vehicle |
 | **Post-trip inspection notice** | Manager (email) | About an hour after the customer completes the pre-trip inspection form, once the post-trip customer message was sent | Customer, vehicle, location, date, and the post-trip inspection link | Review; follow up if the form isn't submitted within a day |
 | **Inspection timing review notice** ("Review recommended: inspection timing for...") | Manager (email) | Only if both inspection forms for a booking were submitted unusually close together (see [Section 9](#9-inspection-forms)) | Customer, booking ID, vehicle, location, scheduled start/end, both inspection times, and how far apart they were | **Recommended — review both inspection responses and contact the customer if something looks off** |
+| **Cancellation notice** ("Cancelled: {name} ({location})") | Manager (email + text) | When a booking is cancelled — automatically (calendar event deleted) or manually (column AA) | Customer name, vehicle, location, date/time, contact info | Review only |
+| **Reschedule notice** ("Rescheduled: {name}") | Manager (email + text) | When a booking's calendar event time changes by more than about a minute | Customer name, old and new date/time, contact info | Review only |
 
 A note on the approval escalation: it is the one manager-related message that does **not** go to
 a location manager — it goes to the system administrator, because at that point the system has
@@ -225,7 +228,7 @@ a customer asks "did I miss something?"
 
 ## 7. The Bookings Sheet Explained
 
-The Bookings sheet has one row per booking and columns A through Z. This table documents the
+The Bookings sheet has one row per booking and columns A through AC. This table documents the
 exact current columns, in order.
 
 | Col | Header | Who/what updates it | What it means | Should a manager edit it? |
@@ -256,11 +259,17 @@ exact current columns, in order.
 | X | Pre-Inspection Form Completed | System, when the customer actually submits the pre-trip inspection form | `Yes` followed by the date and time it was submitted (e.g. `Yes 8/2/2026 9:15 AM`) once the pre-trip inspection form has been submitted. This timestamp is also what the system uses to time the post-trip message (see [Section 9](#9-inspection-forms)). | No — see [Section 9](#9-inspection-forms) |
 | Y | Post-Inspection Form Completed | System, when the customer actually submits the post-trip inspection form | `Yes` followed by the date and time it was submitted (e.g. `Yes 8/2/2026 4:08 PM`) once the post-trip inspection form has been submitted. | No — see [Section 9](#9-inspection-forms) |
 | Z | Suspicious Timing Warning Sent | System, if the two inspection forms were submitted unusually close together | `Yes` once you have been sent the inspection timing review notice for this booking (see [Section 5](#5-manager-email-and-notification-guide)). Blank means either the two forms haven't both been submitted yet, or the timing wasn't unusual. | No |
+| AA | Cancelled | System (automatic), **or you, manually** | Marks this booking cancelled. The system fills this in automatically with a timestamp if the calendar event is deleted. You can also cancel a booking yourself by typing anything into this cell — see [Section 8a](#8a-cancelling-and-rescheduling-a-booking). | **Yes — this is the field you use to cancel a booking by hand.** |
+| AB | Cancel Notified | System | `Yes` once the one-time cancellation email/text has actually been delivered to the customer, so it's never sent twice. | No |
+| AC | Rescheduled At | System, when the calendar event's time is edited | A timestamp showing when this booking was last rescheduled. Only the most recent reschedule is kept — not a history of every change. | No |
 
-**In every column except P, X, and Y, "blank" means "hasn't happened yet" and "Yes" means "done."
-There is no other accepted value in these Yes/blank columns. Columns X and Y are the two
+**In every column except P, X, Y, and AA, "blank" means "hasn't happened yet" and "Yes" means
+"done." There is no other accepted value in these Yes/blank columns. Columns X and Y are two
 exceptions: instead of a bare `Yes`, they hold `Yes` plus the exact date and time the form was
-submitted, in the same cell — blank still means "not done."**
+submitted, in the same cell — blank still means "not done." Column AA is the other exception:
+blank means "not cancelled," but any non-blank value cancels the booking — it does not need to say
+`Yes` specifically (the system itself writes a timestamp; if you're cancelling by hand, typing
+anything at all is enough).**
 
 ---
 
@@ -350,6 +359,66 @@ If you selected the wrong value in Rental Approved, simply change it to the corr
 - **If the customer has already received their approval email before you realize the decision was
   wrong, the system will not automatically "unsend" it.** Contact the customer directly, and
   contact the system administrator if you're unsure how to correct the record.
+
+---
+
+## 8a. Cancelling and Rescheduling a Booking
+
+The system now handles cancellations and reschedules for you, in two ways: automatically, when
+you edit the calendar, and manually, when you cancel a booking directly in the sheet.
+
+### Cancelling a booking
+
+**The easiest way — delete the calendar event.** If a customer cancels, delete their event from
+the Google Calendar as you normally would. Within about 5 minutes, the system notices the event is
+gone and:
+- Marks column AA (Cancelled) with a timestamp
+- Sends the customer a cancellation email and text
+- Sends you a cancellation notice
+- Stops all further automatic messages for that booking (no more approval reminders, no lease, no
+  pickup or return reminders)
+
+**To cancel directly in the sheet instead** (for example, if you want the booking marked
+cancelled right away without waiting on the calendar sync, or the calendar event doesn't exist for
+some reason): type anything into column AA (Cancelled) for that row — it doesn't need to be a
+specific word, just something non-blank. On the next automatic check (~5 minutes), the system
+sends the same cancellation notices as above and stops further processing on that row, exactly as
+if it had detected the calendar deletion itself.
+
+**What still happens after a cancellation:** anything that had already genuinely occurred stays on
+the record — a deposit that was already paid, an intake form that was already submitted, a lease
+that was already signed, or an inspection that was already submitted are all still recorded. Only
+*new* customer messages and *new* lease sends stop.
+
+### Rescheduling a booking
+
+**Just edit the event's date/time on the calendar** — there is no separate "reschedule" step.
+Within about 5 minutes, the system notices the Start Time changed (by more than about a minute —
+small clock adjustments are ignored) and:
+- Updates the booking's Start/End Time in the sheet to match
+- Re-arms the 24-hour and post-trip reminders so they fire again for the new date
+- Sends the customer a reschedule email and text
+- Sends you a reschedule notice
+
+**Deposit, lease, and approval status are untouched by a reschedule** — a reschedule only moves
+the pickup/return time, it does not undo anything that already happened.
+
+**If the pre-trip inspection was already completed** before you reschedule, that inspection is
+cleared along with the reminders — the inspection cycle restarts for the new date, since the
+vehicle's condition should be re-verified closer to the actual new pickup time.
+
+**If the post-trip inspection was already completed** (meaning the customer already picked up and
+returned the vehicle under the old date), the system will **not** automatically treat a further
+calendar edit as a reschedule — the booking is left alone and the system administrator is alerted
+instead, since at that point a "reschedule" likely means something more unusual is going on (for
+example, the calendar event being reused for a different booking) that shouldn't be handled
+automatically.
+
+### A note on customer-initiated changes
+
+Today, customers do not reschedule or cancel themselves through the booking page — they contact
+you (by replying to an email or texting), and you make the calendar change on their behalf. The
+system then picks it up automatically, exactly as described above.
 
 ---
 
@@ -446,6 +515,7 @@ rather than fix by hand.
 ### End of day
 - [ ] Scan the sheet for any bookings with unusual gaps (e.g. approved but not signed for several
       days, or reminders that don't seem to be resolving)
+- [ ] Scan for any newly cancelled bookings (column AA) and confirm they match your own records
 - [ ] Escalate anything that looks stuck — see [Section 14](#14-when-to-contact-the-system-administrator)
 
 ---
@@ -551,7 +621,7 @@ For each issue: check the listed items, avoid the listed edits, and escalate whe
 
 **Manager email has the wrong location greeting**
 - The greeting (e.g. "Hi Bainbridge Manager,") is generated from the booking's Location column
-  (S). If the greeting looks wrong, the booking's location may have been set incorrectly at
+  (T). If the greeting looks wrong, the booking's location may have been set incorrectly at
   creation time.
 - Do not: assume the email went to the wrong inbox — the greeting does not control delivery.
 - Escalate if: the location genuinely appears wrong for that booking.
@@ -589,10 +659,29 @@ For each issue: check the listed items, avoid the listed edits, and escalate whe
 - If it's column P, simply set it to the correct value — this is safe to correct yourself.
 
 **Customer cancels or changes the rental**
-- There is currently no built-in cancellation or rescheduling feature in this system. Handle
-  cancellations and changes through your normal company process, and treat the sheet as a record
-  to be manually annotated or escalated for correction rather than a place with a built-in
-  "cancel" button.
+- See [Section 8a](#8a-cancelling-and-rescheduling-a-booking). Delete the calendar event to cancel,
+  or edit its time to reschedule — the system detects either change automatically within about 5
+  minutes and handles the notices and downstream state for you. You can also cancel a booking
+  directly by typing anything into column AA.
+
+**I cancelled a booking (or the calendar shows it as gone) but the customer/manager notice never
+arrived**
+- Check: has it been at least 5–10 minutes since the calendar event was deleted or column AA was
+  filled in?
+- Check: column AA — is it filled in? If not, the system hasn't detected the cancellation yet.
+- Check: column AB (Cancel Notified) — if AA is filled in but AB is still blank, the notice failed
+  to send (e.g. a temporary email/text outage) and will be retried automatically on the next check.
+- Do not: manually mark AB as `Yes` — this would permanently suppress the real notice.
+- Escalate if: AA has been filled in for a while and AB is still blank.
+
+**I rescheduled a booking but the sheet still shows the old date/time**
+- Check: has it been at least 5–10 minutes since you edited the calendar event's time?
+- Check: did the time actually change by more than about a minute? Very small adjustments are
+  intentionally ignored as clock jitter, not treated as a real reschedule.
+- Check: is the booking already marked Cancelled (column AA)? A cancelled booking is never
+  reschedule-detected.
+- Escalate if: none of the above explains it and the sheet still shows the old time after a
+  reasonable wait.
 
 ---
 
@@ -603,6 +692,7 @@ For each issue: check the listed items, avoid the listed edits, and escalate whe
 | Field | Notes |
 |---|---|
 | **Column P — Rental Approved** | This is the field you are expected to set, using exactly one of the three accepted values from [Section 8](#8-manager-approval-process). |
+| **Column AA — Cancelled** | Type anything into this cell to cancel a booking by hand — see [Section 8a](#8a-cancelling-and-rescheduling-a-booking). Any non-blank value works; it does not need to be `Yes`. |
 
 ### System-managed fields — do not edit
 
@@ -617,6 +707,8 @@ For each issue: check the listed items, avoid the listed edits, and escalate whe
 | U (DocuSeal Submission ID) | This is the internal reference number the system uses to match a signing confirmation to the right booking. Changing it can cause a real signature to be matched to the wrong row, or to no row at all. |
 | V, W, X, Y (approval/intake/inspection completion) | These record that the customer actually completed a specific step. Marking one `Yes` by hand tells the system (and anyone reading the sheet) something happened that may not have — see [Section 9](#9-inspection-forms) for why this matters especially for the inspection columns. |
 | Z (Suspicious Timing Warning Sent) | Records that you've already received the one-time inspection timing review notice for this booking. Marking it `Yes` by hand would suppress that notice even if it hasn't actually been sent. |
+| AB (Cancel Notified) | Records that the one-time cancellation notice has actually been delivered. Marking it `Yes` by hand before it has actually sent would permanently suppress the real notice. |
+| AC (Rescheduled At) | Records when a booking was last rescheduled. Set automatically by the system when it detects a real calendar time change — not something to set by hand. |
 
 **Rule of thumb:** if a column records something the *customer* did (submitted a form, paid, signed) or something the *system* did (sent a message), leave it alone. If it records something *you* decide, it's yours to set.
 
@@ -741,6 +833,26 @@ routinely editing the Location column yourself.
 The system administrator/developer, not the manager. You should never need to deploy, push, or
 otherwise change any code to use this system.
 
+**How do I cancel a booking?**
+Delete the calendar event, or type anything into column AA (Cancelled) for that row. Either way,
+the system picks it up within about 5 minutes and sends the cancellation notices and stops further
+processing for that booking. See [Section 8a](#8a-cancelling-and-rescheduling-a-booking).
+
+**How do I reschedule a booking?**
+Just edit the event's date/time on the calendar — there's no separate reschedule step. See
+[Section 8a](#8a-cancelling-and-rescheduling-a-booking).
+
+**If I cancel or reschedule, does it affect the deposit, lease, or approval already on file?**
+No. Cancelling stops future messages and processing but does not erase anything that already
+happened (deposit paid, lease signed, forms submitted). Rescheduling only moves the pickup/return
+time — deposit, lease, and approval status are untouched, except that if the pre-trip inspection
+was already completed, it's cleared so it can be redone for the new date.
+
+**Does every location's manager sign leases with the same address?**
+No — each location has its own configured signer for DocuSeal, separate from the address that
+sends your location's customer emails/texts. You don't need to do anything differently as a
+result; this is configuration the system administrator manages.
+
 ---
 
 ## 17. Current Rollout Status
@@ -771,6 +883,10 @@ The following are implemented but still awaiting final operational validation:
 - The manager post-trip greeting and notice
 - Post-trip inspection completion tracking with the actual submission time (column Y)
 - The inspection timing review notice actually firing when two inspections are unusually close together (column Z)
+- Automatic cancellation detection (deleting a calendar event) and manual cancellation (column AA)
+- Rescheduling (editing a calendar event's time), including re-arming the inspection cycle when
+  the pre-trip inspection was already completed
+- Per-location DocuSeal manager signer selection
 
 If you notice any of the "still awaiting validation" items behaving unexpectedly, that is
 valuable information — please report it to the system administrator rather than assuming it's a

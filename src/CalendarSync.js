@@ -22,11 +22,57 @@ function syncCalendarBookings() {
       return;
     }
 
-    const events = calendar.getEvents(now, future);
+    // Calendar read safety: a thrown exception here means the read itself
+    // failed (bad permissions, transient API error, etc.) -- distinguish
+    // that from a successful read that legitimately returns zero events
+    // (e.g. every future booking at this location was just cancelled). A
+    // failed read must never be treated as "zero bookings" -- see
+    // runCancellationDetectionForLocation_() in CancelReschedule.js, which
+    // relies on this distinction already having been made before it runs.
+    let events;
+    try {
+      events = calendar.getEvents(now, future);
+    } catch (e) {
+      Logger.log('syncCalendarBookings: calendar read failed for ' + calCfg.propKey + ' (' +
+                 calCfg.location + '): ' + e);
+      alertAdmin('syncCalendarBookings calendar read failed',
+        'Location: ' + calCfg.location + ' (' + calCfg.propKey + ')\n' +
+        'New-booking sync, reschedule detection, and cancellation detection were all skipped for ' +
+        'this location this cycle. Error: ' + e.toString());
+      return; // continue safely with the remaining locations
+    }
+
+    // Location-scoped Event ID -> row index lookup, built fresh each cycle
+    // from a snapshot taken before any of this cycle's writes, used below to
+    // detect reschedules on rows already synced for this location before
+    // falling through to the new-booking append logic.
+    const sheetDataForLocation = sheet.getDataRange().getValues();
+    const rowByEventId = {};
+    for (let r = 1; r < sheetDataForLocation.length; r++) {
+      if (sheetDataForLocation[r][19] === calCfg.location && sheetDataForLocation[r][0]) { // T: Location, A: Event ID
+        rowByEventId[sheetDataForLocation[r][0]] = r;
+      }
+    }
+    const cancelRescheduleLocCfg = getLocationConfig(calCfg.location);
 
     events.forEach(function(event) {
       try {
         const eventId = event.getId();
+
+        // Already synced for this location? Check for a reschedule instead
+        // of the new-booking append logic below.
+        if (rowByEventId.hasOwnProperty(eventId)) {
+          const ri  = rowByEventId[eventId];
+          const row = sheetDataForLocation[ri];
+          const newStart = event.getStartTime();
+          const newEnd   = event.getEndTime();
+          const oldStart = new Date(row[4]); // E: Start Time
+          if (isRescheduleDetected(oldStart.getTime(), newStart.getTime())) {
+            handleReschedule_(sheet, ri, row, newStart, newEnd, cancelRescheduleLocCfg);
+          }
+          return; // never re-add an already-synced event as new
+        }
+
         if (existingIds.includes(eventId)) return;
 
         const desc = event.getDescription() || '';
@@ -131,5 +177,16 @@ function syncCalendarBookings() {
         alertAdmin('syncCalendarBookings error', e.toString());
       }
     });
+
+    // Cancellation detection: after processing all of this location's
+    // currently-fetched events, check whether any of this location's own
+    // future-dated rows are no longer represented on the calendar. Strictly
+    // scoped to calCfg.location (see runCancellationDetectionForLocation_()
+    // in CancelReschedule.js) so a busy or quiet calendar at one location
+    // can never affect another location's rows. events is guaranteed to be
+    // the result of a successful read at this point -- a failed read
+    // already returned out of this forEach iteration above.
+    runCancellationDetectionForLocation_(sheet, calCfg, events, now, future);
+
   });
 }

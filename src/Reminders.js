@@ -27,6 +27,7 @@ function processReminders() {
       const preTripCompletionRaw  = row[23]; // X: Pre-Inspection Form Completed
       const postTripCompletionRaw = row[24]; // Y: Post-Inspection Form Completed
       const timingWarningSent     = row[25]; // Z: Suspicious Timing Warning Sent
+      const cancelled             = row[26]; // AA: Cancelled
 
       if (isNaN(startTime)) continue;
 
@@ -55,7 +56,7 @@ function processReminders() {
         // missing either one is skipped silently here and re-evaluated on
         // every later run for as long as it stays in the window.
         const depositPaid = row[6];
-        if (isPreTripReminderEligible(hoursUntilStart, sent24hr, approved, depositPaid)) {
+        if (!cancelled && isPreTripReminderEligible(hoursUntilStart, sent24hr, approved, depositPaid)) {
           const preUrl = buildInspectUrl(name, email || '', rentalDate, 'pre');
           sendPreTripReminder_(sheet, i, name, email, phone, locCfg, dateStr, vehicleType, location, preUrl, row[14]);
         }
@@ -70,7 +71,7 @@ function processReminders() {
         const hoursSincePreTripCompleted = preTripCompletedAt
           ? (now - preTripCompletedAt.getTime()) / (1000 * 60 * 60)
           : null;
-        if (isPostTripReminderEligible(hoursSincePreTripCompleted, sentPost)) {
+        if (!cancelled && isPostTripReminderEligible(hoursSincePreTripCompleted, sentPost)) {
           const postUrl = buildInspectUrl(name, email || '', rentalDate, 'post');
           sendPostTripReminder_(sheet, i, name, email, phone, locCfg, dateStr, vehicleType, location, postUrl);
         }
