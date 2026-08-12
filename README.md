@@ -425,9 +425,9 @@ system of record.
 │       ▼                                             │
 │  onFormSubmit(e) dispatcher (Forms.js)              │
 │  routes by e.range.getSheet().getName():            │
-│  ├─ "Rental Intake Form" →                          │
+│  ├─ "Intake Form" →                                 │
 │  │    processIntakeFormSubmission_()                │
-│  └─ "Rental Vehicle Condition Inspection Form" →    │
+│  └─ "Vehicle Condition Inspection Form" →           │
 │       processInspectionFormSubmission_()            │
 │       │                                             │
 │       ▼                                             │
@@ -1086,8 +1086,8 @@ stores or forwards the rest of the response.
 
 **Both forms write into tabs of the same spreadsheet as Bookings** (identified by the `SHEET_ID`
 Script Property) — there is no separate spreadsheet for either, and no Script Property identifying
-one. Their response tabs are named exactly `Rental Intake Form` and `Rental Vehicle Condition
-Inspection Form`. Because a spreadsheet-bound form-submit trigger fires for *every* form linked to
+one. Their response tabs are named exactly `Intake Form` and `Vehicle Condition Inspection Form`.
+Because a spreadsheet-bound form-submit trigger fires for *every* form linked to
 a spreadsheet, `setupTriggers()` installs exactly **one** such trigger — `onFormSubmit` — alongside
 the four time-based engines (five triggers total). `onFormSubmit(e)` in `src/Forms.js` is a
 dispatcher: it reads `e.range.getSheet().getName()` and routes the event to

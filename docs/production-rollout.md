@@ -64,7 +64,7 @@ These are business/operational decisions, not code changes — resolve them befo
    tabs. If this is undesirable, create fresh copies of both forms for production and update
    `INTAKE_FORM_BASE`/`INSPECT_FORM_BASE` and all `*_ENTRY_*` properties accordingly — and confirm
    the response tab names still match `INTAKE_RESPONSE_SHEET_NAME`/`INSPECT_RESPONSE_SHEET_NAME`
-   in `src/Forms.js` (`'Rental Intake Form'` / `'Rental Vehicle Condition Inspection Form'`), or
+   in `src/Forms.js` (`'Intake Form'` / `'Vehicle Condition Inspection Form'`), or
    update those constants if the production tabs are named differently.
 2. **DocuSeal templates:** confirm production template IDs and role names (`Driver #1`,
    `Driver #2`, `Reliable Storage Manager`) match exactly what `sendLeaseViaDocuSeal` sends. The

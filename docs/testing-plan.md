@@ -92,8 +92,8 @@ together (Test 13), as described in those tests.
 - [ ] Stripe webhook pointing (via Pipedream) to the deployment URL
 - [ ] DocuSeal `lease_signed` webhook pointing (via Pipedream) to the deployment URL
 - [ ] Intake and inspection Google Forms are linked to the same spreadsheet as Bookings, with
-      response tabs named exactly `Rental Intake Form` and
-      `Rental Vehicle Condition Inspection Form`
+      response tabs named exactly `Intake Form` and
+      `Vehicle Condition Inspection Form`
 - [ ] Test email/phone available that won't alarm real customers
 
 ---

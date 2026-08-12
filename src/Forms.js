@@ -178,7 +178,7 @@ const INTAKE_RESPONSE_ADDITIONAL_DRIVER_EMAIL_QUESTION_TITLE = 'Additional Drive
 // other form that might get linked to this spreadsheet later -- isolated
 // here in one constant rather than scattered through the function. Update
 // this if the response tab is ever renamed.
-const INTAKE_RESPONSE_SHEET_NAME = 'Rental Intake Form';
+const INTAKE_RESPONSE_SHEET_NAME = 'Intake Form';
 
 // Pure extraction of the fields processIntakeFormSubmission_() needs from a
 // spreadsheet form-submit event object -- separated out so it can be
@@ -305,7 +305,7 @@ function validateAdditionalDriverSubmission_(hasAdditionalDriver, additionalDriv
 // Exact Google Form question titles and response-sheet tab name for the
 // inspection form, in the same style as the verified INTAKE_RESPONSE_*
 // constants above -- verified live against the sandbox spreadsheet's
-// "Rental Vehicle Condition Inspection Form" response tab. Other headers
+// "Vehicle Condition Inspection Form" response tab. Other headers
 // exist on that tab but are not needed for completion matching. If the live
 // form's questions are ever retitled, these constants are the only place
 // that needs updating -- extractInspectionSubmissionFields() would
@@ -332,7 +332,7 @@ const INSPECT_RESPONSE_TIMESTAMP_QUESTION_TITLE = 'Timestamp';
 // this handler ignores submissions from any other form linked to this
 // spreadsheet -- isolated here in one constant rather than scattered
 // through the function. Update this if the response tab is ever renamed.
-const INSPECT_RESPONSE_SHEET_NAME = 'Rental Vehicle Condition Inspection Form';
+const INSPECT_RESPONSE_SHEET_NAME = 'Vehicle Condition Inspection Form';
 
 // Pure extraction of the fields processInspectionFormSubmission_() needs
 // from a spreadsheet form-submit event object -- mirrors
@@ -437,8 +437,8 @@ function extractInspectionSubmissionFields(e) {
 //
 // The intake form and the inspection form are NOT separate spreadsheets --
 // both write their responses into tabs of the SAME spreadsheet Bookings
-// lives in (identified by the SHEET_ID Script Property): "Rental Intake
-// Form" and "Rental Vehicle Condition Inspection Form" respectively. A
+// lives in (identified by the SHEET_ID Script Property): "Intake
+// Form" and "Vehicle Condition Inspection Form" respectively. A
 // spreadsheet-bound onFormSubmit trigger fires for EVERY form linked to
 // that spreadsheet, so there can only be one such trigger per spreadsheet
 // -- Apps Script does not support installing two. This dispatcher is that

@@ -36,8 +36,8 @@ function setupTriggers() {
 // There is exactly ONE such trigger, for the SAME spreadsheet Bookings
 // already lives in, via getSheet().getParent() (Helpers.js) -- the same
 // SHEET_ID-based lookup every other function in this codebase uses. The
-// intake form ("Rental Intake Form" tab) and the inspection form ("Rental
-// Vehicle Condition Inspection Form" tab) both write into tabs of this same
+// intake form ("Intake Form" tab) and the inspection form ("Vehicle
+// Condition Inspection Form" tab) both write into tabs of this same
 // spreadsheet -- there is no separate inspection response spreadsheet and
 // no Script Property identifying one. A spreadsheet-bound onFormSubmit
 // trigger fires for every form linked to a spreadsheet, so a single trigger

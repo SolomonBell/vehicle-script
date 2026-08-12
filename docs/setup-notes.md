@@ -270,9 +270,9 @@ Forms has already accepted and recorded the submission — there is no earlier p
 which the script could observe it.
 
 > **Why a flag instead of scanning the intake response sheet on every trigger run?** The intake
-> form's responses are linked to the "Rental Intake Form" tab in the same spreadsheet as Bookings
-> (identified by `SHEET_ID`) — as is the inspection form's "Rental Vehicle Condition Inspection
-> Form" tab; there is no separate spreadsheet for either. Re-scanning either tab from
+> form's responses are linked to the "Intake Form" tab in the same spreadsheet as Bookings
+> (identified by `SHEET_ID`) — as is the inspection form's "Vehicle Condition Inspection Form"
+> tab; there is no separate spreadsheet for either. Re-scanning either tab from
 > `checkRentalEligibility` (every 5 min), `sendLeaseToNewBookings` (every 15 min), or the deposit
 > webhook would mean repeatedly reading a sheet that only grows over time and re-solving the same
 > row-matching problem on every run. The single `onFormSubmit` trigger is spreadsheet-bound (see
@@ -466,8 +466,8 @@ through the existing `SHEET_ID` Script Property. **No new Script Property is add
 The intake form and the inspection form are **not** separate spreadsheets. Both write their
 responses into tabs of the one spreadsheet identified by `SHEET_ID` — alongside `Bookings` itself:
 
-- `Rental Intake Form` — the intake form's response tab
-- `Rental Vehicle Condition Inspection Form` — the inspection form's response tab
+- `Intake Form` — the intake form's response tab
+- `Vehicle Condition Inspection Form` — the inspection form's response tab
 
 A spreadsheet-bound `onFormSubmit` trigger fires for **every** form linked to that spreadsheet, not
 just one — Apps Script does not support installing two separate onFormSubmit triggers for the same
@@ -506,10 +506,10 @@ placeholders:
 
 | Constant | Value | Used for |
 |---|---|---|
-| `INTAKE_RESPONSE_SHEET_NAME` | `'Rental Intake Form'` | Routing + ignoring unrelated submissions |
+| `INTAKE_RESPONSE_SHEET_NAME` | `'Intake Form'` | Routing + ignoring unrelated submissions |
 | `INTAKE_RESPONSE_EMAIL_QUESTION_TITLE` | `'Email Address'` | Intake email extraction |
 | `INTAKE_RESPONSE_DATE_QUESTION_TITLE` | `'Rental Date'` | Intake date extraction |
-| `INSPECT_RESPONSE_SHEET_NAME` | `'Rental Vehicle Condition Inspection Form'` | Routing + ignoring unrelated submissions |
+| `INSPECT_RESPONSE_SHEET_NAME` | `'Vehicle Condition Inspection Form'` | Routing + ignoring unrelated submissions |
 | `INSPECT_RESPONSE_EMAIL_QUESTION_TITLE` | `'Email Address'` | Inspection email extraction |
 | `INSPECT_RESPONSE_DATE_QUESTION_TITLE` | `'Rental Date'` | Inspection date extraction |
 | `INSPECT_RESPONSE_TYPE_QUESTION_TITLE` | `'Inspection Type'` | Inspection pre/post classification |

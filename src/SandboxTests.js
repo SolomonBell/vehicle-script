@@ -1744,13 +1744,13 @@ function testFormSubmitDispatcher() {
   processInspectionFormSubmission_ = function() { inspectionCalls++; };
 
   try {
-    // ---- Dispatcher routes Rental Intake Form to intake logic only ----
+    // ---- Dispatcher routes Intake Form to intake logic only ----
     intakeCalls = 0; inspectionCalls = 0;
     onFormSubmit(fakeEvent(INTAKE_RESPONSE_SHEET_NAME));
     check('intake submission calls intake processing exactly once', intakeCalls === 1);
     check('intake submission does not run inspection processing', inspectionCalls === 0);
 
-    // ---- Dispatcher routes Rental Vehicle Condition Inspection Form to inspection logic only ----
+    // ---- Dispatcher routes Vehicle Condition Inspection Form to inspection logic only ----
     intakeCalls = 0; inspectionCalls = 0;
     onFormSubmit(fakeEvent(INSPECT_RESPONSE_SHEET_NAME));
     check('inspection submission calls inspection processing exactly once', inspectionCalls === 1);
@@ -2737,13 +2737,13 @@ function testTriggerRegistrationIsWellFormed() {
   check('INTAKE_RESPONSE_SHEET_NAME is a non-empty string',
         typeof INTAKE_RESPONSE_SHEET_NAME === 'string' && INTAKE_RESPONSE_SHEET_NAME.length > 0);
   check('INTAKE_RESPONSE_SHEET_NAME is the exact verified tab name',
-        INTAKE_RESPONSE_SHEET_NAME === 'Rental Intake Form');
+        INTAKE_RESPONSE_SHEET_NAME === 'Intake Form');
 
   check('processInspectionFormSubmission_ is defined', typeof processInspectionFormSubmission_ === 'function');
   check('INSPECT_RESPONSE_SHEET_NAME is a non-empty string',
         typeof INSPECT_RESPONSE_SHEET_NAME === 'string' && INSPECT_RESPONSE_SHEET_NAME.length > 0);
   check('INSPECT_RESPONSE_SHEET_NAME is the exact verified tab name',
-        INSPECT_RESPONSE_SHEET_NAME === 'Rental Vehicle Condition Inspection Form');
+        INSPECT_RESPONSE_SHEET_NAME === 'Vehicle Condition Inspection Form');
   check('INSPECT_RESPONSE_EMAIL_QUESTION_TITLE is the exact verified header',
         INSPECT_RESPONSE_EMAIL_QUESTION_TITLE === 'Email Address');
   check('INSPECT_RESPONSE_DATE_QUESTION_TITLE is the exact verified header',

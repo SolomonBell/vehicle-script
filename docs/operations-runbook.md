@@ -152,7 +152,7 @@ If you suspect this happened, check both rows' state manually and correct by han
    found` — both alert admin with the submitter's email and inspection type for manual follow-up.
 4. If none of the above appear at all, confirm the `onFormSubmit` trigger is actually installed
    (Apps Script editor → Triggers) and that the inspection form's response tab is named exactly
-   `Rental Vehicle Condition Inspection Form`.
+   `Vehicle Condition Inspection Form`.
 
 ### "The inspection timing review notice didn't fire (or fired unexpectedly)"
 
