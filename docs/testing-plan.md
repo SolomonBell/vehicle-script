@@ -5,18 +5,19 @@
 > are resolved from `CALENDAR_CONFIGS` (`Config.js`), never hardcoded per site. Any location can
 > be used for these tests; examples below use Bainbridge for concreteness.
 
-This document is the acceptance-test checklist for the sandbox environment and the authoritative
+This document is the acceptance-test checklist for the production environment and the authoritative
 record of what has and has not been confirmed working end-to-end. It complements the manual test
 functions in `src/SandboxTests.js` (config/connectivity/pure-function checks — see
 [README.md §15 Testing](../README.md#15-testing)), which verify configuration and logic without
 exercising the full live flow. **Do not mark an item below as passed without actually observing
-the described result in the sandbox.**
+the described result.** (The same checklist applies equally to the sandbox environment when testing
+a future change before it reaches production.)
 
 ---
 
 ## Current validation status
 
-**Validated** — confirmed working end-to-end in the sandbox environment:
+**Validated** — confirmed working end-to-end:
 
 | Area | Covered by |
 |---|---|
@@ -32,7 +33,7 @@ the described result in the sandbox.**
 | Trigger installation (`setupTriggers()` creates all five triggers) | Prerequisites |
 
 **Still awaiting final operational validation** — implemented and reviewed in code, but not yet
-confirmed by an actual sandbox run reaching these conditions:
+confirmed by an actual observed run reaching these conditions:
 
 | Area | Covered by |
 |---|---|
@@ -52,9 +53,11 @@ confirmed by an actual sandbox run reaching these conditions:
 | Reschedule exceptional path when the post-trip inspection is already complete (Y set) | Test 16 |
 | Per-location DocuSeal manager co-signer selection (all four locations) | Test 17 |
 
-**Confirmed at the sandbox configuration/unit-test level:** `runAllSandboxConfigurationTests()`
+**Confirmed at the configuration/unit-test level:** `runAllSandboxConfigurationTests()`
 (49 tests, including every cancellation/reschedule and per-location DocuSeal manager-signer test)
-has been run in the real Apps Script sandbox environment and completed with:
+has been run in the real Apps Script sandbox environment during development, and again directly in
+the production Apps Script project after deployment, passing 49/49 both times, most recently
+completing with:
 
 ```
 ===== Running Sandbox Configuration Tests (49 tests) =====
@@ -62,6 +65,8 @@ has been run in the real Apps Script sandbox environment and completed with:
 ===== All Sandbox Configuration Tests Completed Successfully =====
 ```
 
+(The function keeps its historical `Sandbox` name — it is the same configuration/logic regression
+suite used to validate both environments, not an indicator of which project it was run against.)
 This confirms the underlying logic — column updates, location scoping, delivery gating,
 idempotency, per-location signer selection, cancelled-row guards — is implemented and wired
 correctly in the real Apps Script runtime, not just in the hand-built Node.js shim used during
@@ -69,8 +74,9 @@ development. **It does not, by itself, satisfy any item in the table above or in
 below** — those require an actual Calendar event edit/delete, an actual DocuSeal signing flow, or
 actual elapsed time, none of which a configuration/unit test exercises.
 
-- [x] Run `runAllSandboxConfigurationTests()` from the actual Apps Script editor in the sandbox
-      project and confirm all tests pass — **done; 49/49 passed**
+- [x] Run `runAllSandboxConfigurationTests()` from the actual Apps Script editor and confirm all
+      tests pass — **done; 49/49 passed in the sandbox project during development and again in the
+      production project after deployment**
 
 Do not report any item in the second table as "passed" until it has actually been exercised —
 either by waiting for a real booking to reach the 24-hour window and, separately, a real hour to

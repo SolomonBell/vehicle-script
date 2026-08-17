@@ -9,11 +9,11 @@ guide for someone operating the system rather than developing it.
 Apps Script execution logs and source-file names. Location managers should use
 [docs/manager-guide.md](manager-guide.md), which covers the same ground in plain language.
 
-**Environment:** as of this writing, only a sandbox deployment exists — see
+**Environment:** the production deployment is live — see
 [README.md "Repository status"](../README.md#repository-status) and
-[docs/production-rollout.md](production-rollout.md). Everything below applies equally to sandbox
-and production; substitute the correct Apps Script project, Sheet, and deployment URL for
-whichever environment you are operating.
+[docs/production-rollout.md](production-rollout.md). A sandbox deployment also exists for testing
+future changes. Everything below applies equally to sandbox and production; substitute the correct
+Apps Script project, Sheet, and deployment URL for whichever environment you are operating.
 
 ---
 

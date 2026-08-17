@@ -49,13 +49,14 @@ post-rental inspection follow-up.
 
 ### Repository status
 
-**Environment:** Sandbox. The code in `src/` has been deployed and exercised in a sandbox Apps
-Script project bound to a sandbox Google Sheet, sandbox Google Forms, and test-mode Stripe/DocuSeal
-credentials. It has **not** been cut over to a production Apps Script project or production Script
-Properties. See [docs/production-rollout.md](docs/production-rollout.md) for the migration plan
-and [docs/testing-plan.md](docs/testing-plan.md) for the acceptance-test checklist.
+**Environment:** Production. The code in `src/` is deployed to the production Apps Script project,
+bound to the production Google Sheet (Bookings, columns A–AC), production Google Forms, and
+live-mode Stripe/DocuSeal/Twilio/SendGrid credentials. A separate sandbox environment (see
+[§14](#14-sandbox-environment)) remains available for testing future changes before they reach
+production. See [docs/production-rollout.md](docs/production-rollout.md) for the migration record
+and [docs/testing-plan.md](docs/testing-plan.md) for the current acceptance-test status.
 
-**Validated in the sandbox environment** (confirmed working end-to-end):
+**Validated end-to-end** (confirmed against real Calendar, Stripe, DocuSeal, SendGrid, and Twilio):
 - Calendar booking sync (`syncCalendarBookings`)
 - Welcome/intake message delivery
 - Stripe payment/authorization flow (Checkout Session → webhook → deposit marked paid)
@@ -70,15 +71,19 @@ and [docs/testing-plan.md](docs/testing-plan.md) for the acceptance-test checkli
 - Intake completion tracking (`onFormSubmit` → column W)
 - Trigger installation (`setupTriggers()` creates all five triggers correctly)
 
-**Confirmed at the sandbox configuration/unit-test level:** the full `runAllSandboxConfigurationTests()`
+**Confirmed at the configuration/unit-test level:** the full `runAllSandboxConfigurationTests()`
 suite (49 tests, including every cancellation/reschedule and per-location DocuSeal manager-signer
-test) has been run in the real Apps Script sandbox environment and passed completely. This confirms
-the underlying logic is implemented and wired correctly — it does **not** by itself confirm the live
-end-to-end behavior in the list below, which still requires a real Calendar edit/delete, a real
-DocuSeal signing flow, or a real elapsed-time trigger to observe.
+test) has been run in the real Apps Script sandbox environment during development, and again
+directly in the production Apps Script project after deployment, passing 49/49 both times. (The
+function keeps its historical `Sandbox` name because it is the same configuration/logic regression
+suite used to validate both environments — the name reflects its origin, not which project it was
+last run against.) This confirms the underlying logic is implemented and wired correctly — it does
+**not** by itself confirm the live, real-elapsed-time end-to-end behavior in the list below, which
+still requires an observed Calendar edit/delete, an observed DocuSeal signing flow, or an observed
+elapsed-time trigger firing.
 
 **Still awaiting final operational validation** (implemented and believed correct from code
-review and the sandbox test suite, but not yet confirmed by a live end-to-end sandbox run):
+review and the automated test suite, but not yet confirmed by an observed live end-to-end run):
 - Automatic 24-hour reminder firing on schedule
 - Manager 24-hour greeting/summary (including the new location-specific greeting)
 - Pre-trip inspection completion update (column X, with actual form-submission timestamp)

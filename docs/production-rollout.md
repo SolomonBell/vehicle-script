@@ -1,10 +1,14 @@
 # Production Rollout Plan — Reliable Storage Vehicle Rental Automation
 
-**Status: not yet started.** This repository is currently validated only in a sandbox
-environment — see [README.md "Repository status"](../README.md#repository-status) and
-[docs/testing-plan.md](testing-plan.md) for exactly what has and has not been confirmed. This
-document describes the plan for moving from sandbox validation to a live production deployment.
-It does not describe work that has already happened.
+**Status: deployment complete.** The cutover described below has been performed — the system runs
+in a production Apps Script project today. See [README.md "Repository
+status"](../README.md#repository-status) and [docs/testing-plan.md](testing-plan.md) for exactly
+what has and has not been individually confirmed working end-to-end since cutover. This document
+is retained as the record of the migration steps that were followed, and as the reference procedure
+for any future re-deployment (a disaster-recovery rebuild, or standing up a new environment) — it
+is no longer a forward-looking plan, and its checklists below should not be read as still-open
+work items unless a specific item is explicitly called out as unconfirmed elsewhere in current
+documentation.
 
 ---
 
@@ -30,6 +34,13 @@ itself. Every credential, ID, and URL is environment-specific.
 ---
 
 ## 2. Pre-rollout checklist
+
+> This checklist reflects the gate that was used before the cutover already performed (see the
+> status note above). It is retained as-is — unchecked items here are not necessarily still open;
+> [docs/testing-plan.md](testing-plan.md) is the current, actively-maintained source of truth for
+> exactly which behaviors have and have not been individually observed working end-to-end in
+> production. Treat this list as historical evidence of the gate applied at cutover time, not as a
+> live task list.
 
 All of the following must be true before starting the cutover in §4:
 

@@ -29,7 +29,8 @@ docs/manager-guide.md       ← nontechnical guide for location managers
 docs/setup-notes.md         ← Script Properties, trigger setup, sheet columns
 docs/testing-plan.md        ← acceptance-test checklist + current validation status
 docs/operations-runbook.md  ← day-to-day operational quick-reference
-docs/production-rollout.md  ← sandbox-to-production migration plan (not yet executed)
+docs/production-rollout.md  ← record of the sandbox-to-production migration (already executed) and
+                                the reference procedure for any future re-deployment
 docs/architecture-proposal.md    ← historical — multi-site proposal; superseded by the
                                     CALENDAR_CONFIGS-based design actually implemented
 docs/production-diff-summary.md  ← historical — v7 → v8 diff analysis, questions resolved
@@ -91,9 +92,12 @@ version) is a separate step needed only when `doPost`/`doGet` (`Webhooks.js`) mu
 deployed web app serves whichever version was active at its last deployment, not the latest saved
 source automatically.
 
-**Environment:** this repository is currently validated only in a sandbox environment — see
-README.md "Repository status" and docs/production-rollout.md before assuming any instruction here
-describes a production deployment.
+**Environment:** the code in this repository is deployed to production — see README.md "Repository
+status" for exactly which behaviors have been individually confirmed working end-to-end in
+production versus which are implemented but still awaiting that observation. A separate sandbox
+environment (README.md §14) remains available for testing future changes before they reach
+production; do not assume an instruction elsewhere in this file describes only that sandbox unless
+it says so.
 
 ## Branch strategy
 

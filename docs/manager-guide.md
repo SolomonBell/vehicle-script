@@ -559,7 +559,7 @@ For each issue: check the listed items, avoid the listed edits, and escalate whe
 **Intake form was submitted but column W is still blank**
 - See [Section 9](#9-inspection-forms) for the same troubleshooting approach — it applies here too
   (double-check the row, confirm the customer actually submitted, allow a short delay).
-- Do not: manually mark V as `Yes`.
+- Do not: manually mark W as `Yes`.
 - Escalate if: the submission is confirmed but the column remains blank after a reasonable wait.
 
 **Deposit was completed but column G is still blank**
@@ -653,10 +653,12 @@ For each issue: check the listed items, avoid the listed edits, and escalate whe
 - Escalate if: a booking consistently shows the wrong vehicle type or location for its calendar.
 
 **Manager accidentally edited the wrong field**
-- If it's a system-managed column (anything other than O), note what it was changed to (if you
-  remember the original value) and contact the system administrator — some system-managed values
-  can be hard to reconstruct correctly by guessing.
+- If it's a system-managed column (anything other than P or AA — see [Section 13](#13-safe-editing-rules)),
+  note what it was changed to (if you remember the original value) and contact the system
+  administrator — some system-managed values can be hard to reconstruct correctly by guessing.
 - If it's column P, simply set it to the correct value — this is safe to correct yourself.
+- If it's column AA and you did not actually intend to cancel the booking, clear it back to blank
+  yourself — see [Section 8a](#8a-cancelling-and-rescheduling-a-booking).
 
 **Customer cancels or changes the rental**
 - See [Section 8a](#8a-cancelling-and-rescheduling-a-booking). Delete the calendar event to cancel,
@@ -857,9 +859,11 @@ differently as a result; this is configuration the system administrator manages.
 
 ## 17. Current Rollout Status
 
-> **This section describes the system's current testing status. It is expected to change as
-> validation continues, and should be updated once the items below are confirmed — this is not
-> a permanent part of a manager's ongoing responsibilities.**
+> **The system is live in production.** This section tracks which specific behaviors have been
+> personally observed working end-to-end, separately from the code simply being deployed and
+> running. It is expected to change as the remaining items below are individually observed, and
+> should be updated as that happens — this is not a permanent part of a manager's ongoing
+> responsibilities.
 
 As of this writing, the following have been validated end-to-end:
 
