@@ -332,7 +332,7 @@ flowchart TD
     B --> C[Row appended to Bookings sheet\nColumns A-T initialised; U-Y populate later]
     C --> D[Welcome SMS and email sent\nDeposit link + intake form URL]
     C --> E[Manager notified by email and SMS]
-    C --> F[checkRentalEligibility sends\napproval request to manager\nColumns Q and R updated]
+    C --> F[checkRentalEligibility sends\napproval request to the LOCATION manager\nColumns Q and R updated]
 
     F --> G{Manager sets Column P}
     G -->|Denied| STOP([Booking closed])
@@ -1209,7 +1209,7 @@ No value ever belongs in source code.
 | `SHEET_NAME` | Bookings tab name | `Bookings` | No | Yes | `Config.js` |
 | `COMPANY_NAME` | Business name used in customer-facing emails, SMS, and the webhook liveness response | `Reliable Storage` | No | Yes | `Config.js` |
 | `ADMIN_EMAIL` | Escalation address for unanswered approvals and script errors | `admin@example.com` | No | Yes | `Config.js` |
-| `MANAGER_EMAIL` | Site manager — BCC'd on all customer emails, receives booking/approval notices | `manager@example.com` | No | Yes | `Config.js` |
+| `MANAGER_EMAIL` | Global manager/admin — BCC'd on all customer emails, receives new-booking notices. Does **not** receive the approval request/reminder — those go to the booking's own location manager (`EMAIL_<LOCATION>`) instead. | `manager@example.com` | No | Yes | `Config.js` |
 | `MANAGER_PHONE` | Site manager phone in E.164 format | `+12065551234` | No | No | `Config.js` |
 | `FROM_NAME` | Display name for outbound emails | `Reliable Storage` | No | Yes | `Config.js` |
 
@@ -1321,8 +1321,14 @@ intended signer. `sendLeaseViaDocuSeal()` (`DocuSeal.js`) uses `locCfg.email` (f
 message does — no separate configuration path, and no fail-closed check specific to this value
 (it relies on the same required-property validation `EMAIL_<LOCATION>` already has via
 `testLocationSenderConfig()`). There is no `MANAGER_EMAIL_<LOCATION>` or `MANAGER_PHONE_<LOCATION>`
-— manager SMS everywhere else in the system, and the global `CONFIG.MANAGER_EMAIL` used for
-approval requests, reminders, new-booking notices, and the customer-email BCC, are unchanged.
+property, and manager SMS elsewhere in the system is unaffected by this. **The initial approval
+request and approval reminder (`checkRentalEligibility_()`, `Approval.js`) also use `locCfg.email`**
+(the booking's own location manager), not the global `CONFIG.MANAGER_EMAIL` — corrected after a
+production bug sent both to the global address instead of the correct location. The global
+`CONFIG.MANAGER_EMAIL` remains used for new-booking notices and the customer-email BCC; approval
+**escalation** after the reminder cap is reached remains the global `CONFIG.ADMIN_EMAIL`,
+unchanged — intentionally global, since a human has already failed to respond at the location
+level by that point.
 
 ### DocuSeal (e-signature)
 
@@ -1640,9 +1646,14 @@ All HTML emails are sent via the SendGrid v3 `/mail/send` endpoint by `sendEmail
 
 **BCC logic:**
 - Every email addressed to a customer is automatically BCC'd to `CONFIG.MANAGER_EMAIL`.
-- Emails already addressed to `CONFIG.MANAGER_EMAIL` — approval notices, booking notices — are
-  **not** BCC'd (the manager is the primary recipient, no copy needed).
-- Emails addressed to `CONFIG.ADMIN_EMAIL` — error alerts — are **not** BCC'd.
+- Emails already addressed to `CONFIG.MANAGER_EMAIL` — new-booking notices — are **not** BCC'd
+  (the manager is the primary recipient, no copy needed).
+- The approval request and approval reminder pass `suppressManagerBcc = true` explicitly (see
+  §12) — they are addressed to the location manager (`locCfg.email`), not `CONFIG.MANAGER_EMAIL`,
+  so without this the generic BCC logic above would otherwise also silently copy the global
+  manager on a message already correctly addressed to the right person.
+- Emails addressed to `CONFIG.ADMIN_EMAIL` — error alerts, approval escalation — are **not**
+  BCC'd.
 
 ### SMS (Twilio)
 
@@ -1670,15 +1681,23 @@ not block the confirmation email or the DocuSeal lease send.
 
 ### Manager notifications
 
-| Trigger | Channel | Content | Greeting |
-|---|---|---|---|
-| New booking detected | Email + SMS | Customer name, date, location, vehicle, contact info | `Hi {Location} Manager,` |
-| Approval needed | Email only | Customer details; instructions to set column P | `Hi {Location} Manager,` |
-| Approval reminder #n | Email only | Customer details; reminder number | `Hi {Location} Manager,` |
-| Approval escalation | Email only | Sent to `ADMIN_EMAIL` when cap reached | none (addressed to admin, not a location manager) |
-| 24hr before pickup | Email + SMS | Customer name, date, deposit status, lease status — no inspection link (the blank pre-trip form is not sent to the manager) | `Hi {Location} Manager,` |
-| One hour after pre-trip inspection form completed | Email only | Customer name, vehicle, location, date, customer email, post-trip inspection form link | `Hi {Location} Manager,` |
-| Suspicious inspection timing (once per booking, only if triggered) | Email only | Customer name, booking ID, vehicle, location, scheduled start/end, both inspection completion times, elapsed time — no form link, no accusatory language | `Hi {Location} Manager,` |
+| Trigger | Recipient | Channel | Content | Greeting |
+|---|---|---|---|---|
+| New booking detected | Global `CONFIG.MANAGER_EMAIL` / `CONFIG.MANAGER_PHONE` | Email + SMS | Customer name, date, location, vehicle, contact info | `Hi {Location} Manager,` |
+| Approval needed | Location `locCfg.email` (e.g. `EMAIL_POULSBO`) | Email only | Customer details; instructions to set column P | `Hi {Location} Manager,` |
+| Approval reminder #n | Location `locCfg.email` | Email only | Customer details; reminder number | `Hi {Location} Manager,` |
+| Approval escalation | Global `CONFIG.ADMIN_EMAIL` when cap reached | Email only | Notes the reminder cap was reached | none (addressed to admin, not a location manager) |
+| 24hr before pickup | Global `CONFIG.MANAGER_EMAIL` / `CONFIG.MANAGER_PHONE` | Email + SMS | Customer name, date, deposit status, lease status — no inspection link (the blank pre-trip form is not sent to the manager) | `Hi {Location} Manager,` |
+| One hour after pre-trip inspection form completed | Global `CONFIG.MANAGER_EMAIL` | Email only | Customer name, vehicle, location, date, customer email, post-trip inspection form link | `Hi {Location} Manager,` |
+| Suspicious inspection timing (once per booking, only if triggered) | Global `CONFIG.MANAGER_EMAIL` | Email only | Customer name, booking ID, vehicle, location, scheduled start/end, both inspection completion times, elapsed time — no form link, no accusatory language | `Hi {Location} Manager,` |
+
+Only **Approval needed** and **Approval reminder #n** are addressed to the booking's own location
+manager (`locCfg.email`) — every other manager notification in this table still goes to the
+global `CONFIG.MANAGER_EMAIL`/`CONFIG.MANAGER_PHONE`, and escalation goes to the global
+`CONFIG.ADMIN_EMAIL`. This narrower scope reflects a real production fix: the approval request and
+reminder were previously sent to the global address despite already opening with a
+location-specific `Hi {Location} Manager,` greeting — see `Approval.js`'s
+`checkRentalEligibility_()`. No other manager notification changed.
 
 Each of the six manager-addressed templates opens with a greeting using that booking's location
 (column T) — e.g. `Hi Bainbridge Manager,`, `Hi Poulsbo Manager,`, `Hi Port Orchard Manager,`,
@@ -1730,14 +1749,14 @@ itself fails (e.g., SendGrid is unreachable), it logs the failure and returns wi
 ```
 R = 0  (no approval email sent yet)
      │
-     ├── Send initial approval email to MANAGER_EMAIL
+     ├── Send initial approval email to the LOCATION manager (locCfg.email)
      ├── Set Q = now
      └── Set R = 1
           │
           ▼
 R = 1 or 2, hours since Q >= HOURS_BETWEEN_APPROVAL_REMINDERS
      │
-     ├── Send "Reminder #N" email to MANAGER_EMAIL
+     ├── Send "Reminder #N" email to the LOCATION manager (locCfg.email)
      ├── Set Q = now
      └── Set R = R + 1
           │

@@ -72,10 +72,17 @@ docs/sandbox-plan.md             ← historical — see README.md §14 for curre
 - `CONFIG.EMAIL_<LOCATION>` (`locCfg.email`) is the DocuSeal "Reliable Storage Manager" co-signer
   destination for that location, read directly in `sendLeaseViaDocuSeal()` — confirmed with
   Andrew that the same per-location sending address is also the intended signer. There is no
-  separate `MANAGER_EMAIL_<LOCATION>` property; do not reintroduce one. The global
-  `CONFIG.MANAGER_EMAIL` is unchanged and still used everywhere else (BCC, approval
-  requests/reminders, new-booking notices, cancellation/reschedule manager notices) — only the
-  DocuSeal co-signer uses `locCfg.email` instead.
+  separate `MANAGER_EMAIL_<LOCATION>` property; do not reintroduce one.
+- The initial manager approval request and approval reminder (`checkRentalEligibility_()`,
+  `Approval.js`) are sent to `locCfg.email` (the booking's own location manager), each passing
+  `suppressManagerBcc = true` so the generic customer-email BCC behavior does not also silently
+  copy the global `CONFIG.MANAGER_EMAIL` — fixed after a production bug where both were being sent
+  to the global address instead. Approval **escalation** (after the reminder cap is reached) is
+  unchanged and intentionally still goes to the global `CONFIG.ADMIN_EMAIL`, not a location
+  address — a human has already failed to respond at the location level by that point. The global
+  `CONFIG.MANAGER_EMAIL` is unchanged and still used for the customer-email BCC, new-booking
+  notices, and cancellation/reschedule manager notices — only DocuSeal signing and the approval
+  request/reminder use `locCfg.email` instead.
 
 ## How to deploy
 

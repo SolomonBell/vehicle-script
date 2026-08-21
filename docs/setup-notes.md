@@ -45,7 +45,7 @@ None of these values belong in source code.
 | `SHEET_NAME`     | Name of the booking tab in the spreadsheet — normally `Bookings` |
 | `COMPANY_NAME`   | Business name used in all customer-facing emails and SMS      |
 | `ADMIN_EMAIL`    | Escalation address for approval reminders and script errors   |
-| `MANAGER_EMAIL`  | Site manager — BCC'd on customer emails by default (except the pre-trip/post-trip inspection emails — see below), receives booking and approval notices |
+| `MANAGER_EMAIL`  | Global manager/admin — BCC'd on customer emails by default (except the pre-trip/post-trip inspection emails — see below), receives new-booking notices. Does **not** receive the approval request/reminder — see "Approval reminder behavior" below; those go to the booking's own location manager (`EMAIL_<LOCATION>`) instead. |
 | `MANAGER_PHONE`  | Site manager phone number in E.164 format (e.g. +12065551234) |
 
 ### Google Calendar (one per site/vehicle)
@@ -759,6 +759,13 @@ The reminder interval and cap are Script Properties, not fixed values — see
 - R = MAX_APPROVAL_REMINDERS, hours since Q ≥ HOURS_BETWEEN_APPROVAL_REMINDERS: escalates to ADMIN_EMAIL → sets R = MAX_APPROVAL_REMINDERS + 1 (permanent skip)
 - R > MAX_APPROVAL_REMINDERS: row is silently skipped forever
 - Manager sets column P to resolve; script skips all resolved rows for the reminder loop
+
+**Recipient:** the initial email and every reminder go to `locCfg.email` — the booking's own
+location manager (e.g. `EMAIL_POULSBO` for a Poulsbo booking), not the global `MANAGER_EMAIL` —
+with `suppressManagerBcc = true` so the generic customer-email BCC logic does not also silently
+copy the global manager. Only the escalation (R reaches `MAX_APPROVAL_REMINDERS`) goes to the
+global `ADMIN_EMAIL`, intentionally, since a human has already failed to respond at the location
+level by that point.
 
 **Audited and confirmed correct.** This state machine was traced end-to-end against the actual
 `checkRentalEligibility_()` implementation: R is read with `Number(data[i][17]) || 0` (blank,

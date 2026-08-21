@@ -4772,6 +4772,173 @@ function testProcessIntakeFormSubmissionCancelledSplitGuard() {
   return failed;
 }
 
+// ---------------------------------------------------------------------------
+// TEST 56: Approval request/reminder route to the booking's LOCATION manager
+// (locCfg.email), not the global CONFIG.MANAGER_EMAIL -- and do not pick up
+// an unintended BCC to the global manager either (checkRentalEligibility_)
+// [CONFIG]
+// ------------------------------------------------------------------------
+// Regression test for a real production bug: the initial approval request
+// and reminder were being sent to CONFIG.MANAGER_EMAIL (a global address)
+// instead of locCfg.email (the specific location's own manager address --
+// e.g. EMAIL_POULSBO for a Poulsbo booking). Verifies, for all four active
+// locations:
+//   - TO is the correct EMAIL_<LOCATION> value, not CONFIG.MANAGER_EMAIL
+//   - FROM and Reply-To are still that same location's address (unchanged)
+//   - suppressManagerBcc is passed as true, so buildEmailPersonalization_()
+//     (Notifications.js) does not also silently BCC the global
+//     CONFIG.MANAGER_EMAIL on a message already correctly addressed to the
+//     right location manager
+// Also verifies escalation (Branch C, reminder cap reached) still goes to
+// the global CONFIG.ADMIN_EMAIL, unchanged by this fix -- escalation is
+// intentionally a global/admin notification, not a location-manager one.
+// Stubs getSheet and sendEmailHtml; no live Sheet or SendGrid call is made.
+// Restores both, and every touched CONFIG property, in a finally block even
+// if an assertion fails.
+// ---------------------------------------------------------------------------
+function testApprovalRequestRoutesToLocationManager() {
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, condition) {
+    if (condition) { Logger.log('OK: ' + label); passed++; }
+    else { Logger.log('FAIL: ' + label); failed++; }
+  }
+
+  function fakeSheet(rows) {
+    const writes = [];
+    const header = new Array(29).fill('');
+    const data   = [header].concat(rows);
+    return {
+      writes: writes,
+      getDataRange: function() { return { getValues: function() { return data; } }; },
+      getRange: function(row, col) { return { setValue: function(v) { writes.push({ row: row, col: col, value: v }); } }; }
+    };
+  }
+
+  function fakeRow(location, reminderCountRaw, lastNotifiedAt) {
+    const row = new Array(29).fill('');
+    row[1]  = 'Test Customer';
+    row[2]  = 'customer@example.com';
+    row[3]  = '+12065551234';
+    row[4]  = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
+    row[8]  = 'Yes'; // I: Intake Sent -- required for the row to be considered at all
+    row[15] = '';    // P: Rental Approved -- pending
+    row[16] = lastNotifiedAt || ''; // Q: Approval Notified At
+    row[17] = reminderCountRaw;     // R: Approval Reminder Count
+    row[18] = 'Cargo Van';          // S: Vehicle Type
+    row[19] = location;             // T: Location
+    return row;
+  }
+
+  const realGetSheet      = getSheet;
+  const realSendEmailHtml = sendEmailHtml;
+  const realConfig = {
+    MANAGER_EMAIL:      CONFIG.MANAGER_EMAIL,
+    ADMIN_EMAIL:        CONFIG.ADMIN_EMAIL,
+    EMAIL_BAINBRIDGE:   CONFIG.EMAIL_BAINBRIDGE,
+    EMAIL_POULSBO:      CONFIG.EMAIL_POULSBO,
+    EMAIL_PORT_ORCHARD: CONFIG.EMAIL_PORT_ORCHARD,
+    EMAIL_FAIRGROUNDS:  CONFIG.EMAIL_FAIRGROUNDS,
+  };
+
+  // MANAGER_EMAIL is deliberately given a DIFFERENT value than every
+  // location address below, so a test that accidentally still routed to it
+  // (the bug being regression-tested) would be caught by the "not the
+  // global MANAGER_EMAIL" assertions.
+  CONFIG.MANAGER_EMAIL      = 'global-boss@example.com';
+  CONFIG.ADMIN_EMAIL        = 'admin@example.com';
+  CONFIG.EMAIL_BAINBRIDGE   = 'bainbridge@reliablestorage.com';
+  CONFIG.EMAIL_POULSBO      = 'poulsbo@reliablestorage.com';
+  CONFIG.EMAIL_PORT_ORCHARD = 'portorchard@reliablestorage.com';
+  CONFIG.EMAIL_FAIRGROUNDS  = 'fairgrounds@reliablestorage.com';
+
+  let calls = [];
+
+  try {
+    sendEmailHtml = function(toEmail, subject, htmlBody, fromEmail, replyToEmail, suppressManagerBcc) {
+      calls.push({
+        toEmail: toEmail, subject: subject,
+        fromEmail: fromEmail, replyToEmail: replyToEmail,
+        suppressManagerBcc: suppressManagerBcc
+      });
+    };
+
+    const LOCATIONS = [
+      { name: 'Bainbridge',   expected: 'bainbridge@reliablestorage.com' },
+      { name: 'Poulsbo',      expected: 'poulsbo@reliablestorage.com' },
+      { name: 'Port Orchard', expected: 'portorchard@reliablestorage.com' },
+      { name: 'Fairgrounds',  expected: 'fairgrounds@reliablestorage.com' },
+    ];
+
+    // ---- Initial approval request (Branch A), each location ----
+    LOCATIONS.forEach(function(loc) {
+      calls = [];
+      const sheet = fakeSheet([ fakeRow(loc.name, '') ]);
+      getSheet = function() { return sheet; };
+      checkRentalEligibility_();
+
+      check(loc.name + ' initial request -- exactly one email sent', calls.length === 1);
+      const call = calls[0];
+      check(loc.name + ' initial request -- TO is ' + loc.expected + ', not the global MANAGER_EMAIL',
+            call && call.toEmail === loc.expected && call.toEmail !== CONFIG.MANAGER_EMAIL);
+      check(loc.name + ' initial request -- FROM is the same location address',
+            call && call.fromEmail === loc.expected);
+      check(loc.name + ' initial request -- Reply-To is the same location address',
+            call && call.replyToEmail === loc.expected);
+      check(loc.name + ' initial request -- suppressManagerBcc is true (no accidental global BCC)',
+            call && call.suppressManagerBcc === true);
+    });
+
+    // ---- Reminder (Branch B) -- Poulsbo specifically, matching the real bug report ----
+    (function poulsboReminder() {
+      calls = [];
+      const longAgo = new Date(Date.now() - 100 * 60 * 60 * 1000); // well past HOURS_BETWEEN_APPROVAL_REMINDERS
+      const sheet = fakeSheet([ fakeRow('Poulsbo', 1, longAgo) ]);
+      getSheet = function() { return sheet; };
+      checkRentalEligibility_();
+
+      check('Poulsbo reminder -- exactly one email sent', calls.length === 1);
+      const call = calls[0];
+      check('Poulsbo reminder -- TO is EMAIL_POULSBO, not the global MANAGER_EMAIL',
+            call && call.toEmail === 'poulsbo@reliablestorage.com' && call.toEmail !== CONFIG.MANAGER_EMAIL);
+      check('Poulsbo reminder -- suppressManagerBcc is true (no accidental global BCC)',
+            call && call.suppressManagerBcc === true);
+    })();
+
+    // ---- Escalation (Branch C) -- must remain the global ADMIN_EMAIL, unaffected by this fix ----
+    (function escalationStillGlobal() {
+      calls = [];
+      const longAgo = new Date(Date.now() - 100 * 60 * 60 * 1000);
+      const sheet = fakeSheet([ fakeRow('Poulsbo', CONFIG.MAX_APPROVAL_REMINDERS, longAgo) ]);
+      getSheet = function() { return sheet; };
+      checkRentalEligibility_();
+
+      check('escalation -- exactly one email sent', calls.length === 1);
+      const call = calls[0];
+      check('escalation -- TO is the global CONFIG.ADMIN_EMAIL, not a location address',
+            call && call.toEmail === CONFIG.ADMIN_EMAIL);
+    })();
+  } finally {
+    getSheet      = realGetSheet;
+    sendEmailHtml = realSendEmailHtml;
+    CONFIG.MANAGER_EMAIL      = realConfig.MANAGER_EMAIL;
+    CONFIG.ADMIN_EMAIL        = realConfig.ADMIN_EMAIL;
+    CONFIG.EMAIL_BAINBRIDGE   = realConfig.EMAIL_BAINBRIDGE;
+    CONFIG.EMAIL_POULSBO      = realConfig.EMAIL_POULSBO;
+    CONFIG.EMAIL_PORT_ORCHARD = realConfig.EMAIL_PORT_ORCHARD;
+    CONFIG.EMAIL_FAIRGROUNDS  = realConfig.EMAIL_FAIRGROUNDS;
+  }
+
+  check('getSheet restored', getSheet === realGetSheet);
+  check('sendEmailHtml restored', sendEmailHtml === realSendEmailHtml);
+
+  Logger.log(failed === 0
+    ? 'All ' + passed + ' approval-request location-routing checks passed.'
+    : passed + ' passed, ' + failed + ' failed.');
+  return failed;
+}
+
 // ============================================================
 // TEST RUNNERS
 // ============================================================
@@ -4817,7 +4984,7 @@ function testProcessIntakeFormSubmissionCancelledSplitGuard() {
 // in a finally block.
 // ---------------------------------------------------------------------------
 function runAllSandboxConfigurationTests() {
-  Logger.log('===== Running Sandbox Configuration Tests (49 tests) =====');
+  Logger.log('===== Running Sandbox Configuration Tests (50 tests) =====');
 
   const tests = [
     validateConfig,
@@ -4869,6 +5036,7 @@ function runAllSandboxConfigurationTests() {
     testCancelledRowGuardsReminders,
     testMarkDepositPaidCancelledSplitGuard,
     testProcessIntakeFormSubmissionCancelledSplitGuard,
+    testApprovalRequestRoutesToLocationManager,
   ];
 
   // Every test function above returns the number of failed assertions (0 if

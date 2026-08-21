@@ -156,8 +156,9 @@ updates (matched by `email+date` in the log) — not the other row.
 1. Confirm row from Test 1 has I = `Yes` and O = blank
 
 **After next trigger run (~5 min):**
-- [ ] Manager receives an "Action needed: approve rental for {name}" email, opening with
-      `Hi {Location} Manager,`
+- [ ] The booking's **location manager** (the address in `EMAIL_<LOCATION>` for that booking's
+      location, e.g. `EMAIL_POULSBO` — not the global `MANAGER_EMAIL`) receives an "Action needed:
+      approve rental for {name}" email, opening with `Hi {Location} Manager,`
 - [ ] Column Q = timestamp of send
 - [ ] Column R = `1`
 
@@ -166,8 +167,8 @@ updates (matched by `email+date` in the log) — not the other row.
 - [ ] Wait for next trigger run
 
 **Expected:**
-- [ ] Manager receives a "Reminder #1: approve rental for {name}" email, also opening with
-      `Hi {Location} Manager,`
+- [ ] The same location manager receives a "Reminder #1: approve rental for {name}" email, also
+      opening with `Hi {Location} Manager,`
 - [ ] Q increments to `2`
 
 **Test manager decision:**

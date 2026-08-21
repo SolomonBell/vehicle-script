@@ -1,8 +1,16 @@
 // ============================================================
 // ENGINE 2b: RENTAL APPROVAL CHECK (5-minute trigger)
-// Sends initial approval email to manager, then reminders every
-// HOURS_BETWEEN_APPROVAL_REMINDERS until MAX_APPROVAL_REMINDERS
-// is reached, then escalates once to ADMIN_EMAIL and goes silent.
+// Sends the initial approval request to the booking's own LOCATION manager
+// (locCfg.email -- e.g. EMAIL_POULSBO for a Poulsbo booking), then reminders
+// to that same location manager every HOURS_BETWEEN_APPROVAL_REMINDERS
+// until MAX_APPROVAL_REMINDERS is reached, then escalates once to the
+// global CONFIG.ADMIN_EMAIL and goes silent -- ADMIN_EMAIL, not
+// CONFIG.MANAGER_EMAIL; there is no global "boss" recipient in this loop
+// before that point. The initial request and reminder both pass
+// suppressManagerBcc = true (sendEmailHtml, Notifications.js) so the
+// generic manager-BCC behavior does not silently also copy the global
+// CONFIG.MANAGER_EMAIL on what is already addressed directly to the
+// correct location manager.
 // Once the manager sets Rental Approved to Approved - Free or
 // Approved - Paid, manager reminders stop immediately -- but the
 // CUSTOMER is not notified until the lease has actually been signed
@@ -118,8 +126,8 @@ function checkRentalEligibility_() {
         decisionList;
 
       try {
-        sendEmailHtml(CONFIG.MANAGER_EMAIL,
-          'Action needed: approve rental for ' + name, html, locCfg.email, locCfg.email);
+        sendEmailHtml(locCfg.email,
+          'Action needed: approve rental for ' + name, html, locCfg.email, locCfg.email, true);
         // Only update Q and R on successful send so failed sends will retry
         sheet.getRange(i + 1, 17).setValue(new Date());
         sheet.getRange(i + 1, 18).setValue(1);
@@ -144,8 +152,8 @@ function checkRentalEligibility_() {
         decisionList;
 
       try {
-        sendEmailHtml(CONFIG.MANAGER_EMAIL,
-          'Reminder #' + reminderCount + ': approve rental for ' + name, html, locCfg.email, locCfg.email);
+        sendEmailHtml(locCfg.email,
+          'Reminder #' + reminderCount + ': approve rental for ' + name, html, locCfg.email, locCfg.email, true);
         sheet.getRange(i + 1, 17).setValue(new Date());
         sheet.getRange(i + 1, 18).setValue(reminderCount + 1);
         SpreadsheetApp.flush();
