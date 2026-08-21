@@ -12,12 +12,10 @@ things at specific points, mainly reviewing and approving each rental.
 
 ---
 
-**Video walkthrough:** Coming soon
+**Video walkthrough:** [Reliable Storage Moving Vehicle Automation — Manager Overview](https://youtu.be/dwMCak1l98M)
 
-> A short walkthrough video will be added here showing the Bookings sheet, the manager approval
-> process, the customer workflow, and what managers should check before and after each rental.
-
-<!-- Replace "Coming soon" above with the final vehicle-rental manager walkthrough link. -->
+> This walkthrough video covers the Bookings sheet, the manager approval process, the customer
+> workflow, and what managers should check before and after each rental.
 
 ---
 
